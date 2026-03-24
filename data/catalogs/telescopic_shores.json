@@ -1,0 +1,82 @@
+{
+  "catalog_version": "1.0",
+  "type": "telescopic_shore",
+  "updated": "2026-01-01",
+  "shores": [
+    {
+      "id": "ESC-TEL-001",
+      "manufacturer": "Genérico",
+      "model": "Escora Leve 2.0-3.4m",
+      "type": "telescopic",
+      "height_min_m": 2.0,
+      "height_max_m": 3.4,
+      "load_capacity_kn": 15.0,
+      "weight_kg": 8.5,
+      "tube_external_mm": 48.3,
+      "tube_internal_mm": 38.1,
+      "base_plate_mm": 120,
+      "price_reference_brl": 45.00,
+      "notes": "Uso residencial, lajes até 15cm"
+    },
+    {
+      "id": "ESC-TEL-002",
+      "manufacturer": "Genérico",
+      "model": "Escora Média 2.6-4.2m",
+      "type": "telescopic",
+      "height_min_m": 2.6,
+      "height_max_m": 4.2,
+      "load_capacity_kn": 20.0,
+      "weight_kg": 11.2,
+      "tube_external_mm": 60.3,
+      "tube_internal_mm": 48.3,
+      "base_plate_mm": 150,
+      "price_reference_brl": 65.00,
+      "notes": "Uso comercial, lajes até 20cm"
+    },
+    {
+      "id": "ESC-TEL-003",
+      "manufacturer": "Genérico",
+      "model": "Escora Pesada 3.0-5.0m",
+      "type": "telescopic",
+      "height_min_m": 3.0,
+      "height_max_m": 5.0,
+      "load_capacity_kn": 30.0,
+      "weight_kg": 16.8,
+      "tube_external_mm": 76.1,
+      "tube_internal_mm": 60.3,
+      "base_plate_mm": 180,
+      "price_reference_brl": 95.00,
+      "notes": "Uso pesado, lajes até 30cm e vigas"
+    },
+    {
+      "id": "ESC-TEL-004",
+      "manufacturer": "Genérico",
+      "model": "Escora Extra-Pesada 3.0-5.5m",
+      "type": "telescopic",
+      "height_min_m": 3.0,
+      "height_max_m": 5.5,
+      "load_capacity_kn": 40.0,
+      "weight_kg": 22.0,
+      "tube_external_mm": 88.9,
+      "tube_internal_mm": 76.1,
+      "base_plate_mm": 200,
+      "price_reference_brl": 130.00,
+      "notes": "Uso pesado especial, vigas e lajes espessas"
+    },
+    {
+      "id": "ESC-TEL-005",
+      "manufacturer": "Genérico",
+      "model": "Escora Curta 1.8-2.8m",
+      "type": "telescopic",
+      "height_min_m": 1.8,
+      "height_max_m": 2.8,
+      "load_capacity_kn": 18.0,
+      "weight_kg": 7.2,
+      "tube_external_mm": 48.3,
+      "tube_internal_mm": 38.1,
+      "base_plate_mm": 120,
+      "price_reference_brl": 38.00,
+      "notes": "Pé-direito baixo, residencial"
+    }
+  ]
+}
