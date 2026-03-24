@@ -47,6 +47,9 @@ def calcular(
         ALTURA_DEFAULT, "--altura", help="Altura do pé-direito (m)"
     ),
     bom: Optional[str] = typer.Option(None, "--bom", help="Caminho para CSV da lista de materiais"),
+    layer: Optional[str] = typer.Option(None, "--layer", help="Layer específico da laje (ignora detecção automática)"),
+    espessura: Optional[float] = typer.Option(None, "--espessura", help="Espessura da laje em cm (override da detecção automática)"),
+    area_min: float = typer.Option(1.0, "--area-min", help="Área mínima de polígono para considerar como laje (m²)"),
 ):
     """Calcula escoramento para um arquivo DXF."""
     input_path = Path(arquivo)
@@ -63,16 +66,20 @@ def calcular(
     doc = read_dxf(str(input_path))
 
     # 2. Encontrar layers de laje
-    slab_layers = find_slab_layers(doc)
-    if not slab_layers:
-        console.print("[red]Nenhum layer de laje encontrado (padrão: LAJE_XXcm)[/red]")
-        console.print("Layers disponíveis:")
-        info = get_document_info(doc)
-        for layer in info["layers"]:
-            console.print(f"  - {layer}")
-        raise typer.Exit(1)
-
-    console.print(f"[green]Layers de laje encontrados:[/green] {', '.join(slab_layers)}")
+    if layer:
+        slab_layers = [layer]
+        console.print(f"[green]Layer especificado:[/green] {layer}")
+    else:
+        slab_layers = find_slab_layers(doc)
+        if not slab_layers:
+            console.print("[red]Nenhum layer de laje detectado automaticamente (padrão: LAJE_XXcm)[/red]")
+            console.print("[yellow]Use --layer NOME para especificar o layer manualmente.[/yellow]")
+            console.print("Layers disponíveis:")
+            info = get_document_info(doc)
+            for l in info["layers"]:
+                console.print(f"  - {l}")
+            raise typer.Exit(1)
+        console.print(f"[green]Layers de laje encontrados:[/green] {', '.join(slab_layers)}")
 
     # 3. Carregar catálogo
     catalog = load_catalog(catalogo)
@@ -83,13 +90,16 @@ def calcular(
 
     for layer_name in slab_layers:
         polylines = get_polylines_by_layer(doc, layer_name)
-        polygons = extract_polygons(polylines)
+        polygons = extract_polygons(polylines, min_area=area_min)
 
         if not polygons:
             console.print(f"[yellow]Aviso: nenhum polígono fechado no layer {layer_name}[/yellow]")
             continue
 
-        thickness = extract_thickness_from_layer(layer_name)
+        if espessura is not None:
+            thickness = espessura / 100.0  # cm → m
+        else:
+            thickness = extract_thickness_from_layer(layer_name)
 
         for polygon in polygons:
             slab = Slab.from_polygon(polygon, layer_name, thickness)
@@ -253,6 +263,93 @@ def catalogo_cmd(
     console.print()
     console.print(table)
     console.print()
+
+
+@app.command()
+def manual(
+    comprimento: float = typer.Argument(help="Comprimento da laje em metros"),
+    largura: float = typer.Argument(help="Largura da laje em metros"),
+    espessura_cm: float = typer.Argument(help="Espessura da laje em centímetros"),
+    output: Optional[str] = typer.Option(None, "-o", "--output", help="Arquivo DXF de saída"),
+    sobrecarga: float = typer.Option(
+        Q_SOBRECARGA_DEFAULT, "--sobrecarga", help="Sobrecarga de trabalho (kN/m²)"
+    ),
+    espacamento_max: float = typer.Option(
+        ESPACAMENTO_MAX_DEFAULT, "--espacamento-max", help="Espaçamento máximo entre escoras (m)"
+    ),
+    catalogo_path: Optional[str] = typer.Option(None, "--catalogo", help="Caminho para catálogo JSON"),
+    altura: float = typer.Option(
+        ALTURA_DEFAULT, "--altura", help="Altura do pé-direito (m)"
+    ),
+    bom_path: Optional[str] = typer.Option(None, "--bom", help="Caminho para CSV da lista de materiais"),
+):
+    """Calcula escoramento informando dimensões manualmente (sem DXF)."""
+    from shapely.geometry import Polygon as ShapelyPolygon
+
+    thickness_m = espessura_cm / 100.0
+    polygon = ShapelyPolygon([
+        (0, 0), (comprimento, 0), (comprimento, largura), (0, largura),
+    ])
+    slab = Slab.from_polygon(polygon, f"LAJE_{espessura_cm:.0f}CM", thickness_m)
+
+    console.print(f"\n[bold]Laje:[/bold] {comprimento} x {largura} m, espessura {espessura_cm:.0f} cm")
+
+    catalog = load_catalog(catalogo_path)
+
+    self_weight = calculate_self_weight(slab)
+    live_load = calculate_live_load(slab, sobrecarga)
+    total_load = calculate_total_load(slab, sobrecarga)
+
+    estimated_load = total_load / max(1, int(slab.area_m2 / (espacamento_max ** 2)))
+    shore = select_shore(catalog, altura, estimated_load)
+
+    if shore is None:
+        console.print(f"[red]Erro: nenhuma escora suporta a carga na altura {altura:.1f}m[/red]")
+        raise typer.Exit(1)
+
+    shores, nx, ny, sx, sy = distribute_shores(slab, shore, total_load, espacamento_max)
+    load_per_shore = total_load / len(shores)
+
+    if load_per_shore > shore.load_capacity_kn:
+        shore = select_shore(catalog, altura, load_per_shore)
+        if shore is None:
+            console.print(f"[red]Erro: carga por escora excede todos os modelos[/red]")
+            raise typer.Exit(1)
+        shores, nx, ny, sx, sy = distribute_shores(slab, shore, total_load, espacamento_max)
+        load_per_shore = total_load / len(shores)
+
+    is_valid, errors = validate_result(shores, sx, sy, espacamento_max)
+    if not is_valid:
+        for error in errors:
+            console.print(f"[yellow]Aviso: {error}[/yellow]")
+
+    result = ShoringResult(
+        slab=slab,
+        total_load_kn=round(total_load, 2),
+        self_weight_kn=round(self_weight, 2),
+        live_load_kn=round(live_load, 2),
+        selected_shore=shore,
+        shores=shores,
+        grid_nx=nx,
+        grid_ny=ny,
+        spacing_x_m=round(sx, 4),
+        spacing_y_m=round(sy, 4),
+        load_per_shore_kn=round(load_per_shore, 2),
+    )
+
+    print_report([result], console)
+
+    if output:
+        generate_output_dxf([result], output)
+        console.print(f"[green]DXF gerado:[/green] {output}")
+
+    bom_out = bom_path or "bom.csv"
+    write_bom_csv([result], bom_out)
+    console.print(f"[green]Lista de materiais:[/green] {bom_out}")
+
+    console.print(
+        f"\n[bold green]Concluído! {len(shores)} escoras posicionadas.[/bold green]\n"
+    )
 
 
 if __name__ == "__main__":
