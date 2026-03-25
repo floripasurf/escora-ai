@@ -51,22 +51,24 @@ Fields:
 - `beam_rows: List[BeamRow]` — one per beam result
 - `slab_rows: List[SlabRow]` — one per slab result
 - `bom_rows: List[BomRow]` — aggregated by shore model
-- `warnings: List[str]`
+- `warnings: List[str]` — combined from `CalculationResult.warnings` + `CalculationResult.validation_errors`
 
 #### SummaryData
 - `total_shores: int`
 - `total_load_kn: float`
 - `pe_direito_m: float`
 - `pe_direito_is_default: bool`
-- `slab_thickness_m: float`
-- `thickness_is_default: bool`
+- `slab_thickness_m: float` — derived from `slab_results[0].thickness_m` (all panels share the same thickness in current implementation). If no slab results, use `ESPESSURA_DEFAULT` (0.12m).
+- `thickness_is_default: bool` — derived from `slab_results[0].thickness_is_default`. If no slab results, `True`.
 - `beam_count: int`
 - `slab_count: int`
 - `is_valid: bool`
 
 #### BeamRow
 - `name: str` — beam name or "Viga sem nome"
-- `section: str` — formatted "14x40 cm"
+- `section: str` — formatted "14x40 cm". When width or height is `None`, use "N/D".
+- `section_width_m: Optional[float]` — raw width for Excel export
+- `section_height_m: Optional[float]` — raw height for Excel export
 - `length_m: float`
 - `load_kn_m: float` — total linear load
 - `shore_count: int`
@@ -129,8 +131,9 @@ A4 portrait, single or multi-page. Generated with ReportLab.
    | Modelo | Fabricante | Qtd | Capacidade (kN) | Altura (m) | Peso Unit. (kg) | Peso Total (kg) |
    |--------|-----------|-----|----------------|-----------|----------------|-----------------|
 
-6. **Warnings Section**
+6. **Avisos e Erros Section**
    - Each warning as a bulleted line
+   - Validation errors (from `validation_errors`) prefixed with "ERRO:"
    - Defaults used highlighted
    - Low-confidence elements noted
 
