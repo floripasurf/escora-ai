@@ -8,7 +8,7 @@ Multi-level segmentation by spatial proximity is Fase 2.
 import re
 from typing import List
 from dataclasses import dataclass, field
-from src.pipeline.stage_parse import ParseResult, TextEntity, SegmentEntity, RectEntity, PolylineEntity
+from src.pipeline.stage_parse import ParseResult, TextEntity, SegmentEntity, RectEntity, CircleEntity, PolylineEntity
 
 LEVEL_PATTERN = re.compile(
     r"(?:COBERTURA|COBERTA|TIPO\s*\d+|PAVT?\.?\s*\d+|"
@@ -26,6 +26,7 @@ class LevelSegment:
     texts: List[TextEntity] = field(default_factory=list)
     segments: List[SegmentEntity] = field(default_factory=list)
     rects: List[RectEntity] = field(default_factory=list)
+    circles: List[CircleEntity] = field(default_factory=list)
     polylines: List[PolylineEntity] = field(default_factory=list)
 
 
@@ -50,6 +51,7 @@ def segment_by_level(parse: ParseResult) -> List[LevelSegment]:
             texts=parse.texts,
             segments=parse.segments,
             rects=parse.rects,
+            circles=parse.circles,
             polylines=parse.polylines,
         )
         return [seg]
@@ -66,6 +68,7 @@ def segment_by_level(parse: ParseResult) -> List[LevelSegment]:
         texts=parse.texts,
         segments=parse.segments,
         rects=parse.rects,
+        circles=parse.circles,
         polylines=parse.polylines,
     )
     return [seg]

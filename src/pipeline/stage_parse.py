@@ -45,6 +45,15 @@ class RectEntity:
 
 
 @dataclass
+class CircleEntity:
+    """A circle (potential circular column)."""
+    cx: float
+    cy: float
+    radius: float
+    layer: str = ""
+
+
+@dataclass
 class PolylineEntity:
     """A closed polyline (potential slab boundary)."""
     points: List[Tuple[float, float]]
@@ -61,6 +70,7 @@ class ParseResult:
     segments: List[SegmentEntity] = field(default_factory=list)
     rects: List[RectEntity] = field(default_factory=list)
     polylines: List[PolylineEntity] = field(default_factory=list)
+    circles: List[CircleEntity] = field(default_factory=list)
     raw_entities: List[dict] = field(default_factory=list)
 
 
@@ -73,6 +83,7 @@ def parse_dxf(filepath: str) -> ParseResult:
     texts: List[TextEntity] = []
     segments: List[SegmentEntity] = []
     rects: List[RectEntity] = []
+    circles: List[CircleEntity] = []
     polylines: List[PolylineEntity] = []
     raw_entities: List[dict] = []
 
@@ -119,6 +130,14 @@ def parse_dxf(filepath: str) -> ParseResult:
                     width=w, height=h, area=w * h, layer=layer,
                 ))
 
+        elif etype == "CIRCLE":
+            circles.append(CircleEntity(
+                cx=entity.dxf.center.x,
+                cy=entity.dxf.center.y,
+                radius=entity.dxf.radius,
+                layer=layer,
+            ))
+
         elif etype in ("LWPOLYLINE", "POLYLINE"):
             if etype == "LWPOLYLINE":
                 pts = [(p[0], p[1]) for p in entity.get_points(format="xy")]
@@ -156,6 +175,7 @@ def parse_dxf(filepath: str) -> ParseResult:
         texts=texts,
         segments=segments,
         rects=rects,
+        circles=circles,
         polylines=polylines,
         raw_entities=raw_entities,
     )
