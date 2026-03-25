@@ -1,15 +1,16 @@
-"""Pipeline runner: orchestrates Stages 1-4 sequentially.
+"""Pipeline runner: orchestrates Stages 1-5 sequentially.
 
-Stage 5 (validation/preview) and Stage 6 (learning) are handled
-by the API layer, not the runner, since they require user interaction.
+Stage 6 (learning) is handled by the API layer since it requires user interaction.
 """
 
 from typing import List, Optional
 from src.pipeline.stage_parse import parse_dxf
 from src.pipeline.stage_segment import segment_by_level
 from src.pipeline.stage_classify import classify_elements
-from src.pipeline.stage_metadata import extract_pe_direito, extract_level_height
+from src.pipeline.stage_metadata import extract_pe_direito, extract_level_height, extract_slab_thickness
+from src.pipeline.stage_calculate import run_calculation
 from src.models.pipeline_models import LevelGroup, PipelineResult
+from src.utils.constants import ALTURA_DEFAULT
 
 
 DEFAULT_SCALE = 0.02  # 1:50 fallback
@@ -54,6 +55,7 @@ def run_pipeline(filepath: str, scale_override: Optional[float] = None) -> Pipel
     # Stage 3 + 4: Classify + metadata for each level
     levels: List[LevelGroup] = []
     warnings: List[str] = []
+    all_elements = []
 
     for seg in level_segments:
         elements = classify_elements(seg, scale=scale)
@@ -61,8 +63,10 @@ def run_pipeline(filepath: str, scale_override: Optional[float] = None) -> Pipel
         pe_direito = extract_pe_direito(seg.texts)
         level_height = extract_level_height(seg.texts)
 
-        if pe_direito is None:
+        pe_direito_is_default = pe_direito is None
+        if pe_direito_is_default:
             warnings.append(f"Pe-direito nao encontrado no nivel {seg.level_name}")
+            pe_direito = ALTURA_DEFAULT
 
         level = LevelGroup(
             level_name=seg.level_name,
@@ -71,10 +75,35 @@ def run_pipeline(filepath: str, scale_override: Optional[float] = None) -> Pipel
             elements=elements,
         )
         levels.append(level)
+        all_elements.extend(elements)
+
+    # Stage 5: Calculation
+    calculation = None
+    if all_elements:
+        pe_direito = levels[0].pe_direito_m or ALTURA_DEFAULT
+        pe_direito_is_default = levels[0].pe_direito_m is None
+
+        slab_thickness = None
+        for seg in level_segments:
+            slab_thickness = extract_slab_thickness(seg.texts)
+            if slab_thickness is not None:
+                break
+
+        try:
+            calculation = run_calculation(
+                elements=all_elements,
+                pe_direito_m=pe_direito,
+                pe_direito_is_default=pe_direito_is_default,
+                slab_thickness_m=slab_thickness,
+            )
+            warnings.extend(calculation.warnings)
+        except Exception as e:
+            warnings.append(f"Cálculo falhou: {e}")
 
     return PipelineResult(
         filename=parse.filename,
         scale=scale,
         levels=levels,
         warnings=warnings,
+        calculation=calculation,
     )
