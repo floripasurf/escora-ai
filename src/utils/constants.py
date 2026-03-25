@@ -22,6 +22,11 @@ ESPACAMENTO_MAX_DEFAULT = 1.5
 # Distância mínima da escora à borda da laje (m)
 DISTANCIA_BORDA_MIN = 0.15
 
+# Distância mínima da escora ao pilar (m) — NBR 15696:2009
+# Escoras não podem ser posicionadas na projeção do pilar nem
+# a menos de 0.20m da face do pilar.
+DISTANCIA_PILAR_MIN = 0.20
+
 # Espessura padrão de laje quando não especificada (m)
 ESPESSURA_DEFAULT = 0.12
 

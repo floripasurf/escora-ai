@@ -47,28 +47,79 @@ def distribute_beam_shores(
     start_x: float = 0.0,
     start_y: float = 0.0,
     direction: str = "x",
+    support_positions: List[float] = None,
+    is_cantilever_start: bool = False,
+    is_cantilever_end: bool = False,
 ) -> Tuple[List[PositionedShore], int, float]:
     """
-    Distribui escoras ao longo de uma viga.
+    Distribui escoras ao longo de uma viga conforme NBR 6118/15696.
+
+    Condições de contorno (NBR 6118):
+    - Apoio (pilar ou cruzamento de viga): não posicionar escora no apoio
+    - Balanço: extremidade livre precisa de escora próxima à ponta
+    - O espaçamento é mais denso em trechos em balanço
+
+    support_positions: coordenadas ao longo do eixo (em metros desde o início)
+        onde há apoios (pilares ou cruzamento de vigas). Escoras não devem
+        ser posicionadas a menos de 0.15m destes pontos.
+    is_cantilever_start: início da viga é extremidade livre (balanço)
+    is_cantilever_end: fim da viga é extremidade livre (balanço)
 
     Retorna: (shores, n_shores, spacing_efetivo)
     """
+    DIST_MIN_APOIO = 0.15  # distância mínima entre escora e ponto de apoio
+
     n = math.ceil(beam_length_m / max_spacing) + 1
     n = max(n, 2)
     spacing = beam_length_m / (n - 1)
 
     total_load = total_linear_load_kn_m * beam_length_m
-    load_per_shore = total_load / n
+
+    # Gerar posições candidatas ao longo do eixo da viga
+    candidates = []
+    for i in range(n):
+        pos = i * spacing  # posição relativa ao início da viga
+        candidates.append(pos)
+
+    # Filtrar posições que caem sobre pontos de apoio
+    if support_positions:
+        filtered = []
+        for pos in candidates:
+            on_support = False
+            for sp in support_positions:
+                if abs(pos - sp) < DIST_MIN_APOIO:
+                    on_support = True
+                    break
+            if not on_support:
+                filtered.append(pos)
+        candidates = filtered
+
+    # Para balanço: garantir escora próxima à extremidade livre
+    # NBR 6118 — extremidade livre deve ter suporte (concreto fresco)
+    if is_cantilever_start and candidates:
+        if candidates[0] > 0.20:  # se a primeira escora está longe da ponta
+            candidates.insert(0, 0.10)  # adicionar escora a 10cm da ponta
+    if is_cantilever_end and candidates:
+        if candidates[-1] < beam_length_m - 0.20:
+            candidates.append(beam_length_m - 0.10)
+
+    if not candidates:
+        # Viga curta totalmente apoiada — sem necessidade de escoras
+        return [], 0, 0.0
+
+    # Recalcular carga por escora
+    n_effective = len(candidates)
+    load_per_shore = total_load / n_effective
     utilization = load_per_shore / shore.load_capacity_kn
 
     shores: List[PositionedShore] = []
-    for i in range(n):
+    for pos in candidates:
         if direction == "x":
-            x = start_x + i * spacing
+            x = start_x + pos
             y = start_y
         else:
             x = start_x
-            y = start_y + i * spacing
+            y = start_y + pos
 
         shores.append(
             PositionedShore(
@@ -80,7 +131,8 @@ def distribute_beam_shores(
             )
         )
 
-    return shores, n, spacing
+    actual_spacing = spacing  # espaçamento nominal do grid
+    return shores, n_effective, actual_spacing
 
 
 def estimate_beam_shore_height(pe_direito_m: float, beam_height_m: float) -> float:
