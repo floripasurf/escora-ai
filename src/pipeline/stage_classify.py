@@ -138,9 +138,14 @@ def classify_elements(level: LevelSegment, scale: float = 1.0) -> List[Classifie
         agree = text_cls.element_type in (ElementType.BEAM, ElementType.UNKNOWN)
         score_final = calculate_confidence(bc.score, text_cls.score, agree)
 
+        if bc.direction == "x":
+            beam_geometry = [(bc.start, bc.axis_coord), (bc.end, bc.axis_coord)]
+        else:
+            beam_geometry = [(bc.axis_coord, bc.start), (bc.axis_coord, bc.end)]
+
         el = ClassifiedElement(
             element_type=ElementType.BEAM,
-            geometry=[],
+            geometry=beam_geometry,
             score_geometric=bc.score,
             score_textual=text_cls.score,
             score_final=score_final,
@@ -185,7 +190,7 @@ def classify_elements(level: LevelSegment, scale: float = 1.0) -> List[Classifie
 
         el = ClassifiedElement(
             element_type=ElementType.PILLAR,
-            geometry=[],
+            geometry=[(pc.cx, pc.cy)],
             score_geometric=pc.score,
             score_textual=text_cls.score,
             score_final=score_final,
@@ -249,7 +254,7 @@ def classify_elements(level: LevelSegment, scale: float = 1.0) -> List[Classifie
 
         el = ClassifiedElement(
             element_type=ElementType.PILLAR,
-            geometry=[],
+            geometry=[(c.cx * scale, c.cy * scale)],
             score_geometric=geo_score,
             score_textual=text_cls.score,
             score_final=score_final,
