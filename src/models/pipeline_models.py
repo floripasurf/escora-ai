@@ -1,7 +1,7 @@
 """Data models for the DXF interpretation pipeline."""
 
 from enum import Enum
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 from pydantic import BaseModel, Field, computed_field
 
 
@@ -61,3 +61,4 @@ class PipelineResult(BaseModel):
     levels: List[LevelGroup] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
+    calculation: Optional[Any] = Field(default=None, description="CalculationResult when engine stage runs")
