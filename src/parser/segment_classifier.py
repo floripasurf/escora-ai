@@ -9,10 +9,14 @@ from typing import List
 
 MAX_BEAM_WIDTH = 0.50
 MIN_BEAM_WIDTH = 0.08
-MAX_PILLAR_AREA = 0.50
+MIN_BEAM_LENGTH_RATIO = 5.0  # length/width — real beams are elongated
+MAX_PILLAR_AREA = 1.00  # m² — allows large columns (e.g. 0.87x0.94m)
 MIN_PILLAR_AREA = 0.015  # m² — filter hatching/fill SOLIDs
 MIN_PILLAR_DIM = 0.10  # m — NBR minimum for structural columns
-MIN_BEAM_LENGTH_DEFAULT = 0.50
+PILLAR_CLUSTER_TOLERANCE = 0.05  # m — merge pillars within 5cm
+MIN_BEAM_LENGTH_DEFAULT = 1.0  # m — real beams are at least 1m
+BEAM_AXIS_TOLERANCE = 0.50  # m — group beams with similar axis coordinates
+BEAM_SPAN_GAP_TOLERANCE = 1.0  # m — bridge pillar interruptions when merging spans
 
 
 @dataclass
@@ -66,6 +70,8 @@ def find_beam_candidates(
 
             axis_y = (h_segs[i]["y"] + h_segs[j]["y"]) / 2
             length_ratio = overlap_len / gap
+            if length_ratio < MIN_BEAM_LENGTH_RATIO:
+                continue
             score = min(0.95, 0.50 + 0.05 * min(length_ratio, 9))
 
             beams.append(BeamCandidate(
@@ -89,6 +95,8 @@ def find_beam_candidates(
 
             axis_x = (v_segs[i]["x"] + v_segs[j]["x"]) / 2
             length_ratio = overlap_len / gap
+            if length_ratio < MIN_BEAM_LENGTH_RATIO:
+                continue
             score = min(0.95, 0.50 + 0.05 * min(length_ratio, 9))
 
             beams.append(BeamCandidate(
@@ -96,7 +104,55 @@ def find_beam_candidates(
                 width_m=gap, length_m=overlap_len, direction="y", score=score,
             ))
 
+    # Deduplicate overlapping beams: merge candidates with same axis and overlapping spans
+    beams = _deduplicate_beams(beams)
+
     return beams
+
+
+def _deduplicate_beams(beams: List[BeamCandidate]) -> List[BeamCandidate]:
+    """Merge beam candidates that overlap on the same axis."""
+    if not beams:
+        return beams
+
+    # Group by direction and axis coordinate (within tolerance)
+    # Sort by axis to cluster nearby axes together
+    beams_sorted = sorted(beams, key=lambda b: (b.direction, b.axis_coord))
+    groups: list = []
+    for b in beams_sorted:
+        placed = False
+        for g in groups:
+            if g[0].direction == b.direction and abs(g[0].axis_coord - b.axis_coord) <= BEAM_AXIS_TOLERANCE:
+                g.append(b)
+                placed = True
+                break
+        if not placed:
+            groups.append([b])
+
+    result = []
+    for group in groups:
+        # Sort by start position
+        group.sort(key=lambda b: b.start)
+        # Merge spans that overlap or are separated by ≤ pillar width
+        merged = group[0]
+        for b in group[1:]:
+            if b.start <= merged.end + BEAM_SPAN_GAP_TOLERANCE:  # bridge pillar gaps
+                # Extend the merged beam
+                merged = BeamCandidate(
+                    axis_coord=merged.axis_coord,
+                    start=min(merged.start, b.start),
+                    end=max(merged.end, b.end),
+                    width_m=(merged.width_m + b.width_m) / 2,
+                    length_m=max(merged.end, b.end) - min(merged.start, b.start),
+                    direction=merged.direction,
+                    score=max(merged.score, b.score),
+                )
+            else:
+                result.append(merged)
+                merged = b
+        result.append(merged)
+
+    return result
 
 
 def find_pillar_candidates(
@@ -111,10 +167,11 @@ def find_pillar_candidates(
         if min(r["width"], r["height"]) < MIN_PILLAR_DIM:
             continue
         aspect = max(r["width"], r["height"]) / max(min(r["width"], r["height"]), 0.01)
-        if aspect > 4.0:
+        if aspect > 6.0:
             continue
-        # Deduplicate: round center to 1cm precision
-        key = (round(r["cx"], 2), round(r["cy"], 2))
+        # Deduplicate: round center to 5cm precision (multiple SOLIDs per pillar)
+        key = (round(r["cx"] / PILLAR_CLUSTER_TOLERANCE) * PILLAR_CLUSTER_TOLERANCE,
+               round(r["cy"] / PILLAR_CLUSTER_TOLERANCE) * PILLAR_CLUSTER_TOLERANCE)
         if key in seen:
             continue
         seen.add(key)
