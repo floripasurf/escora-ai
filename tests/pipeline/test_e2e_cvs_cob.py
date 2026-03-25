@@ -37,3 +37,22 @@ class TestCVSCOBRegression:
         result = run_pipeline(str(DXF_PATH))
         # DXF is in real-world meters (model space), auto-detected as scale=1.0
         assert result.scale == pytest.approx(1.0)
+
+    def test_calculation_produces_results(self):
+        result = run_pipeline(str(DXF_PATH))
+        assert result.calculation is not None
+        assert result.calculation.total_shores > 0
+
+    def test_beam_geometry_populated(self):
+        result = run_pipeline(str(DXF_PATH))
+        all_elements = result.levels[0].elements
+        beams = [e for e in all_elements if e.element_type == ElementType.BEAM]
+        for beam in beams:
+            assert len(beam.geometry) == 2
+
+    def test_pillar_geometry_populated(self):
+        result = run_pipeline(str(DXF_PATH))
+        all_elements = result.levels[0].elements
+        pillars = [e for e in all_elements if e.element_type == ElementType.PILLAR]
+        for pillar in pillars:
+            assert len(pillar.geometry) == 1
