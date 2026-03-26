@@ -1,16 +1,20 @@
-"""Pipeline runner: orchestrates Stages 1-5 sequentially.
+"""Pipeline runner: orchestrates Stages 1-6 sequentially.
 
-Stage 6 (learning) is handled by the API layer since it requires user interaction.
+Stage 6 (learning) automatically saves detection knowledge after each run.
 """
 
+import logging
 from typing import List, Optional
 from src.pipeline.stage_parse import parse_dxf
 from src.pipeline.stage_segment import segment_by_level
 from src.pipeline.stage_classify import classify_elements
 from src.pipeline.stage_metadata import extract_pe_direito, extract_level_height, extract_slab_thickness
 from src.pipeline.stage_calculate import run_calculation
+from src.pipeline.stage_learn import learn_and_save
 from src.models.pipeline_models import LevelGroup, PipelineResult
 from src.utils.constants import ALTURA_DEFAULT
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_SCALE = 0.02  # 1:50 fallback
@@ -100,10 +104,18 @@ def run_pipeline(filepath: str, scale_override: Optional[float] = None) -> Pipel
         except Exception as e:
             warnings.append(f"Cálculo falhou: {e}")
 
-    return PipelineResult(
+    result = PipelineResult(
         filename=parse.filename,
         scale=scale,
         levels=levels,
         warnings=warnings,
         calculation=calculation,
     )
+
+    # Stage 6: Learning — save what we learned from this run
+    try:
+        learn_and_save(result, level_segments=level_segments)
+    except Exception as e:
+        logger.warning(f"Learning stage failed (non-fatal): {e}")
+
+    return result
