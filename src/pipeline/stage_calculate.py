@@ -40,8 +40,17 @@ BEAM_ENDPOINT_PROXIMITY = 0.30
 # Minimum confidence to include in calculations
 MIN_CONFIDENCE = 0.50
 
+# Minimum confidence for pillars — filters only rects where nearby beam text
+# actively contradicts pillar classification (score drops via CONTRADICT_PENALTY)
+MIN_PILLAR_CONFIDENCE = 0.50
+
 # Low confidence threshold for warnings
 LOW_CONFIDENCE = 0.70
+
+# Default beam section height estimation: width * ratio, capped
+BEAM_HEIGHT_RATIO = 2.5
+BEAM_HEIGHT_MIN = 0.30
+BEAM_HEIGHT_MAX = 0.60
 
 # Beam exclusion zone width for slab shore distribution (m)
 BEAM_EXCLUSION_WIDTH = 0.40
@@ -185,9 +194,16 @@ def run_calculation(
 
     # Separate beams and pillars
     beams = [e for e in elements if e.element_type == ElementType.BEAM]
-    pillars = [e for e in elements if e.element_type == ElementType.PILLAR]
+    all_pillars = [e for e in elements if e.element_type == ElementType.PILLAR]
 
-    # Filter by confidence
+    # Filter pillars by confidence (removes false positives from rects near beam text)
+    pillars = []
+    for p in all_pillars:
+        if p.score_final < MIN_PILLAR_CONFIDENCE:
+            continue
+        pillars.append(p)
+
+    # Filter beams by confidence
     valid_beams = []
     for b in beams:
         if b.score_final < MIN_CONFIDENCE:
@@ -224,14 +240,17 @@ def run_calculation(
     for assoc in beam_associations:
         beam = assoc["beam"]
 
-        if not beam.section_height_m:
-            warnings.append(
-                f"Viga {beam.name or 'sem nome'} ignorada — altura da seção não encontrada"
-            )
-            continue
-
         beam_width = beam.section_width_m or 0.14
-        beam_height = beam.section_height_m
+        if beam.section_height_m:
+            beam_height = beam.section_height_m
+        else:
+            # Estimate section height from width using typical beam proportions
+            estimated = min(max(beam_width * BEAM_HEIGHT_RATIO, BEAM_HEIGHT_MIN), BEAM_HEIGHT_MAX)
+            beam_height = estimated
+            warnings.append(
+                f"Viga {beam.name or 'sem nome'} — altura estimada {estimated:.2f}m "
+                f"(seção não encontrada no DXF)"
+            )
         beam_length = beam.length_m or 1.0
 
         total_linear_load = calculate_beam_total_linear_load(

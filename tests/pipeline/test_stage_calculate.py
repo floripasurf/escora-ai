@@ -110,13 +110,15 @@ class TestRunCalculation:
         assert len(result.beam_results) == 0
         assert any("confiança" in w.lower() or "ignorada" in w.lower() for w in result.warnings)
 
-    def test_missing_beam_height_skipped(self):
+    def test_missing_beam_height_estimated(self):
         beam = _beam(0, 0, 10, 0)
         beam.section_height_m = None
+        beam.section_width_m = 0.14
         pillars = [_pillar(0, 0), _pillar(10, 0)]
         result = run_calculation([beam] + pillars, pe_direito_m=2.80)
-        assert len(result.beam_results) == 0
-        assert len(result.warnings) > 0
+        # Now estimated instead of skipped
+        assert len(result.beam_results) == 1
+        assert any("estimada" in w for w in result.warnings)
 
     def test_default_pe_direito_flagged(self):
         beams = [_beam(0, 0, 10, 0), _beam(0, 6, 10, 6),

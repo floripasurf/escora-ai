@@ -15,7 +15,7 @@ from src.models.pipeline_models import ClassifiedElement, ElementType
 from src.models.confidence import calculate_confidence
 
 # Maximum distance to associate a text annotation with a geometric element
-MAX_TEXT_DISTANCE = 2.0  # in meters (real coordinates)
+MAX_TEXT_DISTANCE = 3.0  # in meters (real coordinates)
 
 
 def _find_nearest_texts(
@@ -173,15 +173,15 @@ def classify_elements(level: LevelSegment, scale: float = 1.0) -> List[Classifie
         cx_dxf = pc.cx / scale
         cy_dxf = pc.cy / scale
         nearby = _find_nearest_texts(cx_dxf, cy_dxf, level.texts)
+        # For pillars, only consider pillar-confirming text. Beam and slab labels
+        # are commonly near pillars (beams connect to pillars, slabs span between them)
+        # and should not penalize pillar confidence.
         text_cls = TextClassification(ElementType.UNKNOWN, None, 0.0)
         for t in nearby:
             tc = classify_text(t.content)
-            if tc.score > text_cls.score:
+            if tc.element_type == ElementType.PILLAR and tc.score > text_cls.score:
                 text_cls = tc
 
-        # Don't skip pillars based on nearby beam text — beams connect to pillars
-        # so beam labels are commonly near pillar geometry. Instead, rely on
-        # confidence scoring: disagreeing text lowers the score and sets needs_review.
         agree = text_cls.element_type in (ElementType.PILLAR, ElementType.UNKNOWN)
         score_final = calculate_confidence(pc.score, text_cls.score, agree)
 
@@ -242,10 +242,11 @@ def classify_elements(level: LevelSegment, scale: float = 1.0) -> List[Classifie
         cx_dxf = c.cx
         cy_dxf = c.cy
         nearby = _find_nearest_texts(cx_dxf, cy_dxf, level.texts)
+        # Same as rect pillars: only consider pillar-confirming text
         text_cls = TextClassification(ElementType.UNKNOWN, None, 0.0)
         for t in nearby:
             tc = classify_text(t.content)
-            if tc.score > text_cls.score:
+            if tc.element_type == ElementType.PILLAR and tc.score > text_cls.score:
                 text_cls = tc
 
         agree = text_cls.element_type in (ElementType.PILLAR, ElementType.UNKNOWN)
