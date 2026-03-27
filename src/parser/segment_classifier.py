@@ -16,7 +16,7 @@ MIN_PILLAR_DIM = 0.10  # m — NBR minimum for structural columns
 PILLAR_CLUSTER_TOLERANCE = 0.05  # m — merge pillars within 5cm
 MIN_BEAM_LENGTH_DEFAULT = 1.0  # m — real beams are at least 1m
 BEAM_AXIS_TOLERANCE = 0.50  # m — group beams with similar axis coordinates
-BEAM_SPAN_GAP_TOLERANCE = 1.0  # m — bridge pillar interruptions when merging spans
+BEAM_SPAN_GAP_TOLERANCE = 0.05  # m — only merge truly overlapping spans, NOT across pillars
 
 
 @dataclass
@@ -70,7 +70,7 @@ def find_beam_candidates(
 
             axis_y = (h_segs[i]["y"] + h_segs[j]["y"]) / 2
             length_ratio = overlap_len / gap
-            if length_ratio < MIN_BEAM_LENGTH_RATIO:
+            if length_ratio < MIN_BEAM_LENGTH_RATIO - 0.01:
                 continue
             score = min(0.95, 0.50 + 0.05 * min(length_ratio, 9))
 
@@ -95,7 +95,7 @@ def find_beam_candidates(
 
             axis_x = (v_segs[i]["x"] + v_segs[j]["x"]) / 2
             length_ratio = overlap_len / gap
-            if length_ratio < MIN_BEAM_LENGTH_RATIO:
+            if length_ratio < MIN_BEAM_LENGTH_RATIO - 0.01:
                 continue
             score = min(0.95, 0.50 + 0.05 * min(length_ratio, 9))
 

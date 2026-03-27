@@ -141,7 +141,7 @@ class TestValidator:
             simple_slab, shore, 151.2, max_spacing=1.5
         )
 
-        is_valid, errors = validate_result(shores, sx, sy)
+        is_valid, errors = validate_result(shores, sx, sy, max_spacing=1.5)
         assert is_valid
         assert len(errors) == 0
 

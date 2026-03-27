@@ -120,6 +120,21 @@ class TestRunCalculation:
         assert len(result.beam_results) == 1
         assert any("estimada" in w for w in result.warnings)
 
+    def test_learned_section_height_used(self):
+        beam = _beam(0, 0, 10, 0)
+        beam.section_height_m = None
+        beam.section_width_m = 0.14
+        pillars = [_pillar(0, 0), _pillar(10, 0)]
+        result = run_calculation(
+            [beam] + pillars,
+            pe_direito_m=2.80,
+            learned_section_height_m=0.25,
+        )
+        assert len(result.beam_results) == 1
+        assert any("aprendido" in w for w in result.warnings)
+        # Should NOT fall back to ratio-based estimation
+        assert not any("estimada" in w for w in result.warnings)
+
     def test_default_pe_direito_flagged(self):
         beams = [_beam(0, 0, 10, 0), _beam(0, 6, 10, 6),
                  _beam(0, 0, 0, 6), _beam(10, 0, 10, 6)]

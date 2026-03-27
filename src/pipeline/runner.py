@@ -11,6 +11,7 @@ from src.pipeline.stage_classify import classify_elements
 from src.pipeline.stage_metadata import extract_pe_direito, extract_level_height, extract_slab_thickness
 from src.pipeline.stage_calculate import run_calculation
 from src.pipeline.stage_learn import learn_and_save
+from src.pipeline.learning_store import LearningStore
 from src.models.pipeline_models import LevelGroup, PipelineResult
 from src.utils.constants import ALTURA_DEFAULT
 
@@ -48,6 +49,20 @@ def _detect_coordinate_scale(parse) -> float:
 
 
 def run_pipeline(filepath: str, scale_override: Optional[float] = None) -> PipelineResult:
+    # Stage 0: Load learning store for accumulated knowledge
+    store = LearningStore()
+    known_beam_layers = store.get_known_beam_layers() if store.run_count > 0 else {}
+    known_pillar_layers = store.get_known_pillar_layers() if store.run_count > 0 else {}
+    learned_section_height = store.get_default_section_height() if store.run_count > 0 else None
+    learned_pe_direito = store.get_pe_direito_history() if store.run_count > 0 else None
+
+    if store.run_count > 0:
+        logger.info(
+            f"Learning data loaded: {store.run_count} runs, "
+            f"{len(known_beam_layers)} beam layers, "
+            f"{len(known_pillar_layers)} pillar layers"
+        )
+
     # Stage 1: Parse
     parse = parse_dxf(filepath)
 
@@ -62,15 +77,26 @@ def run_pipeline(filepath: str, scale_override: Optional[float] = None) -> Pipel
     all_elements = []
 
     for seg in level_segments:
-        elements = classify_elements(seg, scale=scale)
+        elements = classify_elements(
+            seg, scale=scale,
+            known_beam_layers=known_beam_layers,
+            known_pillar_layers=known_pillar_layers,
+        )
 
         pe_direito = extract_pe_direito(seg.texts)
         level_height = extract_level_height(seg.texts)
 
         pe_direito_is_default = pe_direito is None
         if pe_direito_is_default:
-            warnings.append(f"Pe-direito nao encontrado no nivel {seg.level_name}")
-            pe_direito = ALTURA_DEFAULT
+            if learned_pe_direito:
+                pe_direito = learned_pe_direito
+                warnings.append(
+                    f"Pe-direito nao encontrado no nivel {seg.level_name} — "
+                    f"usando {learned_pe_direito:.2f}m aprendido de execuções anteriores"
+                )
+            else:
+                warnings.append(f"Pe-direito nao encontrado no nivel {seg.level_name}")
+                pe_direito = ALTURA_DEFAULT
 
         level = LevelGroup(
             level_name=seg.level_name,
@@ -99,6 +125,7 @@ def run_pipeline(filepath: str, scale_override: Optional[float] = None) -> Pipel
                 pe_direito_m=pe_direito,
                 pe_direito_is_default=pe_direito_is_default,
                 slab_thickness_m=slab_thickness,
+                learned_section_height_m=learned_section_height,
             )
             warnings.extend(calculation.warnings)
         except Exception as e:
@@ -114,7 +141,7 @@ def run_pipeline(filepath: str, scale_override: Optional[float] = None) -> Pipel
 
     # Stage 6: Learning — save what we learned from this run
     try:
-        learn_and_save(result, level_segments=level_segments)
+        learn_and_save(result, level_segments=level_segments, store=store)
     except Exception as e:
         logger.warning(f"Learning stage failed (non-fatal): {e}")
 

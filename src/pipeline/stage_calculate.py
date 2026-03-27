@@ -26,7 +26,8 @@ from src.engine.shore_selector import load_catalog, select_shore
 from src.engine.validator import validate_result
 from src.utils.constants import (
     GAMMA_F, Q_SOBRECARGA_DEFAULT, ESPESSURA_DEFAULT, ALTURA_DEFAULT,
-    ESPACAMENTO_MAX_DEFAULT,
+    ESPACAMENTO_MAX_DEFAULT, ESPACAMENTO_MAX_VIGA, ESPACAMENTO_POR_ALTURA,
+    CONTRA_FLECHA,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,10 +54,50 @@ BEAM_HEIGHT_MIN = 0.30
 BEAM_HEIGHT_MAX = 0.60
 
 # Beam exclusion zone width for slab shore distribution (m)
-BEAM_EXCLUSION_WIDTH = 0.40
+# Must be wider than beam width + margin so slab shores don't cluster at beam edges
+BEAM_EXCLUSION_WIDTH = 0.60
+
+# Minimum distance between a slab shore and any beam shore (m)
+# Slab shores closer than this to an existing beam shore are redundant
+MIN_SLAB_BEAM_SHORE_DIST = 0.50
 
 # Cantilever slab spacing reduction factor
 CANTILEVER_SPACING_FACTOR = 0.7
+
+
+def _max_spacing_for_slab(thickness_m: float) -> float:
+    """Get maximum shore spacing based on slab thickness (practical recommendation).
+
+    Manual Lajes Martins table:
+    - 10-16cm: 1.30m
+    - 17-24cm: 1.20m
+    - 25-30cm: 1.10m
+    - >30cm:   1.00m
+    """
+    thickness_cm = round(thickness_m * 100)
+    for (min_cm, max_cm), spacing in ESPACAMENTO_POR_ALTURA.items():
+        if min_cm <= thickness_cm <= max_cm:
+            return spacing
+    return ESPACAMENTO_MAX_DEFAULT
+
+
+def _contra_flecha_warnings(beam_length_m: float, beam_name: str) -> list:
+    """Generate contra-flecha recommendation for spans > 2m."""
+    warnings = []
+    for (vao_min, vao_max), flecha_m in CONTRA_FLECHA.items():
+        if vao_min <= beam_length_m < vao_max:
+            flecha_cm = flecha_m * 100
+            warnings.append(
+                f"Viga {beam_name} (vão {beam_length_m:.1f}m) — "
+                f"contra-flecha recomendada: {flecha_cm:.1f} cm na escora central"
+            )
+            break
+    if beam_length_m >= 6.0:
+        warnings.append(
+            f"Viga {beam_name} (vão {beam_length_m:.1f}m) — "
+            f"contra-flecha recomendada: ≥2.0 cm (vão grande, consultar projetista)"
+        )
+    return warnings
 
 
 def associate_beams_pillars(
@@ -171,6 +212,7 @@ def run_calculation(
     pe_direito_m: float = ALTURA_DEFAULT,
     pe_direito_is_default: bool = False,
     slab_thickness_m: Optional[float] = None,
+    learned_section_height_m: Optional[float] = None,
 ) -> CalculationResult:
     """Run the full calculation pipeline.
 
@@ -243,6 +285,13 @@ def run_calculation(
         beam_width = beam.section_width_m or 0.14
         if beam.section_height_m:
             beam_height = beam.section_height_m
+        elif learned_section_height_m:
+            # Use learned default from historical runs
+            beam_height = learned_section_height_m
+            warnings.append(
+                f"Viga {beam.name or 'sem nome'} — altura {learned_section_height_m:.2f}m "
+                f"(padrão aprendido de execuções anteriores)"
+            )
         else:
             # Estimate section height from width using typical beam proportions
             estimated = min(max(beam_width * BEAM_HEIGHT_RATIO, BEAM_HEIGHT_MIN), BEAM_HEIGHT_MAX)
@@ -290,6 +339,7 @@ def run_calculation(
             beam_height_m=beam_height,
             shore=selected_shore,
             total_linear_load_kn_m=total_linear_load,
+            max_spacing=ESPACAMENTO_MAX_VIGA,
             start_x=start_pt[0],
             start_y=start_pt[1],
             direction=direction,
@@ -313,6 +363,40 @@ def run_calculation(
             selected_shore=selected_shore,
             shore_height_m=shore_height,
         ))
+
+        # Contra-flecha recommendation for spans > 2m
+        beam_name = beam.name or "sem nome"
+        warnings.extend(_contra_flecha_warnings(beam_length, beam_name))
+
+    # === PILLAR PROXIMITY FILTER FOR BEAM SHORES ===
+    # The beam distributor only knows about support positions along the axis.
+    # A shore may still be placed on a beam axis that passes near a pillar
+    # in the perpendicular direction. Remove those here.
+    import math
+    from src.utils.constants import DISTANCIA_PILAR_MIN
+
+    for br in beam_results:
+        filtered_shores = []
+        for s in br.shores:
+            too_close = False
+            for p in pillars:
+                if not p.geometry:
+                    continue
+                px, py = p.geometry[0]
+                pw = (p.section_width_m or 0.20) / 2
+                pd = (p.section_height_m or 0.20) / 2
+                # Distance from shore to pillar face (not center)
+                dx = max(0, abs(s.x - px) - pw)
+                dy = max(0, abs(s.y - py) - pd)
+                dist = math.hypot(dx, dy)
+                if dist < DISTANCIA_PILAR_MIN:
+                    too_close = True
+                    break
+            if not too_close:
+                filtered_shores.append(s)
+        if len(filtered_shores) < len(br.shores):
+            br.shores = filtered_shores
+            br.shore_count = len(filtered_shores)
 
     # === SLAB SHORING ===
     slab_polygons = derive_slabs_from_beams(valid_beams)
@@ -364,7 +448,7 @@ def run_calculation(
             ))
             continue
 
-        max_spacing = ESPACAMENTO_MAX_DEFAULT
+        max_spacing = _max_spacing_for_slab(thickness)
         if is_cantilever:
             max_spacing *= CANTILEVER_SPACING_FACTOR
 
@@ -394,6 +478,79 @@ def run_calculation(
             selected_shore=selected_shore,
             exclusions=all_exclusions,
         ))
+
+    # === SLAB-BEAM SHORE PROXIMITY FILTER ===
+    # Remove slab shores that are too close to any beam shore.
+    # The beam already has its own shore at that position — a slab shore
+    # within MIN_SLAB_BEAM_SHORE_DIST is redundant and clutters the drawing.
+    import math
+
+    beam_shore_positions = []
+    for br in beam_results:
+        for s in br.shores:
+            beam_shore_positions.append((s.x, s.y))
+
+    for sr in slab_results:
+        if not beam_shore_positions:
+            break
+        filtered = []
+        for ss in sr.shores:
+            too_close = False
+            for bx, by in beam_shore_positions:
+                if math.hypot(ss.x - bx, ss.y - by) < MIN_SLAB_BEAM_SHORE_DIST:
+                    too_close = True
+                    break
+            if not too_close:
+                filtered.append(ss)
+        if len(filtered) < len(sr.shores):
+            removed = len(sr.shores) - len(filtered)
+            sr.shores = filtered
+            # Recalculate load per shore
+            if sr.shores and sr.total_load_kn > 0:
+                load_per = sr.total_load_kn / len(sr.shores)
+                util = load_per / (sr.selected_shore.load_capacity_kn if sr.selected_shore else 1)
+                for s in sr.shores:
+                    s.load_applied_kn = round(load_per, 2)
+                    s.utilization_ratio = round(util, 4)
+
+    # === CROSS-BEAM DEDUPLICATION ===
+    # At beam intersections, shores from different beams cluster together.
+    # Remove redundant shores that are too close to each other.
+    # Uses a global set of all shore positions; for each close pair,
+    # removes the one with lower load (keeps the structurally important one).
+    MIN_CROSS_BEAM_DIST = 0.35  # m — minimum distance between shores of different beams
+
+    # Build global index: (beam_idx, shore_idx) -> (x, y, load)
+    all_shore_refs = []
+    for bi, br in enumerate(beam_results):
+        for si, s in enumerate(br.shores):
+            all_shore_refs.append((bi, si, s.x, s.y, s.load_applied_kn))
+
+    # Find all close pairs and mark the weaker shore for removal
+    to_remove = set()  # (beam_idx, shore_idx)
+    for i, (bi, si, x1, y1, l1) in enumerate(all_shore_refs):
+        if (bi, si) in to_remove:
+            continue
+        for j, (bj, sj, x2, y2, l2) in enumerate(all_shore_refs):
+            if j <= i or bi == bj:  # skip same beam (already handled internally)
+                continue
+            if (bj, sj) in to_remove:
+                continue
+            dist = math.hypot(x2 - x1, y2 - y1)
+            if dist < MIN_CROSS_BEAM_DIST:
+                # Remove the shore with lower load
+                if l1 >= l2:
+                    to_remove.add((bj, sj))
+                else:
+                    to_remove.add((bi, si))
+
+    # Apply removals
+    if to_remove:
+        for bi, br in enumerate(beam_results):
+            indices_to_remove = {si for (b, si) in to_remove if b == bi}
+            if indices_to_remove:
+                br.shores = [s for idx, s in enumerate(br.shores) if idx not in indices_to_remove]
+                br.shore_count = len(br.shores)
 
     # === AGGREGATE RESULTS ===
     all_shores_count = (

@@ -3,7 +3,10 @@
 import math
 from typing import List, Tuple
 from src.models.shore import ShoreCatalogEntry, PositionedShore
-from src.utils.constants import GAMMA_CONCRETO, Q_SOBRECARGA_DEFAULT, GAMMA_F
+from src.utils.constants import (
+    GAMMA_CONCRETO, Q_SOBRECARGA_DEFAULT, GAMMA_F,
+    ESPACAMENTO_MIN, ESPACAMENTO_MAX_VIGA, CONTRA_FLECHA,
+)
 
 
 def calculate_beam_self_weight(width_m: float, height_m: float) -> float:
@@ -43,7 +46,7 @@ def distribute_beam_shores(
     beam_height_m: float,
     shore: ShoreCatalogEntry,
     total_linear_load_kn_m: float,
-    max_spacing: float = 1.0,
+    max_spacing: float = ESPACAMENTO_MAX_VIGA,
     start_x: float = 0.0,
     start_y: float = 0.0,
     direction: str = "x",
@@ -67,7 +70,10 @@ def distribute_beam_shores(
 
     Retorna: (shores, n_shores, spacing_efetivo)
     """
-    DIST_MIN_APOIO = 0.15  # distância mínima entre escora e ponto de apoio
+    # Distância mínima entre escora e ponto de apoio (pilar/cruzamento)
+    # Prática: pilar já sustenta a viga, escora próxima é redundante.
+    # Mínimo 0.70m da face do apoio.
+    DIST_MIN_APOIO = 0.70
 
     n = math.ceil(beam_length_m / max_spacing) + 1
     n = max(n, 2)
@@ -97,11 +103,21 @@ def distribute_beam_shores(
     # Para balanço: garantir escora próxima à extremidade livre
     # NBR 6118 — extremidade livre deve ter suporte (concreto fresco)
     if is_cantilever_start and candidates:
-        if candidates[0] > 0.20:  # se a primeira escora está longe da ponta
-            candidates.insert(0, 0.10)  # adicionar escora a 10cm da ponta
+        if candidates[0] > 0.20:
+            candidates.insert(0, 0.10)
     if is_cantilever_end and candidates:
         if candidates[-1] < beam_length_m - 0.20:
             candidates.append(beam_length_m - 0.10)
+
+    # Enforce minimum inter-shore spacing — remove shores that are
+    # too close to each other (clusters near vertices/supports)
+    if len(candidates) > 1:
+        candidates.sort()
+        spaced = [candidates[0]]
+        for pos in candidates[1:]:
+            if pos - spaced[-1] >= ESPACAMENTO_MIN:
+                spaced.append(pos)
+        candidates = spaced
 
     if not candidates:
         # Viga curta totalmente apoiada — sem necessidade de escoras
@@ -131,7 +147,7 @@ def distribute_beam_shores(
             )
         )
 
-    actual_spacing = spacing  # espaçamento nominal do grid
+    actual_spacing = spacing
     return shores, n_effective, actual_spacing
 
 

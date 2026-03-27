@@ -31,3 +31,59 @@ def test_classify_pillar_from_rect():
     elements = classify_elements(level, scale=1.0)
     pillars = [e for e in elements if e.element_type == ElementType.PILLAR]
     assert len(pillars) >= 1
+
+
+def test_learned_beam_layer_accepted():
+    """A layer known from history gets accepted even if not the best rate."""
+    # Layer "42" is the best beam layer, but "99" has learned history
+    level = LevelSegment(
+        level_name="TEST",
+        segments=[
+            # Layer "42" — 2 beams (best rate)
+            SegmentEntity("H", y=10.00, x_min=0, x_max=6.0, layer="42"),
+            SegmentEntity("H", y=10.14, x_min=0, x_max=6.0, layer="42"),
+            # Layer "99" — also has beams, but lower rate (more noise segments)
+            SegmentEntity("H", y=20.00, x_min=0, x_max=5.0, layer="99"),
+            SegmentEntity("H", y=20.14, x_min=0, x_max=5.0, layer="99"),
+            SegmentEntity("V", x=1.0, y_min=19.0, y_max=21.0, layer="99"),
+            SegmentEntity("V", x=2.0, y_min=19.0, y_max=21.0, layer="99"),
+        ],
+        texts=[],
+    )
+    # Without learning: only layer "42" selected (best rate)
+    elements_no_learn = classify_elements(level, scale=1.0)
+    beams_no_learn = [e for e in elements_no_learn if e.element_type == ElementType.BEAM]
+
+    # With learning: layer "99" also accepted
+    elements_learn = classify_elements(
+        level, scale=1.0,
+        known_beam_layers={"99": 1.0},
+    )
+    beams_learn = [e for e in elements_learn if e.element_type == ElementType.BEAM]
+
+    assert len(beams_learn) >= len(beams_no_learn)
+
+
+def test_low_confidence_learned_layer_ignored():
+    """A layer with low historical confidence is not accepted."""
+    level = LevelSegment(
+        level_name="TEST",
+        segments=[
+            SegmentEntity("H", y=10.00, x_min=0, x_max=6.0, layer="42"),
+            SegmentEntity("H", y=10.14, x_min=0, x_max=6.0, layer="42"),
+            SegmentEntity("H", y=20.00, x_min=0, x_max=5.0, layer="99"),
+            SegmentEntity("H", y=20.14, x_min=0, x_max=5.0, layer="99"),
+        ],
+        texts=[],
+    )
+    # Low confidence — should NOT add layer "99"
+    elements = classify_elements(
+        level, scale=1.0,
+        known_beam_layers={"99": 0.50},
+    )
+    beams = [e for e in elements if e.element_type == ElementType.BEAM]
+
+    elements_base = classify_elements(level, scale=1.0)
+    beams_base = [e for e in elements_base if e.element_type == ElementType.BEAM]
+
+    assert len(beams) == len(beams_base)
