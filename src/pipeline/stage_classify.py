@@ -6,7 +6,7 @@ Uses layer classification to filter noise (dimension lines, hatching, etc.).
 """
 
 import math
-from typing import List, Set, Dict
+from typing import List, Set, Dict, Optional
 from src.pipeline.stage_segment import LevelSegment
 from src.pipeline.stage_parse import TextEntity
 from src.parser.segment_classifier import find_beam_candidates, find_pillar_candidates
@@ -16,6 +16,13 @@ from src.models.confidence import calculate_confidence
 
 # Maximum distance to associate a text annotation with a geometric element
 MAX_TEXT_DISTANCE = 3.0  # in meters (real coordinates)
+
+# Minimum historical confidence to accept a layer from learning data
+MIN_LEARNED_LAYER_CONFIDENCE = 0.80
+
+# Minimum detection rate for a learned layer to be accepted in the current DXF
+# Prevents accepting rebar/detailing layers that accidentally have a few parallel pairs
+MIN_LEARNED_LAYER_RATE = 0.10
 
 
 def _find_nearest_texts(
@@ -29,7 +36,11 @@ def _find_nearest_texts(
     return nearby
 
 
-def _classify_layers(level: LevelSegment) -> Dict[str, ElementType]:
+def _classify_layers(
+    level: LevelSegment,
+    known_beam_layers: Optional[Dict[str, float]] = None,
+    known_pillar_layers: Optional[Dict[str, float]] = None,
+) -> Dict[str, ElementType]:
     """Classify layers by running structural detection per-layer.
 
     Strategy: run beam/pillar detection independently on each layer's entities.
@@ -37,9 +48,15 @@ def _classify_layers(level: LevelSegment) -> Dict[str, ElementType]:
     is the structural layer for that type. This directly tests geometric quality
     rather than relying on text proximity which can be misleading.
 
+    When learning data is available, layers with high historical confidence
+    are also accepted if they contain valid structural candidates in this DXF.
+
     Returns a map of layer_name -> ElementType for structural layers.
     """
     from collections import Counter, defaultdict
+
+    known_beam_layers = known_beam_layers or {}
+    known_pillar_layers = known_pillar_layers or {}
 
     # Group segments by layer
     segs_by_layer: Dict[str, list] = defaultdict(list)
@@ -58,20 +75,55 @@ def _classify_layers(level: LevelSegment) -> Dict[str, ElementType]:
 
     result = {}
 
-    # Best beam layer: highest detection rate (beams found / segments on layer)
-    # Structural layers have high density of parallel pairs; noise layers have sparse hits
+    # Best beam layer: uses a combined score of detection rate AND absolute count.
+    # Pure rate favors tiny layers with 1 accidental beam (e.g., 1/13 = 7.7%).
+    # Pure count favors huge noisy layers. Combined score balances both:
+    #   score = beam_count * rate  (rewards layers with many beams at decent rate)
+    # Minimum 3 beams to avoid fluky single-pair detections.
+    MIN_BEAM_COUNT = 3
     best_beam_layer = None
-    best_beam_rate = 0
+    best_beam_score = 0
     for layer, seg_dicts in segs_by_layer.items():
         beams = find_beam_candidates(seg_dicts)
-        if not beams:
+        if not beams or len(beams) < MIN_BEAM_COUNT:
             continue
         rate = len(beams) / max(len(seg_dicts), 1)
-        if rate > best_beam_rate:
-            best_beam_rate = rate
+        score = len(beams) * rate
+        if score > best_beam_score:
+            best_beam_score = score
             best_beam_layer = layer
     if best_beam_layer:
         result[best_beam_layer] = ElementType.BEAM
+
+    # Fallback: if no layer has MIN_BEAM_COUNT, pick the one with best rate
+    if not best_beam_layer:
+        best_rate = 0
+        for layer, seg_dicts in segs_by_layer.items():
+            beams = find_beam_candidates(seg_dicts)
+            if not beams:
+                continue
+            rate = len(beams) / max(len(seg_dicts), 1)
+            if rate > best_rate:
+                best_rate = rate
+                best_beam_layer = layer
+        if best_beam_layer:
+            result[best_beam_layer] = ElementType.BEAM
+
+    # Accept additional beam layers from learning history
+    # Only if they have candidates in this DXF, high historical confidence,
+    # AND a reasonable detection rate (filters rebar/detailing noise)
+    for layer, confidence in known_beam_layers.items():
+        if layer in result:
+            continue  # Already selected
+        if confidence < MIN_LEARNED_LAYER_CONFIDENCE:
+            continue
+        if layer not in segs_by_layer:
+            continue
+        beams = find_beam_candidates(segs_by_layer[layer])
+        if beams:
+            rate = len(beams) / max(len(segs_by_layer[layer]), 1)
+            if rate >= MIN_LEARNED_LAYER_RATE:
+                result[layer] = ElementType.BEAM
 
     # Best pillar layer: highest detection rate (rect pillars found / total rects)
     best_pillar_layer = None
@@ -87,14 +139,37 @@ def _classify_layers(level: LevelSegment) -> Dict[str, ElementType]:
     if best_pillar_layer:
         result[best_pillar_layer] = ElementType.PILLAR
 
+    # Accept additional pillar layers from learning history
+    for layer, confidence in known_pillar_layers.items():
+        if layer in result:
+            continue
+        if confidence < MIN_LEARNED_LAYER_CONFIDENCE:
+            continue
+        if layer not in rects_by_layer:
+            continue
+        pillars = find_pillar_candidates(rects_by_layer[layer])
+        if pillars:
+            rate = len(pillars) / max(len(rects_by_layer[layer]), 1)
+            if rate >= MIN_LEARNED_LAYER_RATE:
+                result[layer] = ElementType.PILLAR
+
     return result
 
 
-def classify_elements(level: LevelSegment, scale: float = 1.0) -> List[ClassifiedElement]:
+def classify_elements(
+    level: LevelSegment,
+    scale: float = 1.0,
+    known_beam_layers: Optional[Dict[str, float]] = None,
+    known_pillar_layers: Optional[Dict[str, float]] = None,
+) -> List[ClassifiedElement]:
     elements: List[ClassifiedElement] = []
 
-    # Classify layers to filter noise
-    layer_types = _classify_layers(level)
+    # Classify layers to filter noise (with learning boost)
+    layer_types = _classify_layers(
+        level,
+        known_beam_layers=known_beam_layers,
+        known_pillar_layers=known_pillar_layers,
+    )
     beam_layers = {l for l, t in layer_types.items() if t == ElementType.BEAM}
     pillar_layers = {l for l, t in layer_types.items() if t == ElementType.PILLAR}
 
@@ -125,14 +200,17 @@ def classify_elements(level: LevelSegment, scale: float = 1.0) -> List[Classifie
         section = None
         for t in nearby:
             tc = classify_text(t.content)
-            if tc.score > text_cls.score:
+            # For beams: only consider beam-confirming or slab-indicating text.
+            # Pillar labels (P1, P20) are commonly near beams (beams connect to pillars)
+            # and should NOT override beam detection.
+            if tc.element_type != ElementType.PILLAR and tc.score > text_cls.score:
                 text_cls = tc
             s = extract_section(t.content)
             if s:
                 section = s
 
-        # Text override: if text clearly says different type, skip
-        if text_cls.element_type not in (ElementType.BEAM, ElementType.UNKNOWN) and text_cls.score >= 0.80:
+        # Text override: only skip if text clearly says SLAB (not pillar — pillars are expected near beams)
+        if text_cls.element_type == ElementType.SLAB and text_cls.score >= 0.80:
             continue
 
         agree = text_cls.element_type in (ElementType.BEAM, ElementType.UNKNOWN)
@@ -143,6 +221,14 @@ def classify_elements(level: LevelSegment, scale: float = 1.0) -> List[Classifie
         else:
             beam_geometry = [(bc.axis_coord, bc.start), (bc.axis_coord, bc.end)]
 
+        # For beams, width is always the smaller dimension, height the larger
+        if section:
+            sec_w = min(section[0], section[1])
+            sec_h = max(section[0], section[1])
+        else:
+            sec_w = bc.width_m
+            sec_h = None
+
         el = ClassifiedElement(
             element_type=ElementType.BEAM,
             geometry=beam_geometry,
@@ -150,8 +236,8 @@ def classify_elements(level: LevelSegment, scale: float = 1.0) -> List[Classifie
             score_textual=text_cls.score,
             score_final=score_final,
             name=text_cls.name,
-            section_width_m=section[0] if section else bc.width_m,
-            section_height_m=section[1] if section else None,
+            section_width_m=sec_w,
+            section_height_m=sec_h,
             length_m=bc.length_m,
             source_layer="",
         )

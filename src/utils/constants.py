@@ -16,16 +16,43 @@ Q_SOBRECARGA_DEFAULT = 1.5
 # Coeficiente de majoração de ações — NBR 15696:2009
 GAMMA_F = 1.4
 
-# Espaçamento máximo entre escoras (m) — prática de projeto
-ESPACAMENTO_MAX_DEFAULT = 1.5
+# Espaçamento máximo entre escoras de LAJE (m) — Manual Lajes Martins
+# Varia por altura da laje (ver ESPACAMENTO_POR_ALTURA abaixo)
+ESPACAMENTO_MAX_DEFAULT = 1.30
+
+# Espaçamento máximo entre escoras de VIGA (m)
+# Referência: projetos executivos de engenharia (mediana real: 0.70m)
+# Vigas concentram mais carga que lajes → espaçamento mais denso
+ESPACAMENTO_MAX_VIGA = 1.00
+
+# Espaçamento por faixa de altura da laje (m) — Manual Lajes Martins
+# Chave: (min_cm, max_cm) -> espaçamento máximo em metros
+ESPACAMENTO_POR_ALTURA = {
+    (10, 16): 1.30,   # lajes leves
+    (17, 24): 1.20,   # lajes médias
+    (25, 30): 1.10,   # lajes altas
+    (31, 99): 1.00,   # lajes muito altas — segurança máxima
+}
+
+# Espaçamento mínimo entre escoras (m) — evita acúmulo próximo a apoios
+ESPACAMENTO_MIN = 0.30
+
+# Contra-flecha recomendada por faixa de vão (m) — Manual Lajes Martins
+# Chave: (vão_min, vão_max) -> contra-flecha em metros
+CONTRA_FLECHA = {
+    (2.0, 3.0): 0.005,   # 0.5 cm
+    (3.0, 4.0): 0.010,   # 1.0 cm
+    (4.0, 5.0): 0.015,   # 1.5 cm
+    (5.0, 6.0): 0.020,   # 2.0 cm
+}
 
 # Distância mínima da escora à borda da laje (m)
 DISTANCIA_BORDA_MIN = 0.15
 
-# Distância mínima da escora ao pilar (m) — NBR 15696:2009
-# Escoras não podem ser posicionadas na projeção do pilar nem
-# a menos de 0.20m da face do pilar.
-DISTANCIA_PILAR_MIN = 0.20
+# Distância mínima da escora ao pilar (m) — recomendação prática
+# O pilar já sustenta a estrutura; escoras muito próximas são redundantes
+# e atrapalham a circulação na obra. 0.70m da face do pilar.
+DISTANCIA_PILAR_MIN = 0.70
 
 # Espessura padrão de laje quando não especificada (m)
 ESPESSURA_DEFAULT = 0.12

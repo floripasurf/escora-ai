@@ -16,3 +16,14 @@ htmlcov/
 *.dxf.bak
 .DS_Store
 data/learning.json
+
+# Client files — never commit
+input/*.DXF
+input/*.dxf
+input/*.dwg
+input/Sergio1/
+input/Cesar/
+input/teste*/
+input/*.key
+output/
+uploads/
