@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Escora.AI — Escoramento Inteligente</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg: #0f172a;
+            --bg-card: #1e293b;
+            --bg-card-hover: #334155;
+            --accent: #e87d2f;
+            --accent-light: #f59e0b;
+            --blue: #3b82f6;
+            --green: #10b981;
+            --red: #ef4444;
+            --text: #f1f5f9;
+            --text-muted: #94a3b8;
+            --border: #334155;
+            --radius: 12px;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        /* Header */
+        header {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border-bottom: 2px solid var(--accent);
+            padding: 1rem 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 800;
+            color: var(--text);
+            letter-spacing: -0.5px;
+        }
+        .logo span { color: var(--accent); }
+        .badge {
+            background: var(--accent);
+            color: var(--bg);
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 20px;
+            text-transform: uppercase;
+        }
+
+        /* Main layout */
+        main {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        /* Upload zone */
+        .upload-zone {
+            border: 2px dashed var(--border);
+            border-radius: var(--radius);
+            padding: 3rem 2rem;
+            text-align: center;
+            transition: all 0.3s;
+            cursor: pointer;
+            background: var(--bg-card);
+            margin-bottom: 2rem;
+        }
+        .upload-zone:hover, .upload-zone.dragover {
+            border-color: var(--accent);
+            background: rgba(232, 125, 47, 0.05);
+        }
+        .upload-zone h2 {
+            font-size: 1.3rem;
+            margin-bottom: 0.5rem;
+        }
+        .upload-zone p {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+        .upload-zone input { display: none; }
+        .upload-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.6;
+        }
+
+        /* Job cards */
+        .job-card {
+            background: var(--bg-card);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            border-left: 4px solid var(--border);
+            transition: all 0.3s;
+        }
+        .job-card.processing { border-left-color: var(--accent-light); }
+        .job-card.done { border-left-color: var(--green); }
+        .job-card.error { border-left-color: var(--red); }
+
+        .job-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.8rem;
+        }
+        .job-filename {
+            font-weight: 600;
+            font-size: 1.05rem;
+        }
+        .job-status {
+            font-size: 0.8rem;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-weight: 600;
+        }
+        .status-processing { background: rgba(245, 158, 11, 0.15); color: var(--accent-light); }
+        .status-done { background: rgba(16, 185, 129, 0.15); color: var(--green); }
+        .status-error { background: rgba(239, 68, 68, 0.15); color: var(--red); }
+
+        /* Metrics */
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 0.8rem;
+            margin: 1rem 0;
+        }
+        .metric {
+            background: rgba(255,255,255,0.03);
+            border-radius: 8px;
+            padding: 0.8rem;
+            text-align: center;
+        }
+        .metric-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--blue);
+        }
+        .metric-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: none;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+        }
+        .btn-primary:hover { background: #d06a20; }
+        .btn-secondary {
+            background: var(--bg-card-hover);
+            color: var(--text);
+        }
+        .btn-secondary:hover { background: #475569; }
+        .btn-green {
+            background: var(--green);
+            color: white;
+        }
+        .btn-green:hover { background: #059669; }
+        .btn-accent {
+            background: var(--blue);
+            color: white;
+        }
+        .btn-accent:hover { background: #2563eb; }
+
+        .actions {
+            display: flex;
+            gap: 0.6rem;
+            margin-top: 1rem;
+            flex-wrap: wrap;
+        }
+
+        /* Warnings */
+        .warnings {
+            margin-top: 0.8rem;
+            max-height: 120px;
+            overflow-y: auto;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            background: rgba(0,0,0,0.2);
+            border-radius: 6px;
+            padding: 0.6rem;
+        }
+        .warnings div { padding: 2px 0; }
+
+        /* Revision results */
+        .revision-result {
+            margin-top: 1rem;
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            border-radius: 8px;
+            padding: 1rem;
+        }
+        .revision-result h4 {
+            color: var(--green);
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+        }
+        .learning-item {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            padding: 3px 0;
+        }
+
+        /* Loader */
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: var(--accent-light);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-muted);
+        }
+
+        /* Beams table */
+        .beams-table {
+            width: 100%;
+            font-size: 0.8rem;
+            margin-top: 0.8rem;
+            border-collapse: collapse;
+        }
+        .beams-table th {
+            text-align: left;
+            color: var(--text-muted);
+            padding: 4px 8px;
+            border-bottom: 1px solid var(--border);
+            font-weight: 500;
+        }
+        .beams-table td {
+            padding: 3px 8px;
+            color: var(--text);
+        }
+        .beams-toggle {
+            color: var(--blue);
+            cursor: pointer;
+            font-size: 0.8rem;
+            margin-top: 0.5rem;
+            display: inline-block;
+        }
+        .beams-toggle:hover { text-decoration: underline; }
+
+        /* Hide file input for revision */
+        .revision-input { display: none; }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo">ESCORA<span>.AI</span></div>
+        <span class="badge">Beta Gratuito</span>
+    </header>
+
+    <main>
+        <!-- Upload -->
+        <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+            <div class="upload-icon">&#128194;</div>
+            <h2>Envie seu arquivo DXF estrutural</h2>
+            <p>Arraste ou clique para selecionar — formato .dxf ate 50MB</p>
+            <input type="file" id="fileInput" accept=".dxf,.dwg">
+        </div>
+
+        <!-- Jobs list -->
+        <div id="jobsList"></div>
+    </main>
+
+    <script>
+        const API = '/api/v1';
+        const jobs = {};
+
+        // Upload handling
+        const uploadZone = document.getElementById('uploadZone');
+        const fileInput = document.getElementById('fileInput');
+
+        ['dragover', 'dragenter'].forEach(e => {
+            uploadZone.addEventListener(e, (ev) => {
+                ev.preventDefault();
+                uploadZone.classList.add('dragover');
+            });
+        });
+        ['dragleave', 'drop'].forEach(e => {
+            uploadZone.addEventListener(e, () => uploadZone.classList.remove('dragover'));
+        });
+        uploadZone.addEventListener('drop', (ev) => {
+            ev.preventDefault();
+            const file = ev.dataTransfer.files[0];
+            if (file) uploadFile(file);
+        });
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files[0]) uploadFile(fileInput.files[0]);
+            fileInput.value = '';
+        });
+
+        async function uploadFile(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const res = await fetch(`${API}/jobs`, { method: 'POST', body: formData });
+                if (!res.ok) {
+                    const err = await res.json();
+                    alert(err.detail || 'Erro no upload');
+                    return;
+                }
+                const data = await res.json();
+                jobs[data.id] = data;
+                renderJobs();
+                pollJob(data.id);
+            } catch (e) {
+                alert('Erro de conexao: ' + e.message);
+            }
+        }
+
+        async function pollJob(jobId) {
+            const poll = async () => {
+                try {
+                    const res = await fetch(`${API}/jobs/${jobId}/status`);
+                    const data = await res.json();
+                    jobs[jobId] = data;
+                    renderJobs();
+                    if (data.status === 'processing' || data.status === 'pending') {
+                        setTimeout(poll, 2000);
+                    }
+                } catch (e) {
+                    console.error('Poll error:', e);
+                    setTimeout(poll, 5000);
+                }
+            };
+            poll();
+        }
+
+        async function uploadRevision(jobId) {
+            const input = document.getElementById(`rev-${jobId}`);
+            input.click();
+            input.onchange = async () => {
+                const file = input.files[0];
+                if (!file) return;
+
+                const formData = new FormData();
+                formData.append('file', file);
+
+                try {
+                    const res = await fetch(`${API}/jobs/${jobId}/revision`, {
+                        method: 'POST',
+                        body: formData,
+                    });
+                    const data = await res.json();
+
+                    // Update job with revision data
+                    if (jobs[jobId]) {
+                        jobs[jobId].has_revision = true;
+                        jobs[jobId].revision_learnings = data.learnings;
+                        jobs[jobId]._revision = data;
+                    }
+                    renderJobs();
+                } catch (e) {
+                    alert('Erro no upload da revisao: ' + e.message);
+                }
+                input.value = '';
+            };
+        }
+
+        function toggleBeams(jobId) {
+            const el = document.getElementById(`beams-${jobId}`);
+            el.style.display = el.style.display === 'none' ? 'block' : 'none';
+        }
+
+        function renderJobs() {
+            const container = document.getElementById('jobsList');
+            const jobList = Object.values(jobs).sort((a, b) =>
+                new Date(b.created_at) - new Date(a.created_at)
+            );
+
+            if (jobList.length === 0) {
+                container.innerHTML = '<div class="empty-state">Nenhum projeto processado ainda</div>';
+                return;
+            }
+
+            container.innerHTML = jobList.map(job => {
+                const statusClass = job.status;
+                const statusLabel = {
+                    pending: 'Na fila',
+                    processing: 'Processando...',
+                    done: 'Concluido',
+                    error: 'Erro',
+                }[job.status] || job.status;
+
+                let content = '';
+
+                if (job.status === 'processing') {
+                    content = '<div style="margin-top:0.8rem"><span class="spinner"></span> Processando pipeline de 6 estagios...</div>';
+                }
+
+                if (job.status === 'error') {
+                    content = `<div style="margin-top:0.8rem;color:var(--red)">${job.error_message || 'Erro desconhecido'}</div>`;
+                }
+
+                if (job.status === 'done' && job.total_shores != null) {
+                    content = `
+                        <div class="metrics">
+                            <div class="metric">
+                                <div class="metric-value">${job.beam_count || 0}</div>
+                                <div class="metric-label">Vigas</div>
+                            </div>
+                            <div class="metric">
+                                <div class="metric-value">${job.pillar_count || 0}</div>
+                                <div class="metric-label">Pilares</div>
+                            </div>
+                            <div class="metric">
+                                <div class="metric-value">${job.slab_count || 0}</div>
+                                <div class="metric-label">Lajes</div>
+                            </div>
+                            <div class="metric">
+                                <div class="metric-value" style="color:var(--green)">${job.total_shores}</div>
+                                <div class="metric-label">Escoras Total</div>
+                            </div>
+                        </div>
+                    `;
+
+                    // Beams detail
+                    if (job.beams && job.beams.length > 0) {
+                        const beamRows = job.beams.slice(0, 15).map(b =>
+                            `<tr>
+                                <td>${b.name || '?'}</td>
+                                <td>${b.length_m}m</td>
+                                <td>${b.width_m}x${b.height_m || '?'}</td>
+                                <td>${b.shore_count}</td>
+                                <td>${b.spacing_m}m</td>
+                            </tr>`
+                        ).join('');
+
+                        content += `
+                            <span class="beams-toggle" onclick="toggleBeams('${job.id}')">
+                                Ver detalhes das vigas &#9662;
+                            </span>
+                            <div id="beams-${job.id}" style="display:none">
+                                <table class="beams-table">
+                                    <tr><th>Viga</th><th>Compr.</th><th>Secao</th><th>Escoras</th><th>Espac.</th></tr>
+                                    ${beamRows}
+                                </table>
+                                ${job.beams.length > 15 ? `<div style="color:var(--text-muted);font-size:0.75rem;margin-top:4px">... e mais ${job.beams.length - 15} vigas</div>` : ''}
+                            </div>
+                        `;
+                    }
+
+                    // Actions
+                    content += `
+                        <div class="actions">
+                            <a href="${API}/jobs/${job.id}/download" class="btn btn-primary">
+                                &#8681; Download DXF
+                            </a>
+                            <a href="${API}/jobs/${job.id}/download/csv" class="btn btn-accent">
+                                &#128196; Download BOM (CSV)
+                            </a>
+                            <button class="btn btn-green" onclick="uploadRevision('${job.id}')">
+                                &#8679; Enviar Revisao do Engenheiro
+                            </button>
+                            <input type="file" class="revision-input" id="rev-${job.id}" accept=".dxf">
+                        </div>
+                    `;
+
+                    // Warnings
+                    if (job.warnings && job.warnings.length > 0) {
+                        const warns = job.warnings.slice(0, 8).map(w => `<div>&#9888; ${w}</div>`).join('');
+                        content += `<div class="warnings">${warns}</div>`;
+                    }
+
+                    // Revision results
+                    if (job.has_revision && job.revision_learnings) {
+                        const learnings = job.revision_learnings.map(l =>
+                            `<div class="learning-item">&#10003; ${l}</div>`
+                        ).join('');
+
+                        const rev = job._revision || {};
+                        content += `
+                            <div class="revision-result">
+                                <h4>Aprendizado da Revisao do Engenheiro</h4>
+                                ${learnings}
+                                ${rev.accuracy_beam != null ? `<div class="learning-item" style="margin-top:8px;color:var(--green)">Precisao vigas: ${rev.accuracy_beam}% | Precisao lajes: ${rev.accuracy_slab}%</div>` : ''}
+                            </div>
+                        `;
+                    }
+                }
+
+                return `
+                    <div class="job-card ${statusClass}">
+                        <div class="job-header">
+                            <span class="job-filename">${job.filename}</span>
+                            <span class="job-status status-${job.status}">${statusLabel}</span>
+                        </div>
+                        ${content}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Initial render
+        renderJobs();
+    </script>
+</body>
+</html>
