@@ -1,0 +1,137 @@
+{
+  "catalog_version": "1.0",
+  "type": "shoring_tower",
+  "updated": "2026-03-28",
+  "towers": [
+    {
+      "id": "TWR-SH-LTT",
+      "manufacturer": "SH",
+      "model": "Torre LTT",
+      "system": "tubular",
+      "load_capacity_kn": 120.0,
+      "module_height_m": 1.50,
+      "base_dimension_m": 1.30,
+      "max_height_m": 30.0,
+      "weight_per_module_kg": 38.0,
+      "includes_bracing": true,
+      "price_per_module_brl": 15.00,
+      "notes": "Torre padrão SH, capacidade 12tf, mais usada no Brasil"
+    },
+    {
+      "id": "TWR-SH-SLTT",
+      "manufacturer": "SH",
+      "model": "Super LTT",
+      "system": "tubular",
+      "load_capacity_kn": 180.0,
+      "module_height_m": 1.50,
+      "base_dimension_m": 1.50,
+      "max_height_m": 25.0,
+      "weight_per_module_kg": 52.0,
+      "includes_bracing": true,
+      "price_per_module_brl": 22.00,
+      "notes": "Torre reforçada SH, capacidade 18tf"
+    },
+    {
+      "id": "TWR-PERI-PEP",
+      "manufacturer": "PERI",
+      "model": "PEP Ergo",
+      "system": "modular_roseta",
+      "load_capacity_kn": 100.0,
+      "module_height_m": 1.00,
+      "base_dimension_m": 1.25,
+      "max_height_m": 24.0,
+      "weight_per_module_kg": 28.0,
+      "includes_bracing": true,
+      "price_per_module_brl": 18.00,
+      "notes": "Sistema PERI de roseta, montagem rápida"
+    },
+    {
+      "id": "TWR-PERI-ST100",
+      "manufacturer": "PERI",
+      "model": "ST100",
+      "system": "modular_roseta",
+      "load_capacity_kn": 200.0,
+      "module_height_m": 1.00,
+      "base_dimension_m": 1.50,
+      "max_height_m": 30.0,
+      "weight_per_module_kg": 45.0,
+      "includes_bracing": true,
+      "price_per_module_brl": 25.00,
+      "notes": "Torre pesada PERI, capacidade 20tf, para OAE"
+    },
+    {
+      "id": "TWR-CUPLOCK",
+      "manufacturer": "Genérico",
+      "model": "Cuplock Standard",
+      "system": "cuplock",
+      "load_capacity_kn": 90.0,
+      "module_height_m": 1.00,
+      "base_dimension_m": 1.20,
+      "max_height_m": 20.0,
+      "weight_per_module_kg": 25.0,
+      "includes_bracing": false,
+      "price_per_module_brl": 12.00,
+      "notes": "Sistema Cuplock tradicional, contraventamento separado"
+    },
+    {
+      "id": "TWR-RINGLOCK",
+      "manufacturer": "Genérico",
+      "model": "Ringlock Standard",
+      "system": "ringlock",
+      "load_capacity_kn": 110.0,
+      "module_height_m": 0.50,
+      "base_dimension_m": 1.20,
+      "max_height_m": 25.0,
+      "weight_per_module_kg": 18.0,
+      "includes_bracing": true,
+      "price_per_module_brl": 14.00,
+      "notes": "Sistema Ringlock, roseta a cada 50cm, flexível em altura"
+    }
+  ],
+  "distribution_beams": [
+    {
+      "id": "VD-VM130",
+      "manufacturer": "Versatil Metal",
+      "model": "VM130",
+      "height_mm": 130,
+      "moment_capacity_knm": 7.8,
+      "max_span_m": 3.5,
+      "weight_per_m_kg": 6.5,
+      "price_per_m_brl": 8.00,
+      "notes": "Viga H de madeira reforçada, mais usada no Brasil"
+    },
+    {
+      "id": "VD-GT24",
+      "manufacturer": "PERI",
+      "model": "GT24",
+      "height_mm": 240,
+      "moment_capacity_knm": 14.5,
+      "max_span_m": 5.0,
+      "weight_per_m_kg": 5.9,
+      "price_per_m_brl": 12.00,
+      "notes": "Viga treliçada PERI, alta capacidade"
+    },
+    {
+      "id": "VD-H20",
+      "manufacturer": "Doka",
+      "model": "H20",
+      "height_mm": 200,
+      "moment_capacity_knm": 5.0,
+      "max_span_m": 3.0,
+      "weight_per_m_kg": 4.5,
+      "price_per_m_brl": 10.00,
+      "notes": "Viga H de madeira Doka, uso padrão"
+    },
+    {
+      "id": "VD-MADEIRA-6x16",
+      "manufacturer": "Genérico",
+      "model": "Pontalete 6x16cm",
+      "height_mm": 160,
+      "moment_capacity_knm": 2.5,
+      "max_span_m": 2.0,
+      "weight_per_m_kg": 4.8,
+      "price_per_m_brl": 4.00,
+      "notes": "Viga de madeira serrada, uso simples"
+    }
+  ]
+}
