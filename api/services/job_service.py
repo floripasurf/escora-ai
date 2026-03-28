@@ -13,14 +13,12 @@ def create_job(filename: str, input_path: str, office_name: Optional[str] = None
     job_id = str(uuid.uuid4())[:8]
     job = {
         "id": job_id,
-        "tenant_id": "pilot",
         "status": "pending",
         "filename": filename,
         "office_name": office_name,
         "input_path": input_path,
-        "scale": None,
-        "pe_direito_m": None,
-        "preview_data": None,
+        "output_dxf_path": None,
+        "revision_path": None,
         "results_data": None,
         "error_message": None,
         "created_at": datetime.utcnow(),
@@ -40,3 +38,7 @@ def update_job(job_id: str, **kwargs) -> Optional[dict]:
         job.update(kwargs)
         job["updated_at"] = datetime.utcnow()
     return job
+
+
+def list_jobs() -> list:
+    return sorted(_jobs.values(), key=lambda j: j["created_at"], reverse=True)
