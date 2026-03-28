@@ -176,6 +176,7 @@ def run_pipeline(filepath: str, scale_override: Optional[float] = None) -> Pipel
                 pe_direito_is_default=pe_direito_is_default,
                 slab_thickness_m=slab_thickness,
                 learned_section_height_m=learned_section_height,
+                slab_type=classification.slab_type.value,
             )
             warnings.extend(calculation.warnings)
         except Exception as e:

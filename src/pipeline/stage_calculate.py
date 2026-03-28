@@ -23,6 +23,10 @@ from src.engine.beam_calculator import (
 )
 from src.engine.grid_distributor import distribute_shores, PillarExclusion
 from src.engine.shore_selector import load_catalog, select_shore
+from src.engine.tower_selector import (
+    load_tower_catalog, decide_support_type, select_tower,
+    select_distribution_beam, SupportType,
+)
 from src.engine.validator import validate_result
 from src.utils.constants import (
     GAMMA_F, Q_SOBRECARGA_DEFAULT, ESPESSURA_DEFAULT, ALTURA_DEFAULT,
@@ -213,6 +217,7 @@ def run_calculation(
     pe_direito_is_default: bool = False,
     slab_thickness_m: Optional[float] = None,
     learned_section_height_m: Optional[float] = None,
+    slab_type: str = "solid",
 ) -> CalculationResult:
     """Run the full calculation pipeline.
 
@@ -221,6 +226,7 @@ def run_calculation(
         pe_direito_m: Floor-to-ceiling height in meters.
         pe_direito_is_default: True if pe_direito was not found in DXF.
         slab_thickness_m: Slab thickness override. None = use default.
+        slab_type: Detected slab type (solid, ribbed, waffle, etc.)
 
     Returns:
         CalculationResult with beam/slab shoring results.
@@ -265,6 +271,13 @@ def run_calculation(
     except FileNotFoundError:
         warnings.append("Catálogo de escoras não encontrado — usando valores padrão")
         catalog = []
+
+    # Load tower and distribution beam catalog
+    try:
+        tower_catalog, dist_beam_catalog = load_tower_catalog()
+    except FileNotFoundError:
+        warnings.append("Catálogo de torres não encontrado")
+        tower_catalog, dist_beam_catalog = [], []
 
     # Slab thickness
     thickness = slab_thickness_m or ESPESSURA_DEFAULT
@@ -317,14 +330,58 @@ def run_calculation(
             continue
 
         load_per_shore_estimate = total_linear_load * 1.0
+
+        # Decide: telescopic shore or tower?
+        support_type, decision_reasons = decide_support_type(
+            required_height_m=shore_height,
+            load_per_point_kn=load_per_shore_estimate,
+            slab_thickness_m=thickness,
+            span_m=beam_length,
+            slab_type=slab_type,
+        )
+
+        selected_tower = None
+        selected_dist_beam = None
+
+        if support_type == SupportType.TOWER and tower_catalog:
+            selected_tower = select_tower(tower_catalog, shore_height, load_per_shore_estimate)
+            if selected_tower:
+                warnings.append(
+                    f"Viga {beam.name or 'sem nome'} — torre {selected_tower.model} "
+                    f"({selected_tower.manufacturer}): {'; '.join(decision_reasons)}"
+                )
+                # Select distribution beam if available
+                if dist_beam_catalog:
+                    selected_dist_beam = select_distribution_beam(
+                        dist_beam_catalog, span_m=1.0, load_kn_m=total_linear_load,
+                    )
+
         selected_shore = select_shore(catalog, shore_height, load_per_shore_estimate) if catalog else None
 
         if not selected_shore:
-            warnings.append(
-                f"Viga {beam.name or 'sem nome'} — nenhuma escora compatível "
-                f"(altura {shore_height:.2f}m, carga {load_per_shore_estimate:.1f} kN)"
-            )
-            continue
+            if selected_tower:
+                # Create a synthetic ShoreCatalogEntry from tower for compatibility
+                from src.models.shore import ShoreCatalogEntry
+                selected_shore = ShoreCatalogEntry(
+                    id=selected_tower.id,
+                    manufacturer=selected_tower.manufacturer,
+                    model=f"Torre {selected_tower.model}",
+                    type="tower",
+                    height_min_m=0.0,
+                    height_max_m=selected_tower.max_height_m,
+                    load_capacity_kn=selected_tower.load_capacity_kn,
+                    weight_kg=selected_tower.total_weight_kg(shore_height),
+                    tube_external_mm=0,
+                    tube_internal_mm=0,
+                    base_plate_mm=selected_tower.base_dimension_m * 1000,
+                    price_reference_brl=selected_tower.total_price_brl(shore_height),
+                )
+            else:
+                warnings.append(
+                    f"Viga {beam.name or 'sem nome'} — nenhuma escora/torre compatível "
+                    f"(altura {shore_height:.2f}m, carga {load_per_shore_estimate:.1f} kN)"
+                )
+                continue
 
         start_pt = beam.geometry[0] if len(beam.geometry) >= 2 else (0, 0)
         end_pt = beam.geometry[1] if len(beam.geometry) >= 2 else (beam_length, 0)
@@ -429,13 +486,47 @@ def run_calculation(
         estimated_shores = max(1, int(slab.area_m2 / (ESPACAMENTO_MAX_DEFAULT ** 2)))
         load_per_shore_estimate = total_load / estimated_shores
 
+        # Decide: telescopic shore or tower?
+        slab_support_type, slab_decision_reasons = decide_support_type(
+            required_height_m=slab_shore_height,
+            load_per_point_kn=load_per_shore_estimate,
+            slab_thickness_m=thickness,
+            slab_type=slab_type,
+        )
+
+        slab_tower = None
+        if slab_support_type == SupportType.TOWER and tower_catalog:
+            slab_tower = select_tower(tower_catalog, slab_shore_height, load_per_shore_estimate)
+            if slab_tower:
+                warnings.append(
+                    f"Laje (área {slab.area_m2:.1f}m²) — torre {slab_tower.model}: "
+                    f"{'; '.join(slab_decision_reasons)}"
+                )
+
         selected_shore = select_shore(catalog, slab_shore_height, load_per_shore_estimate) if catalog else None
 
         if not selected_shore:
-            warnings.append(
-                f"Laje (área {slab.area_m2:.1f}m²) — nenhuma escora compatível "
-                f"(altura {slab_shore_height:.2f}m, carga {load_per_shore_estimate:.1f} kN)"
-            )
+            if slab_tower:
+                from src.models.shore import ShoreCatalogEntry
+                selected_shore = ShoreCatalogEntry(
+                    id=slab_tower.id,
+                    manufacturer=slab_tower.manufacturer,
+                    model=f"Torre {slab_tower.model}",
+                    type="tower",
+                    height_min_m=0.0,
+                    height_max_m=slab_tower.max_height_m,
+                    load_capacity_kn=slab_tower.load_capacity_kn,
+                    weight_kg=slab_tower.total_weight_kg(slab_shore_height),
+                    tube_external_mm=0,
+                    tube_internal_mm=0,
+                    base_plate_mm=slab_tower.base_dimension_m * 1000,
+                    price_reference_brl=slab_tower.total_price_brl(slab_shore_height),
+                )
+            else:
+                warnings.append(
+                    f"Laje (área {slab.area_m2:.1f}m²) — nenhuma escora/torre compatível "
+                    f"(altura {slab_shore_height:.2f}m, carga {load_per_shore_estimate:.1f} kN)"
+                )
             slab_results.append(SlabShoringResult(
                 polygon=polygon,
                 thickness_m=thickness,
