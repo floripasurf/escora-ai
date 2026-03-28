@@ -1,6 +1,13 @@
-"""Pipeline runner: orchestrates Stages 1-6 sequentially.
+"""Pipeline runner: orchestrates Stages 1-7 sequentially.
 
-Stage 6 (learning) automatically saves detection knowledge after each run.
+Stage 0: Load learning store
+Stage 1: Parse DXF (entities, texts, hatches, dimensions, INSERT blocks)
+Stage 1.5: Region filter (remove detail views, sections, title blocks)
+Stage 1.6: Classify construction type and slab type
+Stage 2: Segment by level
+Stage 3+4: Classify elements + metadata
+Stage 5: Calculation
+Stage 6: Learning
 """
 
 import logging
@@ -12,6 +19,8 @@ from src.pipeline.stage_metadata import extract_pe_direito, extract_level_height
 from src.pipeline.stage_calculate import run_calculation
 from src.pipeline.stage_learn import learn_and_save
 from src.pipeline.learning_store import LearningStore
+from src.parser.region_filter import filter_main_plan
+from src.parser.construction_classifier import classify_construction, ConstructionType
 from src.models.pipeline_models import LevelGroup, PipelineResult
 from src.utils.constants import ALTURA_DEFAULT
 
@@ -68,6 +77,34 @@ def run_pipeline(filepath: str, scale_override: Optional[float] = None) -> Pipel
 
     scale = scale_override or _detect_coordinate_scale(parse)
 
+    # Stage 1.5: Region filter — remove detail views, sections, title blocks
+    (
+        parse.texts, parse.segments, parse.rects,
+        parse.circles, parse.polylines, parse.hatches,
+        parse.dimensions, region_warnings,
+    ) = filter_main_plan(
+        parse.texts, parse.segments, parse.rects,
+        parse.circles, parse.polylines, parse.hatches,
+        parse.dimensions,
+    )
+
+    # Stage 1.6: Classify construction type and slab type
+    classification = classify_construction(
+        texts=parse.texts,
+        layers=parse.layers,
+        segments=parse.segments,
+        rects=parse.rects,
+        hatches=parse.hatches,
+        dimensions=parse.dimensions,
+        polylines=parse.polylines,
+    )
+    logger.info(
+        f"Construction: {classification.construction_type.value} "
+        f"({classification.construction_confidence:.0%}), "
+        f"Slab: {classification.slab_type.value} "
+        f"({classification.slab_confidence:.0%})"
+    )
+
     # Stage 2: Segment by level
     level_segments = segment_by_level(parse)
 
@@ -75,6 +112,19 @@ def run_pipeline(filepath: str, scale_override: Optional[float] = None) -> Pipel
     levels: List[LevelGroup] = []
     warnings: List[str] = []
     all_elements = []
+
+    # Add classification info and region filter warnings
+    warnings.append(
+        f"Tipo de obra: {classification.construction_type.value} "
+        f"({classification.construction_confidence:.0%})"
+    )
+    if classification.slab_type.value != "unknown":
+        warnings.append(
+            f"Tipo de laje: {classification.slab_type.value} "
+            f"({classification.slab_confidence:.0%})"
+        )
+    warnings.extend(classification.signals)
+    warnings.extend(region_warnings)
 
     for seg in level_segments:
         elements = classify_elements(
@@ -134,6 +184,8 @@ def run_pipeline(filepath: str, scale_override: Optional[float] = None) -> Pipel
     result = PipelineResult(
         filename=parse.filename,
         scale=scale,
+        construction_type=classification.construction_type.value,
+        slab_type=classification.slab_type.value,
         levels=levels,
         warnings=warnings,
         calculation=calculation,

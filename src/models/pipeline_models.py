@@ -58,6 +58,8 @@ class PipelineResult(BaseModel):
     """Complete result of the interpretation pipeline."""
     filename: str
     scale: float = Field(default=1.0, description="Drawing scale factor (DXF units -> meters)")
+    construction_type: Optional[str] = Field(default=None, description="Detected construction type")
+    slab_type: Optional[str] = Field(default=None, description="Detected slab type")
     levels: List[LevelGroup] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
