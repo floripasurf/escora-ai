@@ -24,21 +24,21 @@ class TextClassification:
 BEAM_PATTERNS = [
     (re.compile(r"\bVIGA\s*\d*\w*", re.IGNORECASE), 0.95),
     (re.compile(r"\bVG[-.]?\d+", re.IGNORECASE), 0.90),
-    (re.compile(r"\bV\d+\w*\b"), 0.85),
+    (re.compile(r"\bV\d+\w*\b", re.IGNORECASE), 0.85),  # case-insensitive: v1 = V1
     (re.compile(r"\bVIGAS?\b", re.IGNORECASE), 0.80),
 ]
 
 PILLAR_PATTERNS = [
     (re.compile(r"\bPILAR\s*\d*\w*", re.IGNORECASE), 0.95),
     (re.compile(r"\bPIL[-.]?\d+", re.IGNORECASE), 0.90),
-    (re.compile(r"\bP\d+\w*\b"), 0.85),
+    (re.compile(r"\bP\d+\w*\b", re.IGNORECASE), 0.85),  # case-insensitive: p70 = P70 (Cesar/ALG)
     (re.compile(r"\bPILARES?\b", re.IGNORECASE), 0.80),
 ]
 
 SLAB_PATTERNS = [
     (re.compile(r"\bLAJE\s*\d*\w*", re.IGNORECASE), 0.95),
     (re.compile(r"\bLJ[-.]?\d+", re.IGNORECASE), 0.90),
-    (re.compile(r"\bL\d+\w*\b"), 0.85),
+    (re.compile(r"\bL\d+\w*\b", re.IGNORECASE), 0.85),  # case-insensitive: l1 = L1
     (re.compile(r"\bLAJES?\b", re.IGNORECASE), 0.80),
 ]
 
