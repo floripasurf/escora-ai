@@ -2,6 +2,7 @@
 
 import csv
 import logging
+from datetime import date
 from pathlib import Path
 from typing import Optional
 
@@ -9,6 +10,8 @@ import ezdxf
 
 from src.pipeline.runner import run_pipeline
 from src.models.pipeline_models import ElementType
+from src.output.report_data import build_report_data, ReportMetadata
+from src.output.pdf_generator import generate_pdf, generate_memoria_calculo, generate_orcamento
 from api.config import settings
 
 logger = logging.getLogger(__name__)
@@ -66,6 +69,37 @@ def process_dxf(input_path: str, job_id: str) -> dict:
     csv_path = str(output_dir / f"{Path(input_path).stem}_BOM.csv")
     _generate_bom_csv(calc, csv_path)
 
+    # Generate PDF reports (memória de cálculo + orçamento)
+    stem = Path(input_path).stem
+    pdf_paths = {}
+    try:
+        metadata = ReportMetadata(
+            project_name=stem,
+            date=date.today().strftime("%d/%m/%Y"),
+            scale=result.scale,
+            dxf_filename=Path(input_path).name,
+        )
+        report_data = build_report_data(calc, metadata)
+
+        # Relatório resumo
+        pdf_report = str(output_dir / f"{stem}_relatorio.pdf")
+        generate_pdf(report_data, pdf_report)
+        pdf_paths["relatorio"] = pdf_report
+
+        # Memória de cálculo
+        pdf_memoria = str(output_dir / f"{stem}_memoria_calculo.pdf")
+        generate_memoria_calculo(report_data, pdf_memoria)
+        pdf_paths["memoria_calculo"] = pdf_memoria
+
+        # Proposta comercial / Orçamento
+        pdf_orcamento = str(output_dir / f"{stem}_orcamento.pdf")
+        generate_orcamento(report_data, pdf_orcamento)
+        pdf_paths["orcamento"] = pdf_orcamento
+
+        logger.info(f"Generated PDFs: {list(pdf_paths.keys())}")
+    except Exception as e:
+        logger.warning(f"PDF generation failed (non-fatal): {e}")
+
     return {
         "beam_count": len(calc.beam_results),
         "pillar_count": pillar_count,
@@ -76,6 +110,7 @@ def process_dxf(input_path: str, job_id: str) -> dict:
         "warnings": result.warnings[:20],  # Limit warnings
         "output_dxf_path": output_dxf,
         "csv_path": csv_path,
+        **pdf_paths,
     }
 
 
