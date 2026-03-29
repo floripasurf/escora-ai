@@ -26,4 +26,6 @@ input/Cesar/
 input/teste*/
 input/*.key
 output/
+!src/output/
+!tests/output/
 uploads/
