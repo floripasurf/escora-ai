@@ -28,6 +28,7 @@ from src.engine.tower_selector import (
     select_distribution_beam, SupportType,
 )
 from src.engine.validator import validate_result
+from src.ml.predictor import ShoringPredictor
 from src.utils.constants import (
     GAMMA_F, Q_SOBRECARGA_DEFAULT, ESPESSURA_DEFAULT, ALTURA_DEFAULT,
     ESPACAMENTO_MAX_DEFAULT, ESPACAMENTO_MAX_VIGA, ESPACAMENTO_POR_ALTURA,
@@ -279,6 +280,14 @@ def run_calculation(
         warnings.append("Catálogo de torres não encontrado")
         tower_catalog, dist_beam_catalog = [], []
 
+    # Load ML predictor (advisory — augments rule-based decisions)
+    try:
+        ml_predictor = ShoringPredictor.load()
+        if ml_predictor.is_loaded:
+            logger.info("ML predictor loaded — predictions will augment rule-based decisions")
+    except Exception:
+        ml_predictor = ShoringPredictor()  # Unloaded, returns None for all predictions
+
     # Slab thickness
     thickness = slab_thickness_m or ESPESSURA_DEFAULT
     thickness_is_default = slab_thickness_m is None
@@ -339,6 +348,85 @@ def run_calculation(
             span_m=beam_length,
             slab_type=slab_type,
         )
+
+        # --- ML advisory prediction ---
+        if ml_predictor.is_loaded:
+            try:
+                import math as _math
+                # Compute beam angle
+                if len(beam.geometry) >= 2:
+                    _dx = beam.geometry[1][0] - beam.geometry[0][0]
+                    _dy = beam.geometry[1][1] - beam.geometry[0][1]
+                    beam_angle = abs(_math.degrees(_math.atan2(_dy, _dx)))
+                else:
+                    beam_angle = 0.0
+
+                # Nearest pillar distance
+                beam_cx = beam.geometry[0][0] if beam.geometry else 0.0
+                beam_cy = beam.geometry[0][1] if beam.geometry else 0.0
+                nearest_pillar = 99.0
+                pillar_count_3m = 0
+                for p in pillars:
+                    if not p.geometry:
+                        continue
+                    px, py = p.geometry[0]
+                    d = _math.hypot(beam_cx - px, beam_cy - py)
+                    if d < nearest_pillar:
+                        nearest_pillar = d
+                    if d <= 3.0:
+                        pillar_count_3m += 1
+
+                # Nearby beam context
+                nearby_beams = []
+                for other_assoc in beam_associations:
+                    ob = other_assoc["beam"]
+                    if ob is beam:
+                        continue
+                    if ob.geometry:
+                        ox, oy = ob.geometry[0]
+                        if _math.hypot(beam_cx - ox, beam_cy - oy) <= 3.0:
+                            nearby_beams.append(ob.length_m or 1.0)
+
+                is_perimeter = nearest_pillar > 2.0 and pillar_count_3m <= 1
+
+                ml_pred = ml_predictor.predict(
+                    beam_length_m=beam_length,
+                    beam_angle_deg=beam_angle,
+                    nearest_pillar_dist_m=nearest_pillar,
+                    pillar_count_3m=pillar_count_3m,
+                    nearby_beam_count=len(nearby_beams),
+                    nearby_beam_avg_length_m=(
+                        sum(nearby_beams) / len(nearby_beams) if nearby_beams else 0.0
+                    ),
+                    is_perimeter=is_perimeter,
+                )
+
+                if ml_pred and ml_pred.is_confident:
+                    beam_name = beam.name or "sem nome"
+                    # Compare ML vs rule-based
+                    rule_type = "tower" if support_type == SupportType.TOWER else "telescopic"
+                    if ml_pred.support_type != rule_type and ml_pred.support_type != "none":
+                        warnings.append(
+                            f"ML: Viga {beam_name} — modelo sugere "
+                            f"'{ml_pred.support_type}' "
+                            f"(confiança {ml_pred.support_confidence:.0%}) "
+                            f"vs regra '{rule_type}'"
+                        )
+                    # Spacing suggestion
+                    if ml_pred.recommended_spacing_m:
+                        warnings.append(
+                            f"ML: Viga {beam_name} — espaçamento sugerido "
+                            f"{ml_pred.recommended_spacing_m:.2f}m"
+                        )
+                    # Equipment suggestion
+                    if ml_pred.recommended_equipment:
+                        warnings.append(
+                            f"ML: Viga {beam_name} — equipamento sugerido "
+                            f"'{ml_pred.recommended_equipment}' "
+                            f"(confiança {ml_pred.equipment_confidence:.0%})"
+                        )
+            except Exception as e:
+                logger.debug(f"ML prediction failed for beam: {e}")
 
         selected_tower = None
         selected_dist_beam = None
