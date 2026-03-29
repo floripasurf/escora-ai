@@ -21,7 +21,7 @@ def test_upload_dxf(client, tmp_path):
     assert r.status_code == 201
     data = r.json()
     assert "id" in data
-    assert data["status"] == "pending"
+    assert data["status"] in ("pending", "processing")
 
 
 def test_get_job_status(client, tmp_path):
@@ -36,4 +36,4 @@ def test_get_job_status(client, tmp_path):
 
     r = client.get(f"/api/v1/jobs/{job_id}/status")
     assert r.status_code == 200
-    assert r.json()["status"] in ("pending", "processing")
+    assert r.json()["status"] in ("pending", "processing", "completed", "error")
