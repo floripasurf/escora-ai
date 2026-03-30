@@ -169,6 +169,16 @@ def run_pipeline(filepath: str, scale_override: Optional[float] = None) -> Pipel
             if slab_thickness is not None:
                 break
 
+        # Collect all rects for nervura detection
+        all_rects = []
+        for seg in level_segments:
+            for r in seg.rects:
+                all_rects.append({
+                    "cx": r.cx, "cy": r.cy,
+                    "width": r.width, "height": r.height,
+                    "area": r.area, "layer": r.layer,
+                })
+
         try:
             calculation = run_calculation(
                 elements=all_elements,
@@ -177,6 +187,7 @@ def run_pipeline(filepath: str, scale_override: Optional[float] = None) -> Pipel
                 slab_thickness_m=slab_thickness,
                 learned_section_height_m=learned_section_height,
                 slab_type=classification.slab_type.value,
+                nervura_rects=all_rects,
             )
             warnings.extend(calculation.warnings)
         except Exception as e:
