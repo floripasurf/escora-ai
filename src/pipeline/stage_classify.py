@@ -36,6 +36,31 @@ def _find_nearest_texts(
     return nearby
 
 
+def _is_nervura_layer(pillars, max_count: int = 60) -> bool:
+    """Detect if pillar candidates are actually nervura/waffle slab ribs.
+
+    Nervura ribs are densely packed (NN distance < 0.5m for most).
+    Real pillars are spaced 3-8m apart. Returns True if the candidates
+    look like nervura rather than real pillars.
+    """
+    if len(pillars) <= max_count:
+        return False
+    import math as _math
+    positions = [(p.cx, p.cy) for p in pillars]
+    tight_count = 0
+    for i, (x1, y1) in enumerate(positions):
+        min_dist = 999.0
+        for j, (x2, y2) in enumerate(positions):
+            if i == j:
+                continue
+            d = _math.hypot(x1 - x2, y1 - y2)
+            if d < min_dist:
+                min_dist = d
+        if min_dist < 0.50:
+            tight_count += 1
+    return tight_count / len(pillars) > 0.50
+
+
 def _classify_layers(
     level: LevelSegment,
     known_beam_layers: Optional[Dict[str, float]] = None,
@@ -126,12 +151,17 @@ def _classify_layers(
                 result[layer] = ElementType.BEAM
 
     # Best pillar layer: highest detection rate (rect pillars found / total rects)
+    # BUT filter out nervura/waffle slab layers — they produce many small, densely
+    # packed rects that look like pillars but aren't.
+    MAX_REALISTIC_PILLARS = 60  # Real buildings rarely have >60 pillars per floor
     best_pillar_layer = None
     best_pillar_rate = 0
     for layer, rect_dicts in rects_by_layer.items():
         pillars = find_pillar_candidates(rect_dicts)
         if not pillars:
             continue
+        if _is_nervura_layer(pillars, MAX_REALISTIC_PILLARS):
+            continue  # Skip — nervura/waffle slab layer
         rate = len(pillars) / max(len(rect_dicts), 1)
         if rate > best_pillar_rate:
             best_pillar_rate = rate
@@ -149,6 +179,8 @@ def _classify_layers(
             continue
         pillars = find_pillar_candidates(rects_by_layer[layer])
         if pillars:
+            if _is_nervura_layer(pillars, MAX_REALISTIC_PILLARS):
+                continue  # Skip — nervura/waffle slab layer
             rate = len(pillars) / max(len(rects_by_layer[layer]), 1)
             if rate >= MIN_LEARNED_LAYER_RATE:
                 result[layer] = ElementType.PILLAR
