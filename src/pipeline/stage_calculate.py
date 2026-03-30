@@ -28,6 +28,7 @@ from src.engine.tower_selector import (
     select_distribution_beam, SupportType,
 )
 from src.engine.validator import validate_result
+from src.engine.nervura_detector import detect_nervura_regions, distribute_nervura_shores
 from src.ml.predictor import ShoringPredictor
 from src.utils.constants import (
     GAMMA_F, Q_SOBRECARGA_DEFAULT, ESPESSURA_DEFAULT, ALTURA_DEFAULT,
@@ -219,6 +220,7 @@ def run_calculation(
     slab_thickness_m: Optional[float] = None,
     learned_section_height_m: Optional[float] = None,
     slab_type: str = "solid",
+    nervura_rects: Optional[List[Dict[str, Any]]] = None,
 ) -> CalculationResult:
     """Run the full calculation pipeline.
 
@@ -657,6 +659,116 @@ def run_calculation(
             selected_shore=selected_shore,
             exclusions=all_exclusions,
         ))
+
+    # === NERVURA (WAFFLE/RIBBED) SLAB SHORING ===
+    # For nervura slabs, shores go on the rib lines (borders between caixões),
+    # not on a uniform grid over the slab surface.
+    # Try nervura detection regardless of slab_type classification —
+    # the classifier may misidentify nervura as solid. If nervura regions
+    # are found from the rect geometry, use them.
+    if nervura_rects:
+        nervura_regions = detect_nervura_regions(nervura_rects, valid_beams)
+        if nervura_regions:
+            warnings.append(
+                f"Laje nervurada detectada — {len(nervura_regions)} região(ões), "
+                f"escoras posicionadas nas nervuras"
+            )
+        for region in nervura_regions:
+            # Shore selection for nervura region
+            nervura_shore_height = pe_direito_m - thickness
+            if nervura_shore_height <= 0:
+                continue
+
+            estimated_shores = max(1, int(region.area_m2 / (ESPACAMENTO_MAX_DEFAULT ** 2)))
+            nerv_load_total = (
+                region.area_m2
+                * (Q_SOBRECARGA_DEFAULT + thickness * 25.0)  # kN/m²
+                * GAMMA_F
+            )
+            nerv_load_per_shore = nerv_load_total / estimated_shores
+
+            nerv_support_type, nerv_reasons = decide_support_type(
+                required_height_m=nervura_shore_height,
+                load_per_point_kn=nerv_load_per_shore,
+                slab_thickness_m=thickness,
+                slab_type=slab_type,
+            )
+
+            nerv_tower = None
+            if nerv_support_type == SupportType.TOWER and tower_catalog:
+                nerv_tower = select_tower(tower_catalog, nervura_shore_height, nerv_load_per_shore)
+
+            nerv_shore = select_shore(catalog, nervura_shore_height, nerv_load_per_shore) if catalog else None
+            if not nerv_shore and nerv_tower:
+                from src.models.shore import ShoreCatalogEntry
+                nerv_shore = ShoreCatalogEntry(
+                    id=nerv_tower.id,
+                    manufacturer=nerv_tower.manufacturer,
+                    model=f"Torre {nerv_tower.model}",
+                    type="tower",
+                    height_min_m=0.0,
+                    height_max_m=nerv_tower.max_height_m,
+                    load_capacity_kn=nerv_tower.load_capacity_kn,
+                    weight_kg=nerv_tower.total_weight_kg(nervura_shore_height),
+                    tube_external_mm=0,
+                    tube_internal_mm=0,
+                    base_plate_mm=nerv_tower.base_dimension_m * 1000,
+                    price_reference_brl=nerv_tower.total_price_brl(nervura_shore_height),
+                )
+            if not nerv_shore:
+                warnings.append(
+                    f"Laje nervurada (área {region.area_m2:.1f}m²) — "
+                    f"nenhuma escora compatível"
+                )
+                continue
+
+            # Place shores on rib lines
+            pillar_pos = [(p.geometry[0][0], p.geometry[0][1])
+                          for p in pillars if p.geometry]
+            rib_shores = distribute_nervura_shores(
+                region=region,
+                max_spacing=_max_spacing_for_slab(thickness),
+                pillar_positions=pillar_pos,
+            )
+
+            if not rib_shores:
+                continue
+
+            # Convert to PositionedShore objects
+            from src.models.shore import PositionedShore
+            load_per = nerv_load_total / len(rib_shores)
+            util = load_per / nerv_shore.load_capacity_kn
+
+            positioned = []
+            for rs in rib_shores:
+                positioned.append(PositionedShore(
+                    x=round(rs.x, 3),
+                    y=round(rs.y, 3),
+                    shore=nerv_shore,
+                    load_applied_kn=round(load_per, 2),
+                    utilization_ratio=round(min(util, 1.0), 4),
+                ))
+
+            slab_results.append(SlabShoringResult(
+                polygon=region.polygon,
+                thickness_m=thickness,
+                thickness_is_default=thickness_is_default,
+                area_m2=region.area_m2,
+                is_cantilever=False,
+                total_load_kn=round(nerv_load_total, 2),
+                shores=positioned,
+                grid_nx=len(region.v_rib_lines),
+                grid_ny=len(region.h_rib_lines),
+                spacing_x_m=round((region.x_max - region.x_min) / max(len(region.v_rib_lines), 1), 2),
+                spacing_y_m=round((region.y_max - region.y_min) / max(len(region.h_rib_lines), 1), 2),
+                selected_shore=nerv_shore,
+                exclusions=all_exclusions,
+            ))
+
+            warnings.append(
+                f"Laje nervurada: {len(positioned)} escoras em "
+                f"{len(region.h_rib_lines)} nervuras H + {len(region.v_rib_lines)} nervuras V"
+            )
 
     # === SLAB-BEAM SHORE PROXIMITY FILTER ===
     # Remove slab shores that are too close to any beam shore.
