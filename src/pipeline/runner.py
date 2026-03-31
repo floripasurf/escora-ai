@@ -179,6 +179,33 @@ def run_pipeline(filepath: str, scale_override: Optional[float] = None) -> Pipel
                     "area": r.area, "layer": r.layer,
                 })
 
+        # Collect segments from beam layers for slab derivation fallback.
+        # When classified beams are too sparse for polygonize, we use ALL
+        # beam candidates from the beam layer (not just the ones that pass
+        # text-based classification) to derive slab panels.
+        all_beam_layer_segs = []
+        for seg in level_segments:
+            # Get beam layers for this level (same logic as stage_classify)
+            from src.pipeline.stage_classify import _classify_layers
+            from src.models.pipeline_models import ElementType as _ET
+            layer_types = _classify_layers(seg)
+            beam_layers = {l for l, t in layer_types.items() if t == _ET.BEAM}
+            if not beam_layers:
+                continue
+            for s in seg.segments:
+                if s.layer not in beam_layers:
+                    continue
+                if s.type == "H":
+                    all_beam_layer_segs.append({
+                        "type": "H", "y": s.y * scale,
+                        "x_min": s.x_min * scale, "x_max": s.x_max * scale,
+                    })
+                else:
+                    all_beam_layer_segs.append({
+                        "type": "V", "x": s.x * scale,
+                        "y_min": s.y_min * scale, "y_max": s.y_max * scale,
+                    })
+
         try:
             calculation = run_calculation(
                 elements=all_elements,
@@ -188,6 +215,7 @@ def run_pipeline(filepath: str, scale_override: Optional[float] = None) -> Pipel
                 learned_section_height_m=learned_section_height,
                 slab_type=classification.slab_type.value,
                 nervura_rects=all_rects,
+                beam_layer_segments=all_beam_layer_segs,
             )
             warnings.extend(calculation.warnings)
         except Exception as e:

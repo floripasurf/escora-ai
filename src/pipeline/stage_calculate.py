@@ -14,7 +14,7 @@ from src.models.calculation_models import (
     BeamShoringResult, SlabShoringResult, CalculationResult,
 )
 from src.models.slab import Slab
-from src.engine.slab_builder import derive_slabs_from_beams, detect_cantilever_slabs
+from src.engine.slab_builder import derive_slabs_from_beams, derive_slabs_from_axes, detect_cantilever_slabs
 from src.engine.load_calculator import calculate_total_load
 from src.engine.beam_calculator import (
     calculate_beam_total_linear_load,
@@ -221,6 +221,7 @@ def run_calculation(
     learned_section_height_m: Optional[float] = None,
     slab_type: str = "solid",
     nervura_rects: Optional[List[Dict[str, Any]]] = None,
+    beam_layer_segments: Optional[List[Dict[str, Any]]] = None,
 ) -> CalculationResult:
     """Run the full calculation pipeline.
 
@@ -547,6 +548,31 @@ def run_calculation(
 
     # === SLAB SHORING ===
     slab_polygons = derive_slabs_from_beams(valid_beams)
+
+    # Fallback: if classified beams are too sparse for polygonize, use ALL beam
+    # candidates from the beam layer with extended snapping tolerance.
+    # This finds slab panels that the sparse classified beam set misses.
+    if not slab_polygons and beam_layer_segments:
+        from src.parser.segment_classifier import find_beam_candidates
+        all_candidates = find_beam_candidates(beam_layer_segments)
+        if all_candidates:
+            h_axes = [
+                (bc.axis_coord, bc.start, bc.end)
+                for bc in all_candidates if bc.direction == "x"
+            ]
+            v_axes = [
+                (bc.axis_coord, bc.start, bc.end)
+                for bc in all_candidates if bc.direction == "y"
+            ]
+            slab_polygons = derive_slabs_from_axes(h_axes, v_axes)
+            if slab_polygons:
+                total_area = sum(p.area for p in slab_polygons)
+                warnings.append(
+                    f"Lajes derivadas de {len(all_candidates)} eixos de viga "
+                    f"(tolerância estendida) — {len(slab_polygons)} painéis, "
+                    f"área total {total_area:.0f}m²"
+                )
+
     cantilever_flags = detect_cantilever_slabs(slab_polygons, pillars)
 
     pillar_exclusions = _build_pillar_exclusions(pillars)

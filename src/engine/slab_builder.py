@@ -19,6 +19,11 @@ MIN_SLAB_AREA = 0.5  # m2 -- anything smaller is noise
 # Max gap to bridge between beam endpoints and perpendicular beams (pillar width)
 SNAP_TOLERANCE = 0.60  # m — typical pillar is 0.20-0.50m wide
 
+# Extended tolerance for beam axes — bridges larger gaps across pillars
+# Real pillar widths range from 0.20m to 1.0m+, and beams stop at pillar faces
+# leaving gaps of pillar_width + 2 * beam_offset ≈ 0.5-2.0m
+SNAP_TOLERANCE_AXES = 2.00  # m
+
 
 def _classify_beam_direction(start: Tuple, end: Tuple) -> str:
     """Return 'H' or 'V' based on major axis."""
@@ -126,9 +131,92 @@ def _extend_beams_to_grid(beams: List[ClassifiedElement]) -> List[LineString]:
     return lines
 
 
+def _extend_axes_to_grid(
+    h_axes: List[Tuple[float, float, float]],
+    v_axes: List[Tuple[float, float, float]],
+    tolerance: float = SNAP_TOLERANCE_AXES,
+) -> List[LineString]:
+    """Extend beam axis lines to snap onto perpendicular axes.
+
+    Similar to _extend_beams_to_grid but operates on raw beam axes
+    (midline between parallel pairs) rather than ClassifiedElement objects.
+    Uses a larger tolerance to bridge pillar gaps.
+
+    Args:
+        h_axes: List of (y, x_start, x_end) for horizontal beam axes.
+        v_axes: List of (x, y_start, y_end) for vertical beam axes.
+        tolerance: Maximum gap to bridge between endpoints and perpendicular axes.
+    """
+    lines = []
+
+    for y, x_min, x_max in h_axes:
+        new_x_min = x_min
+        new_x_max = x_max
+
+        for vx, vy_min, vy_max in v_axes:
+            # Extend left
+            if vx < x_min and x_min - vx <= tolerance:
+                if vy_min <= y + tolerance and vy_max >= y - tolerance:
+                    new_x_min = min(new_x_min, vx)
+            # Extend right
+            if vx > x_max and vx - x_max <= tolerance:
+                if vy_min <= y + tolerance and vy_max >= y - tolerance:
+                    new_x_max = max(new_x_max, vx)
+
+        lines.append(LineString([(new_x_min, y), (new_x_max, y)]))
+
+    for x, y_min, y_max in v_axes:
+        new_y_min = y_min
+        new_y_max = y_max
+
+        for hy, hx_min, hx_max in h_axes:
+            # Extend down
+            if hy < y_min and y_min - hy <= tolerance:
+                if hx_min <= x + tolerance and hx_max >= x - tolerance:
+                    new_y_min = min(new_y_min, hy)
+            # Extend up
+            if hy > y_max and hy - y_max <= tolerance:
+                if hx_min <= x + tolerance and hx_max >= x - tolerance:
+                    new_y_max = max(new_y_max, hy)
+
+        lines.append(LineString([(x, new_y_min), (x, new_y_max)]))
+
+    return lines
+
+
 def derive_slabs_from_beams(beams: List[ClassifiedElement]) -> List[Polygon]:
     """Extract closed slab panels from the beam grid."""
     lines = _extend_beams_to_grid(beams)
+
+    if not lines:
+        return []
+
+    merged = unary_union(lines)
+    polygons = list(polygonize(merged))
+    return [p for p in polygons if p.area >= MIN_SLAB_AREA]
+
+
+def derive_slabs_from_axes(
+    h_axes: List[Tuple[float, float, float]],
+    v_axes: List[Tuple[float, float, float]],
+) -> List[Polygon]:
+    """Extract closed slab panels from beam axis lines.
+
+    Uses all beam candidates (not just classified beams) with extended
+    snapping tolerance to bridge pillar gaps. This produces slab panels
+    even when the classified beam set is too sparse for polygonize.
+
+    Args:
+        h_axes: List of (y, x_start, x_end) for horizontal beam axes.
+        v_axes: List of (x, y_start, y_end) for vertical beam axes.
+
+    Returns:
+        List of Shapely Polygon representing slab panels.
+    """
+    if not h_axes and not v_axes:
+        return []
+
+    lines = _extend_axes_to_grid(h_axes, v_axes)
 
     if not lines:
         return []
