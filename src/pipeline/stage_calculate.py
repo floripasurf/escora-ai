@@ -546,10 +546,9 @@ def run_calculation(
             br.shores = filtered_shores
             br.shore_count = len(filtered_shores)
 
-    # === DETECT NERVURA REGIONS (for rib-based shore placement within slab panels) ===
+    # === NERVURA DETECTION (disabled — requires more learning from executed files) ===
+    # TODO: re-enable once we have reference projects with correct nervura shoring
     nervura_regions = []
-    if nervura_rects:
-        nervura_regions = detect_nervura_regions(nervura_rects, valid_beams)
 
     # === SLAB SHORING ===
     slab_polygons = derive_slabs_from_beams(valid_beams)
