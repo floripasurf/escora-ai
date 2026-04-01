@@ -247,14 +247,83 @@ Quando duas ou mais linhas coincidem na mesma posição:
 | `layer` contendo "EIXO"/"AXIS" | — | Layer de eixos estruturais |
 | `layer` contendo "HACH" | — | Layer de hachuras |
 
-### Regras para Filtragem de Ruído no Parser
+### Uso de Cada Tipo de Dado no Parser
 
-1. **Linhas de cota** (estreitas, layer COTA/DIM) → **EXCLUIR** da detecção de vigas/pilares
-2. **Eixos** (traço-ponto, layer EIXO) → **EXCLUIR** da detecção geométrica, mas USAR para identificar grid estrutural
-3. **Hachuras** (estreitas, layer HACH) → **EXCLUIR** da detecção geométrica, mas USAR para identificar tipo de material
-4. **Contornos largos** (≥0.50mm, CONTINUOUS) → **PRIORIZAR** como contornos de elementos estruturais
-5. **Tracejadas** → Podem indicar vigas acima do plano de corte (importante para formas de cobertura)
-6. **Traço-dois-pontos** → Projeções de balanço (lajes em balanço / marquises)
+Cada tipo de entidade DXF carrega informação útil para o cálculo de escoramento.
+**Nenhum dado deve ser descartado** — todos servem como validação, enriquecimento
+ou fonte primária de informação estrutural.
+
+#### 1. Cotas (DIMENSION + texto de cota) → ENRIQUECER detecção
+
+**Fonte primária de dimensões reais:**
+- `actual_measurement` → dimensão real em unidades do desenho
+- Texto "14x50", "20/60" perto de viga → **confirma seção** (largura × altura em cm)
+- Cota linear entre pilares → **comprimento real do vão** da viga
+- "h=12", "e=15", "ESP.20" → **espessura da laje** confirmada
+- Cota vertical em corte → **pé-direito** real
+
+**Validação cruzada:**
+- Se cota diz 5.00m entre eixos e geometria mede 5.02m → confiança alta
+- Se cota contradiz geometria → sinalizar warning para revisão
+- Valor da cota é SEMPRE a dimensão REAL (independente da escala do desenho)
+
+**Uso no pipeline:**
+- Alimentar `section_width_m` e `section_height_m` dos elementos classificados
+- Reduzir warnings de "seção não encontrada" quando cota está disponível
+- Calibrar escala automaticamente: `escala = cota_valor / distância_geométrica`
+
+#### 2. Eixos (DASHDOT / layer EIXO/AXIS) → DETECTAR grid estrutural
+
+**Grid de eixos = esqueleto da estrutura:**
+- Intersecção de eixo H com eixo V → **posição provável de pilar**
+- Espaçamento entre eixos paralelos → **vão entre apoios** (pilares)
+- Eixos definem a modulação da estrutura (ex: 5x7m, 4x6m)
+
+**Validação cruzada:**
+- Pilar detectado geometricamente + eixo passando = **confiança alta**
+- Eixo sem pilar detectado → possível pilar não reconhecido
+- Viga entre dois eixos → confirma vão e direção
+
+**Uso no pipeline:**
+- Complementar detecção de pilares quando geometria é ambígua
+- Validar comprimento de vigas contra espaçamento de eixos
+- Identificar módulo estrutural para estimar áreas de laje
+
+#### 3. Hachuras (HATCH) → CONFIRMAR contornos e materiais
+
+**Boundary da hachura = contorno exato do elemento:**
+- Hachura sólida (SOLID) em retângulo pequeno → **pilar confirmado**
+- Boundary polygon entre vigas → **área exata da laje**
+- Hachura granulada/pontos → concreto armado
+- Hachura diagonal 45° → alvenaria (excluir do cálculo estrutural)
+
+**Validação cruzada:**
+- Área de hachura vs área calculada por polygonize → confirma laje
+- Hachura dentro de retângulo + texto "P1" = pilar com confiança máxima
+- Sem hachura em região entre vigas → pode ser vazio (escada, shaft)
+
+**Uso no pipeline:**
+- Usar boundaries de HATCH como fonte alternativa de polígonos de laje
+- Confirmar/rejeitar candidatos a pilar baseado em preenchimento
+- Detectar aberturas (regiões sem hachura dentro do perímetro estrutural)
+
+#### 4. Contornos por espessura de linha → PRIORIZAR detecção
+
+- **Linhas largas** (≥0.50mm, CONTINUOUS) → contornos de elementos cortados pelo plano (pilares, vigas em seção)
+- **Linhas estreitas** (0.25mm) → elementos em vista, detalhes secundários
+- **Prioridade de confiança**: elemento detectado em linha larga > elemento em linha estreita
+
+#### 5. Linhas tracejadas (DASHED/HIDDEN) → VIGAS OCULTAS
+
+- Vigas acima do plano de corte aparecem tracejadas em planta
+- Em plantas de cobertura: vigas abaixo aparecem tracejadas
+- **Não ignorar** — podem ser vigas estruturais importantes para escoramento
+
+#### 6. Traço-dois-pontos → BALANÇOS
+
+- Projeções de pavimentos em balanço, marquises, beirais
+- Indica laje em balanço → **escoramento com fator de segurança maior**
+- Reforça detecção de cantilever no `detect_cantilever_slabs()`
 
 ### Interpretação de Cotas para Seções de Vigas
 
@@ -269,23 +338,27 @@ Padrões de texto de cota associados a vigas:
 
 ```
 PILAR em planta:
-  → Retângulo fechado
-  → Linhas contínuas largas (cortado pelo plano)
-  → Possível hachura interna (concreto)
-  → Eixo traço-ponto no centro
-  → Nomenclatura "P1", "P2" próxima
+  → Retângulo fechado com linhas contínuas largas (cortado pelo plano)
+  → Possível hachura interna (SOLID ou granulado = concreto)
+  → Eixo traço-ponto passando pelo centro (confirma posição)
+  → Nomenclatura "P1", "P2" próxima (confirma tipo)
+  → Cota de seção "20x40" associada (confirma dimensões)
 
 VIGA em planta de forma:
-  → Par de linhas paralelas
+  → Par de linhas paralelas (largura da viga)
   → Linhas contínuas (largas se cortadas, estreitas se em vista)
-  → Nomenclatura "V1", "V2" próxima
-  → Cota de seção "bxh" associada
-  → Tracejada se acima do plano de corte
+  → Nomenclatura "V1", "V2" próxima (confirma tipo)
+  → Cota de seção "bxh" associada (confirma dimensões)
+  → Cota linear ao longo do eixo (confirma comprimento/vão)
+  → Tracejada se acima do plano de corte (não ignorar!)
+  → Eixos nas extremidades (confirmam vão entre apoios)
 
 LAJE:
-  → Área delimitada por vigas
-  → Possível hachura interna
-  → Nomenclatura "L1", "L2" no centro
-  → Indicação de espessura "h=12"
-  → Setas de armadura (direção principal)
+  → Área delimitada por vigas (perímetro = vigas)
+  → Hachura interna (boundary = contorno exato da laje)
+  → Nomenclatura "L1", "L2" no centro (confirma tipo)
+  → Indicação de espessura "h=12" (confirma dimensão)
+  → Setas de armadura (direção principal de esforço)
+  → Cota de espessura em corte (confirma e=Xcm)
+  → Traço-dois-pontos = projeção de balanço (cantilever)
 ```
