@@ -182,6 +182,17 @@
             color: white;
         }
         .btn-accent:hover { background: #2563eb; }
+        .btn-danger {
+            background: transparent;
+            color: var(--red);
+            border: 1px solid var(--red);
+        }
+        .btn-danger:hover { background: rgba(239, 68, 68, 0.15); }
+        .btn-pdf {
+            background: #7c3aed;
+            color: white;
+        }
+        .btn-pdf:hover { background: #6d28d9; }
 
         .actions {
             display: flex;
@@ -387,6 +398,21 @@
             };
         }
 
+        async function deleteJob(jobId) {
+            if (!confirm('Remover este projeto?')) return;
+            try {
+                const res = await fetch(`${API}/jobs/${jobId}`, { method: 'DELETE' });
+                if (res.ok) {
+                    delete jobs[jobId];
+                    renderJobs();
+                } else {
+                    alert('Erro ao remover');
+                }
+            } catch (e) {
+                alert('Erro: ' + e.message);
+            }
+        }
+
         function toggleBeams(jobId) {
             const el = document.getElementById(`beams-${jobId}`);
             el.style.display = el.style.display === 'none' ? 'block' : 'none';
@@ -419,7 +445,12 @@
                 }
 
                 if (job.status === 'error') {
-                    content = `<div style="margin-top:0.8rem;color:var(--red)">${job.error_message || 'Erro desconhecido'}</div>`;
+                    content = `
+                        <div style="margin-top:0.8rem;color:var(--red)">${job.error_message || 'Erro desconhecido'}</div>
+                        <div class="actions">
+                            <button class="btn btn-danger" onclick="deleteJob('${job.id}')">&#10005; Remover</button>
+                        </div>
+                    `;
                 }
 
                 if (job.status === 'done' && job.total_shores != null) {
@@ -474,15 +505,19 @@
                     content += `
                         <div class="actions">
                             <a href="${API}/jobs/${job.id}/download" class="btn btn-primary">
-                                &#8681; Download DXF
+                                &#8681; DXF Escoras
                             </a>
                             <a href="${API}/jobs/${job.id}/download/csv" class="btn btn-accent">
-                                &#128196; Download BOM (CSV)
+                                &#128196; BOM (CSV)
                             </a>
+                            ${job.has_relatorio ? `<a href="${API}/jobs/${job.id}/download/pdf/relatorio" class="btn btn-pdf">&#128196; Relatorio PDF</a>` : ''}
+                            ${job.has_memoria_calculo ? `<a href="${API}/jobs/${job.id}/download/pdf/memoria_calculo" class="btn btn-pdf">&#128196; Memoria Calculo</a>` : ''}
+                            ${job.has_orcamento ? `<a href="${API}/jobs/${job.id}/download/pdf/orcamento" class="btn btn-pdf">&#128196; Orcamento PDF</a>` : ''}
                             <button class="btn btn-green" onclick="uploadRevision('${job.id}')">
-                                &#8679; Enviar Revisao do Engenheiro
+                                &#8679; Enviar Revisao
                             </button>
                             <input type="file" class="revision-input" id="rev-${job.id}" accept=".dxf">
+                            <button class="btn btn-danger" onclick="deleteJob('${job.id}')">&#10005;</button>
                         </div>
                     `;
 
