@@ -14,7 +14,10 @@ from src.parser.text_classifier import classify_text, extract_section, TextClass
 from src.models.pipeline_models import ClassifiedElement, ElementType
 from src.models.confidence import calculate_confidence
 
-# Maximum distance to associate a text annotation with a geometric element
+# Maximum perpendicular distance from beam axis to associate text (m)
+MAX_TEXT_PERP_DIST = 3.0  # text within 3m perpendicular to beam axis
+
+# Maximum distance to associate text with a point element (pillar center)
 MAX_TEXT_DISTANCE = 3.0  # in meters (real coordinates)
 
 # Minimum historical confidence to accept a layer from learning data
@@ -32,6 +35,46 @@ def _find_nearest_texts(
     for t in texts:
         dist = math.hypot(t.x - x, t.y - y)
         if dist <= max_dist:
+            nearby.append(t)
+    return nearby
+
+
+def _find_texts_along_beam(
+    p1: tuple, p2: tuple, texts: List[TextEntity],
+    scale: float, max_perp_dist: float = MAX_TEXT_PERP_DIST,
+) -> List[TextEntity]:
+    """Find texts near the entire beam axis, not just the midpoint.
+
+    Uses perpendicular distance to the beam line segment, with a small
+    extension beyond the endpoints to catch labels placed at beam ends.
+    """
+    # Beam coords are in real meters, text coords in DXF units
+    ax, ay = p1[0] / scale, p1[1] / scale
+    bx, by = p2[0] / scale, p2[1] / scale
+    max_perp_dxf = max_perp_dist / scale
+    # Extend beam segment by 2m at each end to catch end-of-beam labels
+    ext = 2.0 / scale
+    dx, dy = bx - ax, by - ay
+    seg_len = math.hypot(dx, dy)
+    if seg_len < 0.01:
+        return _find_nearest_texts((ax + bx) / 2, (ay + by) / 2, texts, max_perp_dist / scale)
+
+    ux, uy = dx / seg_len, dy / seg_len
+    # Extended endpoints
+    eax, eay = ax - ux * ext, ay - uy * ext
+    ebx, eby = bx + ux * ext, by + uy * ext
+    edx, edy = ebx - eax, eby - eay
+    elen_sq = edx * edx + edy * edy
+
+    nearby = []
+    for t in texts:
+        # Project text onto extended beam line
+        tp = ((t.x - eax) * edx + (t.y - eay) * edy) / elen_sq
+        tp = max(0.0, min(1.0, tp))
+        proj_x = eax + tp * edx
+        proj_y = eay + tp * edy
+        perp_dist = math.hypot(t.x - proj_x, t.y - proj_y)
+        if perp_dist <= max_perp_dxf:
             nearby.append(t)
     return nearby
 
@@ -217,15 +260,15 @@ def classify_elements(
     # Beams from geometry
     beam_candidates = find_beam_candidates(seg_dicts)
     for bc in beam_candidates:
-        # Find nearby text
         if bc.direction == "x":
-            cx = (bc.start + bc.end) / 2 / scale
-            cy = bc.axis_coord / scale
+            beam_geometry = [(bc.start, bc.axis_coord), (bc.end, bc.axis_coord)]
         else:
-            cx = bc.axis_coord / scale
-            cy = (bc.start + bc.end) / 2 / scale
+            beam_geometry = [(bc.axis_coord, bc.start), (bc.axis_coord, bc.end)]
 
-        nearby = _find_nearest_texts(cx, cy, level.texts)
+        # Find text along the entire beam axis (not just midpoint)
+        nearby = _find_texts_along_beam(
+            beam_geometry[0], beam_geometry[1], level.texts, scale,
+        )
         text_cls = TextClassification(ElementType.UNKNOWN, None, 0.0)
         section = None
         for t in nearby:
@@ -246,11 +289,6 @@ def classify_elements(
         agree = text_cls.element_type in (ElementType.BEAM, ElementType.UNKNOWN)
         score_final = calculate_confidence(bc.score, text_cls.score, agree)
 
-        if bc.direction == "x":
-            beam_geometry = [(bc.start, bc.axis_coord), (bc.end, bc.axis_coord)]
-        else:
-            beam_geometry = [(bc.axis_coord, bc.start), (bc.axis_coord, bc.end)]
-
         # For beams, width is always the smaller dimension, height the larger
         if section:
             sec_w = min(section[0], section[1])
@@ -259,13 +297,21 @@ def classify_elements(
             sec_w = bc.width_m
             sec_h = None
 
+        # Fallback name: position-based identifier for unnamed beams
+        beam_name = text_cls.name
+        if not beam_name:
+            if bc.direction == "x":
+                beam_name = f"Eixo Y={bc.axis_coord:.1f} ({bc.start:.1f}-{bc.end:.1f})"
+            else:
+                beam_name = f"Eixo X={bc.axis_coord:.1f} ({bc.start:.1f}-{bc.end:.1f})"
+
         el = ClassifiedElement(
             element_type=ElementType.BEAM,
             geometry=beam_geometry,
             score_geometric=bc.score,
             score_textual=text_cls.score,
             score_final=score_final,
-            name=text_cls.name,
+            name=beam_name,
             section_width_m=sec_w,
             section_height_m=sec_h,
             length_m=bc.length_m,
