@@ -19,7 +19,7 @@ import numpy as np
 try:
     import joblib
 except ImportError:
-    from sklearn.externals import joblib
+    joblib = None  # ML predictions disabled — rule-based engine used instead
 
 logger = logging.getLogger(__name__)
 
