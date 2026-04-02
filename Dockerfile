@@ -7,12 +7,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc libgeos-dev && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy and install Python deps
-COPY pyproject.toml .
-RUN pip install --no-cache-dir .
-
-# Copy application code
+# Copy everything first (needed for pip install . with setuptools)
 COPY . .
+
+# Install Python deps
+RUN pip install --no-cache-dir .
 
 # Create dirs
 RUN mkdir -p uploads output
