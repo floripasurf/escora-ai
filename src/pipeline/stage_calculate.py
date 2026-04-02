@@ -559,10 +559,13 @@ def run_calculation(
     # === SLAB SHORING ===
     slab_polygons = derive_slabs_from_beams(valid_beams)
 
-    # Fallback: if classified beams are too sparse for polygonize, use ALL beam
+    # Fallback: if classified beams produce too few slabs, use ALL beam
     # candidates from the beam layer with extended snapping tolerance.
     # This finds slab panels that the sparse classified beam set misses.
-    if not slab_polygons and beam_layer_segments:
+    # Previously only triggered on 0 slabs — now triggers when < 3 slabs
+    # (a real floor always has multiple slab panels).
+    MIN_SLAB_PANELS = 3
+    if len(slab_polygons) < MIN_SLAB_PANELS and beam_layer_segments:
         from src.parser.segment_classifier import find_beam_candidates
         all_candidates = find_beam_candidates(beam_layer_segments)
         if all_candidates:

@@ -82,16 +82,34 @@ def _find_texts_along_beam(
 def _is_nervura_layer(pillars, max_count: int = 60) -> bool:
     """Detect if pillar candidates are actually nervura/waffle slab ribs.
 
-    Nervura ribs are densely packed (NN distance < 0.5m for most).
-    Real pillars are spaced 3-8m apart. Returns True if the candidates
-    look like nervura rather than real pillars.
+    Nervura ribs are densely packed and/or highly uniform in size.
+    Real pillars are spaced 3-8m apart with varied dimensions.
+    Returns True if the candidates look like nervura rather than real pillars.
+
+    Detection criteria (any triggers rejection):
+    1. Tight packing: NN distance < 1.5m for >50% of candidates
+    2. Uniform size: dominant rect size covers >60% of candidates
     """
     if len(pillars) <= max_count:
         return False
+
     import math as _math
+    from collections import Counter
+
+    # Check 1: Size uniformity — nervura ribs are all the same size
+    sizes = Counter(
+        (round(p.width_m, 2), round(p.depth_m, 2)) for p in pillars
+    )
+    dominant_count = sizes.most_common(1)[0][1] if sizes else 0
+    if dominant_count / len(pillars) > 0.60:
+        return True  # >60% same size = nervura, not pillars
+
+    # Check 2: Tight packing (NN distance < 1.5m for most)
+    # Sample up to 100 for performance
     positions = [(p.cx, p.cy) for p in pillars]
+    sample = positions[:100]
     tight_count = 0
-    for i, (x1, y1) in enumerate(positions):
+    for i, (x1, y1) in enumerate(sample):
         min_dist = 999.0
         for j, (x2, y2) in enumerate(positions):
             if i == j:
@@ -99,9 +117,9 @@ def _is_nervura_layer(pillars, max_count: int = 60) -> bool:
             d = _math.hypot(x1 - x2, y1 - y2)
             if d < min_dist:
                 min_dist = d
-        if min_dist < 0.50:
+        if min_dist < 1.50:
             tight_count += 1
-    return tight_count / len(pillars) > 0.50
+    return tight_count / len(sample) > 0.50
 
 
 def _classify_layers(
