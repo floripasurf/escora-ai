@@ -40,5 +40,12 @@ def update_job(job_id: str, **kwargs) -> Optional[dict]:
     return job
 
 
+def delete_job(job_id: str) -> bool:
+    if job_id in _jobs:
+        del _jobs[job_id]
+        return True
+    return False
+
+
 def list_jobs() -> list:
     return sorted(_jobs.values(), key=lambda j: j["created_at"], reverse=True)

@@ -98,6 +98,7 @@ async def get_status(job_id: str):
     if not job:
         raise HTTPException(404, "Job nao encontrado")
 
+    results = job.get("results_data") or {}
     response = {
         "id": job["id"],
         "status": job["status"],
@@ -107,10 +108,12 @@ async def get_status(job_id: str):
         "updated_at": job["updated_at"],
         "has_output_dxf": job.get("output_dxf_path") is not None,
         "has_csv": job.get("csv_path") is not None,
+        "has_relatorio": bool(results.get("relatorio")),
+        "has_memoria_calculo": bool(results.get("memoria_calculo")),
+        "has_orcamento": bool(results.get("orcamento")),
         "has_revision": job.get("revision_path") is not None,
     }
 
-    results = job.get("results_data")
     if results:
         response.update({
             "beam_count": results.get("beam_count"),
@@ -167,6 +170,58 @@ async def download_csv(job_id: str):
     return FileResponse(
         csv_path,
         media_type="text/csv",
+        filename=filename,
+    )
+
+
+@router.delete("/{job_id}")
+async def delete_job(job_id: str):
+    """Delete a job and its files."""
+    job = job_service.get_job(job_id)
+    if not job:
+        raise HTTPException(404, "Job nao encontrado")
+
+    # Clean up files
+    import shutil
+    from api.config import settings
+    job_dir = Path(settings.output_dir) / job_id
+    if job_dir.exists():
+        shutil.rmtree(job_dir, ignore_errors=True)
+
+    upload_path = job.get("input_path")
+    if upload_path and Path(upload_path).exists():
+        Path(upload_path).unlink(missing_ok=True)
+
+    job_service.delete_job(job_id)
+    return {"message": "Job removido com sucesso"}
+
+
+@router.get("/{job_id}/download/pdf/{report_type}")
+async def download_pdf(job_id: str, report_type: str):
+    """Download a PDF report (relatorio, memoria_calculo, orcamento)."""
+    if report_type not in ("relatorio", "memoria_calculo", "orcamento"):
+        raise HTTPException(400, "Tipo invalido. Use: relatorio, memoria_calculo, orcamento")
+
+    job = job_service.get_job(job_id)
+    if not job:
+        raise HTTPException(404, "Job nao encontrado")
+    if job["status"] != "done":
+        raise HTTPException(400, "Processamento ainda nao concluido")
+
+    results = job.get("results_data") or {}
+    pdf_path = results.get(report_type)
+    if not pdf_path or not Path(pdf_path).exists():
+        raise HTTPException(404, f"PDF {report_type} nao encontrado")
+
+    labels = {
+        "relatorio": "relatorio",
+        "memoria_calculo": "memoria_calculo",
+        "orcamento": "orcamento",
+    }
+    filename = f"{Path(job['filename']).stem}_{labels[report_type]}.pdf"
+    return FileResponse(
+        pdf_path,
+        media_type="application/pdf",
         filename=filename,
     )
 
