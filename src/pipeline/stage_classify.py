@@ -150,24 +150,22 @@ def _classify_layers(
             if rate >= MIN_LEARNED_LAYER_RATE:
                 result[layer] = ElementType.BEAM
 
-    # Best pillar layer: highest detection rate (rect pillars found / total rects)
-    # BUT filter out nervura/waffle slab layers — they produce many small, densely
-    # packed rects that look like pillars but aren't.
+    # Pillar layers: accept ALL layers that contain valid pillar candidates.
+    # Unlike beams (where only 1 layer typically has parallel pairs), pillar fills
+    # are often spread across multiple layers (e.g., layers 21-24 for SOLID fills).
+    # Selecting only 1 layer misses pillars and breaks slab grid detection.
     MAX_REALISTIC_PILLARS = 60  # Real buildings rarely have >60 pillars per floor
-    best_pillar_layer = None
-    best_pillar_rate = 0
+    MIN_PILLAR_RATE = 0.05  # Minimum detection rate to accept a pillar layer
+    MIN_PILLAR_COUNT = 2  # At least 2 pillars to consider a layer structural
     for layer, rect_dicts in rects_by_layer.items():
         pillars = find_pillar_candidates(rect_dicts)
-        if not pillars:
+        if not pillars or len(pillars) < MIN_PILLAR_COUNT:
             continue
         if _is_nervura_layer(pillars, MAX_REALISTIC_PILLARS):
             continue  # Skip — nervura/waffle slab layer
         rate = len(pillars) / max(len(rect_dicts), 1)
-        if rate > best_pillar_rate:
-            best_pillar_rate = rate
-            best_pillar_layer = layer
-    if best_pillar_layer:
-        result[best_pillar_layer] = ElementType.PILLAR
+        if rate >= MIN_PILLAR_RATE:
+            result[layer] = ElementType.PILLAR
 
     # Accept additional pillar layers from learning history
     for layer, confidence in known_pillar_layers.items():
@@ -337,51 +335,153 @@ def classify_elements(
 
     # Only process circles whose radius appears enough times
     structural_radii = {r for r, count in radius_counts.items() if count >= MIN_CIRCLE_CLUSTER}
-    if not structural_radii:
-        return elements
+    if structural_radii:
+        seen_circles: set = set()
+        for c in level.circles:
+            r = c.radius * scale
+            if r < MIN_PILLAR_RADIUS or r > MAX_PILLAR_RADIUS:
+                continue
+            if round(r, 2) not in structural_radii:
+                continue
+            key = (round(c.cx * scale / CIRCLE_CLUSTER_TOLERANCE) * CIRCLE_CLUSTER_TOLERANCE,
+                   round(c.cy * scale / CIRCLE_CLUSTER_TOLERANCE) * CIRCLE_CLUSTER_TOLERANCE)
+            if key in seen_circles:
+                continue
+            seen_circles.add(key)
 
-    seen_circles: set = set()
-    for c in level.circles:
-        r = c.radius * scale
-        if r < MIN_PILLAR_RADIUS or r > MAX_PILLAR_RADIUS:
+            diameter = r * 2
+            geo_score = min(0.85, 0.60 + 0.10 * (1.0 - abs(r - 0.15) / 0.45))
+
+            cx_dxf = c.cx
+            cy_dxf = c.cy
+            nearby = _find_nearest_texts(cx_dxf, cy_dxf, level.texts)
+            text_cls = TextClassification(ElementType.UNKNOWN, None, 0.0)
+            for t in nearby:
+                tc = classify_text(t.content)
+                if tc.element_type == ElementType.PILLAR and tc.score > text_cls.score:
+                    text_cls = tc
+
+            agree = text_cls.element_type in (ElementType.PILLAR, ElementType.UNKNOWN)
+            score_final = calculate_confidence(geo_score, text_cls.score, agree)
+            pillar_name = text_cls.name if agree else None
+
+            el = ClassifiedElement(
+                element_type=ElementType.PILLAR,
+                geometry=[(c.cx * scale, c.cy * scale)],
+                score_geometric=geo_score,
+                score_textual=text_cls.score,
+                score_final=score_final,
+                name=pillar_name,
+                section_width_m=diameter,
+                section_height_m=diameter,
+                source_layer=c.layer,
+            )
+            elements.append(el)
+
+    # === TEXT-BASED PILLAR DETECTION ===
+    # Many DXF files have pillar labels ("P1", "P15") with section text ("30x19")
+    # but no SOLID/rect geometry at that location. Detect pillars from text when
+    # no geometric pillar was found nearby.
+    # This catches pillars that the geometric detector misses.
+    TEXT_PILLAR_DEDUP_DIST = 1.50  # m — don't create text pillar if geometric one within this distance
+    SECTION_SEARCH_RADIUS = 2.0   # m — max distance to find a section text near a pillar label
+
+    import re as _re
+    _pillar_label_re = _re.compile(r"^P(\d+)\w*$", _re.IGNORECASE)
+    _section_re = _re.compile(r"(\d+)\s*[x/]\s*(\d+)")
+
+    # Collect existing pillar positions for deduplication
+    existing_pillar_pos = set()
+    for el in elements:
+        if el.element_type == ElementType.PILLAR and el.geometry:
+            px, py = el.geometry[0]
+            existing_pillar_pos.add((
+                round(px / TEXT_PILLAR_DEDUP_DIST) * TEXT_PILLAR_DEDUP_DIST,
+                round(py / TEXT_PILLAR_DEDUP_DIST) * TEXT_PILLAR_DEDUP_DIST,
+            ))
+
+    # Find pillar label texts
+    pillar_texts = []
+    for t in level.texts:
+        m = _pillar_label_re.match(t.content.strip())
+        if m:
+            pillar_texts.append(t)
+
+    for pt in pillar_texts:
+        # Check if a geometric pillar already exists nearby
+        dedup_key = (
+            round(pt.x * scale / TEXT_PILLAR_DEDUP_DIST) * TEXT_PILLAR_DEDUP_DIST,
+            round(pt.y * scale / TEXT_PILLAR_DEDUP_DIST) * TEXT_PILLAR_DEDUP_DIST,
+        )
+        if dedup_key in existing_pillar_pos:
             continue
-        if round(r, 2) not in structural_radii:
+
+        # Also check euclidean distance to any existing pillar
+        too_close = False
+        for el in elements:
+            if el.element_type == ElementType.PILLAR and el.geometry:
+                px, py = el.geometry[0]
+                if math.hypot(pt.x * scale - px, pt.y * scale - py) < TEXT_PILLAR_DEDUP_DIST:
+                    too_close = True
+                    break
+        if too_close:
             continue
-        # Deduplicate by center position
-        key = (round(c.cx * scale / CIRCLE_CLUSTER_TOLERANCE) * CIRCLE_CLUSTER_TOLERANCE,
-               round(c.cy * scale / CIRCLE_CLUSTER_TOLERANCE) * CIRCLE_CLUSTER_TOLERANCE)
-        if key in seen_circles:
-            continue
-        seen_circles.add(key)
 
-        diameter = r * 2
-        geo_score = min(0.85, 0.60 + 0.10 * (1.0 - abs(r - 0.15) / 0.45))
+        # Look for section text ("bxh") nearby
+        sec_w, sec_h = None, None
+        for t2 in level.texts:
+            if t2 is pt:
+                continue
+            dist = math.hypot(t2.x - pt.x, t2.y - pt.y)
+            if dist > SECTION_SEARCH_RADIUS / scale:
+                continue
+            sm = _section_re.match(t2.content.strip())
+            if sm:
+                # Section in cm -> convert to meters
+                sec_w = int(sm.group(1)) / 100.0
+                sec_h = int(sm.group(2)) / 100.0
+                break
 
-        cx_dxf = c.cx
-        cy_dxf = c.cy
-        nearby = _find_nearest_texts(cx_dxf, cy_dxf, level.texts)
-        # Same as rect pillars: only consider pillar-confirming text
-        text_cls = TextClassification(ElementType.UNKNOWN, None, 0.0)
-        for t in nearby:
-            tc = classify_text(t.content)
-            if tc.element_type == ElementType.PILLAR and tc.score > text_cls.score:
-                text_cls = tc
+        # Default pillar section if no text found
+        if sec_w is None:
+            sec_w = 0.30
+            sec_h = 0.30
 
-        agree = text_cls.element_type in (ElementType.PILLAR, ElementType.UNKNOWN)
-        score_final = calculate_confidence(geo_score, text_cls.score, agree)
-        pillar_name = text_cls.name if agree else None
+        # Try to find the nearest SOLID/rect to use as the real pillar center.
+        # Text labels are offset from the actual pillar position (typically
+        # below or beside it). The SOLID fill IS the pillar outline.
+        RECT_SEARCH_RADIUS = 2.0  # m — search for rect near text label
+        pillar_cx = pt.x * scale
+        pillar_cy = pt.y * scale
+        best_rect_dist = RECT_SEARCH_RADIUS
+        for r in level.rects:
+            rx, ry = r.cx * scale, r.cy * scale
+            rw, rh = r.width * scale, r.height * scale
+            # Rect must be plausible pillar size
+            if rw < 0.10 or rh < 0.10 or rw > 1.0 or rh > 1.0:
+                continue
+            d = math.hypot(rx - pillar_cx, ry - pillar_cy)
+            if d < best_rect_dist:
+                best_rect_dist = d
+                pillar_cx = rx
+                pillar_cy = ry
+                # Use rect dimensions as section (more accurate than text)
+                sec_w = max(sec_w, rw)
+                sec_h = max(sec_h, rh)
 
+        pillar_name = pt.content.strip()
         el = ClassifiedElement(
             element_type=ElementType.PILLAR,
-            geometry=[(c.cx * scale, c.cy * scale)],
-            score_geometric=geo_score,
-            score_textual=text_cls.score,
-            score_final=score_final,
+            geometry=[(pillar_cx, pillar_cy)],
+            score_geometric=0.30 if best_rect_dist < RECT_SEARCH_RADIUS else 0.0,
+            score_textual=0.85,
+            score_final=0.75,
             name=pillar_name,
-            section_width_m=diameter,
-            section_height_m=diameter,
-            source_layer=c.layer,
+            section_width_m=sec_w,
+            section_height_m=sec_h,
+            source_layer="text_detected",
         )
         elements.append(el)
+        existing_pillar_pos.add(dedup_key)
 
     return elements

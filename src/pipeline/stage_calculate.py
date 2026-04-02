@@ -39,10 +39,16 @@ from src.utils.constants import (
 logger = logging.getLogger(__name__)
 
 # Beam-pillar association proximity threshold (m)
-BEAM_PILLAR_PROXIMITY = 0.30
+# Must be generous: pillar labels are offset from beam axis, SOLID fills sit
+# at pillar face (not centerline), and pillar sections can be 0.20-0.60m wide.
+# A pillar center within 1.0m of the beam axis is structurally supporting it.
+BEAM_PILLAR_PROXIMITY = 1.00
 
 # Beam endpoint proximity for cantilever detection (m)
-BEAM_ENDPOINT_PROXIMITY = 0.30
+# Pillar within this distance of beam endpoint = beam is supported there.
+# In DXF, beams end at pillar face, pillar center can be 0.30-0.50m beyond.
+# Text labels add another ~0.30m offset. Total realistic gap: ~1.0m.
+BEAM_ENDPOINT_PROXIMITY = 1.00
 
 # Minimum confidence to include in calculations
 MIN_CONFIDENCE = 0.50
@@ -885,6 +891,27 @@ def run_calculation(
                 br.shores = [s for idx, s in enumerate(br.shores) if idx not in indices_to_remove]
                 br.shore_count = len(br.shores)
 
+    # === POST-PROCESSING REVIEW ===
+    # Final quality check: catches overlapping shores, shores on pillars,
+    # shores on beam axes, and shores outside polygon boundaries.
+    from src.engine.shore_reviewer import review_and_fix
+
+    calc_result = CalculationResult(
+        beam_results=beam_results,
+        slab_results=slab_results,
+        shore_catalog_used=[],
+        total_shores=0,
+        total_load_kn=0.0,
+        pe_direito_m=pe_direito_m,
+        pe_direito_is_default=pe_direito_is_default,
+        warnings=warnings,
+        validation_errors=validation_errors,
+        is_valid=True,
+    )
+
+    review_corrections = review_and_fix(calc_result, pillars, valid_beams)
+    warnings.extend(review_corrections)
+
     # === AGGREGATE RESULTS ===
     all_shores_count = (
         sum(r.shore_count for r in beam_results)
@@ -902,15 +929,9 @@ def run_calculation(
         if r.selected_shore:
             shore_models_used[r.selected_shore.id] = r.selected_shore
 
-    return CalculationResult(
-        beam_results=beam_results,
-        slab_results=slab_results,
-        shore_catalog_used=list(shore_models_used.values()),
-        total_shores=all_shores_count,
-        total_load_kn=round(all_load, 2),
-        pe_direito_m=pe_direito_m,
-        pe_direito_is_default=pe_direito_is_default,
-        warnings=warnings,
-        validation_errors=validation_errors,
-        is_valid=len(validation_errors) == 0,
-    )
+    calc_result.shore_catalog_used = list(shore_models_used.values())
+    calc_result.total_shores = all_shores_count
+    calc_result.total_load_kn = round(all_load, 2)
+    calc_result.is_valid = len(validation_errors) == 0
+
+    return calc_result
