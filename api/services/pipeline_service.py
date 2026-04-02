@@ -189,8 +189,10 @@ def _generate_output_dxf(input_path: str, calc, output_path: str):
             )
 
     # Draw beam shores — crosshair + circle for visibility
-    shore_radius = 0.20  # 20cm radius — visible on structural drawings
-    cross_size = 0.25    # 25cm crosshair arm length
+    # Marker total diameter should be < half the minimum shore spacing
+    # to avoid visual overlap between adjacent shores
+    shore_radius = 0.12  # 12cm radius — clear but compact
+    cross_size = 0.15    # 15cm crosshair arm length
     for br in calc.beam_results:
         for shore in br.shores:
             cx, cy = shore.x, shore.y

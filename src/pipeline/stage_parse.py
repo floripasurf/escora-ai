@@ -96,6 +96,17 @@ class DimensionEntity:
 
 
 @dataclass
+class ArcEntity:
+    """An arc entity (potential curved structural element or corner fillet)."""
+    cx: float
+    cy: float
+    radius: float
+    start_angle: float  # degrees
+    end_angle: float    # degrees
+    layer: str = ""
+
+
+@dataclass
 class ParseResult:
     filename: str
     layers: List[str]
@@ -107,6 +118,7 @@ class ParseResult:
     circles: List[CircleEntity] = field(default_factory=list)
     hatches: List[HatchEntity] = field(default_factory=list)
     dimensions: List[DimensionEntity] = field(default_factory=list)
+    arcs: List[ArcEntity] = field(default_factory=list)
     raw_entities: List[dict] = field(default_factory=list)
 
 
@@ -337,6 +349,7 @@ def parse_dxf(filepath: str) -> ParseResult:
     polylines: List[PolylineEntity] = []
     hatches: List[HatchEntity] = []
     dimensions: List[DimensionEntity] = []
+    arcs: List[ArcEntity] = []
     raw_entities: List[dict] = []
 
     for entity in msp:
@@ -399,6 +412,19 @@ def parse_dxf(filepath: str) -> ParseResult:
         elif etype == "DIMENSION":
             _process_dimension(entity, layer, dimensions)
 
+        elif etype == "ARC":
+            try:
+                arcs.append(ArcEntity(
+                    cx=entity.dxf.center.x,
+                    cy=entity.dxf.center.y,
+                    radius=entity.dxf.radius,
+                    start_angle=entity.dxf.start_angle,
+                    end_angle=entity.dxf.end_angle,
+                    layer=layer,
+                ))
+            except Exception:
+                pass
+
     # Detect scale
     text_contents = [t.content for t in texts]
     detected_scale = detect_scale_from_texts(text_contents)
@@ -406,7 +432,7 @@ def parse_dxf(filepath: str) -> ParseResult:
     logger.info(
         f"Parsed {filename}: {len(segments)} segments, {len(rects)} rects, "
         f"{len(circles)} circles, {len(texts)} texts, {len(hatches)} hatches, "
-        f"{len(dimensions)} dimensions, {len(polylines)} polylines"
+        f"{len(dimensions)} dimensions, {len(polylines)} polylines, {len(arcs)} arcs"
     )
 
     return ParseResult(
@@ -420,5 +446,6 @@ def parse_dxf(filepath: str) -> ParseResult:
         polylines=polylines,
         hatches=hatches,
         dimensions=dimensions,
+        arcs=arcs,
         raw_entities=raw_entities,
     )
