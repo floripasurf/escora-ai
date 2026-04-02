@@ -139,6 +139,62 @@ def _add_line_segment(
         ))
 
 
+def _polyline_to_rect(
+    pts: List[Tuple[float, float]], closed: bool, layer: str,
+    rects: List[RectEntity],
+) -> bool:
+    """Convert a closed rectangular polyline to a RectEntity.
+
+    Recognizes polylines with 4 or 5 points (5th = closing duplicate) where
+    first ≈ last point, forming an axis-aligned rectangle. Many DXF files
+    use POLYLINE instead of SOLID for pillar fills and structural outlines.
+    Returns True if converted, False otherwise.
+    """
+    n = len(pts)
+    # Accept 4 (closed flag) or 5 points (explicit closing vertex)
+    if n < 4 or n > 5:
+        return False
+    # Check quasi-closed: first ≈ last
+    import math
+    if n == 5:
+        if math.hypot(pts[0][0] - pts[4][0], pts[0][1] - pts[4][1]) > 0.01:
+            return False
+        corners = pts[:4]
+    elif closed:
+        corners = pts[:4]
+    else:
+        return False
+
+    xs = [x for x, y in corners]
+    ys = [y for x, y in corners]
+    w = max(xs) - min(xs)
+    h = max(ys) - min(ys)
+    if w < 0.001 or h < 0.001:
+        return False
+
+    # Check rectangularity: all corners should be near the bounding box corners
+    bbox_corners = {
+        (min(xs), min(ys)), (min(xs), max(ys)),
+        (max(xs), min(ys)), (max(xs), max(ys)),
+    }
+    tol = max(w, h) * 0.05  # 5% tolerance
+    matched = 0
+    for cx, cy in corners:
+        for bx, by in bbox_corners:
+            if math.hypot(cx - bx, cy - by) < tol:
+                matched += 1
+                break
+    if matched < 4:
+        return False
+
+    rects.append(RectEntity(
+        cx=(min(xs) + max(xs)) / 2,
+        cy=(min(ys) + max(ys)) / 2,
+        width=w, height=h, area=w * h, layer=layer,
+    ))
+    return True
+
+
 def _decompose_polyline_segments(
     pts: List[Tuple[float, float]], closed: bool, layer: str,
     segments: List[SegmentEntity],
@@ -240,6 +296,7 @@ def _process_insert(
                         closed = sub.is_closed
                     if len(pts) >= 2:
                         polylines.append(PolylineEntity(points=pts, layer=sub_layer, is_closed=closed))
+                        _polyline_to_rect(pts, closed, sub_layer, rects)
                         _decompose_polyline_segments(pts, closed, sub_layer, segments)
                 except Exception:
                     pass
@@ -400,6 +457,8 @@ def parse_dxf(filepath: str) -> ParseResult:
                 polylines.append(PolylineEntity(
                     points=pts, layer=layer, is_closed=closed,
                 ))
+                # Convert closed rectangular polylines to RectEntity (pillar fills)
+                _polyline_to_rect(pts, closed, layer, rects)
                 # Decompose ALL polyline edges into H/V segments (not just 2-point)
                 _decompose_polyline_segments(pts, closed, layer, segments)
 
