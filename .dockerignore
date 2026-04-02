@@ -18,6 +18,9 @@ node_modules/
 docs/
 tests/
 scripts/
-data/
+data/learning.json
+data/test_files/
+data/training/
+data/models/*.joblib
 *.pptx
 .vercel/
