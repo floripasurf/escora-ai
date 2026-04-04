@@ -12,7 +12,9 @@ MIN_BEAM_WIDTH = 0.08
 MIN_BEAM_LENGTH_RATIO = 5.0  # length/width — real beams are elongated
 MAX_PILLAR_AREA = 1.00  # m² — allows large columns (e.g. 0.87x0.94m)
 MIN_PILLAR_AREA = 0.015  # m² — filter hatching/fill SOLIDs
-MIN_PILLAR_DIM = 0.10  # m — NBR minimum for structural columns
+MIN_PILLAR_DIM = 0.14  # m — NBR 6118 min is 19cm; 14cm filters dimension symbols
+                        # (level triangles, tick marks) which are typically 10-12cm
+MAX_PILLAR_ASPECT = 4.0  # aspect ratio — filters elongated dimension/annotation rects
 PILLAR_CLUSTER_TOLERANCE = 0.30  # m — merge pillar SOLIDs within 30cm (same pillar has 2-3 SOLID fills)
 MIN_BEAM_LENGTH_DEFAULT = 1.0  # m — real beams are at least 1m
 BEAM_AXIS_TOLERANCE = 0.50  # m — group beams with similar axis coordinates
@@ -167,7 +169,7 @@ def find_pillar_candidates(
         if min(r["width"], r["height"]) < MIN_PILLAR_DIM:
             continue
         aspect = max(r["width"], r["height"]) / max(min(r["width"], r["height"]), 0.01)
-        if aspect > 6.0:
+        if aspect > MAX_PILLAR_ASPECT:
             continue
         # Deduplicate: round center to 5cm precision (multiple SOLIDs per pillar)
         key = (round(r["cx"] / PILLAR_CLUSTER_TOLERANCE) * PILLAR_CLUSTER_TOLERANCE,
