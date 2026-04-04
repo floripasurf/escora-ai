@@ -17,7 +17,8 @@ from reportlab.platypus import (
 )
 from src.output.report_data import ReportData
 from src.utils.constants import (
-    GAMMA_CONCRETO, GAMMA_F, Q_SOBRECARGA_DEFAULT, ESPESSURA_DEFAULT,
+    GAMMA_CONCRETO, GAMMA_F, Q_SOBRECARGA_DEFAULT, Q_FORMA_DEFAULT,
+    ESPESSURA_DEFAULT,
     ESPACAMENTO_MAX_DEFAULT, ESPACAMENTO_MAX_VIGA, ESPACAMENTO_POR_ALTURA,
     CONTRA_FLECHA, DISTANCIA_BORDA_MIN, DISTANCIA_PILAR_MIN,
 )
@@ -265,6 +266,7 @@ def generate_memoria_calculo(report: ReportData, output_path: str) -> str:
         ["Pé-direito (H)", f"{s.pe_direito_m:.2f} m{pe_nota}", "DXF / input"],
         ["Espessura da laje (h)", f"{s.slab_thickness_m:.2f} m{esp_nota}", "DXF / input"],
         ["Peso específico concreto (γc)", f"{GAMMA_CONCRETO:.1f} kN/m³", "NBR 6120:2019"],
+        ["Peso fôrmas (q_forma)", f"{Q_FORMA_DEFAULT:.1f} kN/m²", "NBR 6120:2019"],
         ["Sobrecarga de trabalho (q)", f"{Q_SOBRECARGA_DEFAULT:.1f} kN/m²", "NBR 15696:2009"],
         ["Coeficiente de majoração (γf)", f"{GAMMA_F:.1f}", "NBR 15696:2009"],
         ["Vigas identificadas", str(s.beam_count), "Parser DXF"],

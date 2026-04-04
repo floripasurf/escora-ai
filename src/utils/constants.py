@@ -4,10 +4,15 @@ Constantes normativas para cálculo de escoramento.
 Referências:
 - NBR 15696:2009 — Fôrmas e escoramentos para estruturas de concreto
 - NBR 6120:2019 — Ações para cálculo de estruturas de edificações
+- NBR 6118:2023 — Projeto de estruturas de concreto
 """
 
-# Peso específico do concreto armado (kN/m³) — NBR 6120:2019
+# Peso específico do concreto armado (kN/m³) — NBR 6120:2019 Tabela 1
 GAMMA_CONCRETO = 25.0
+
+# Peso próprio do sistema de fôrmas (kN/m²) — NBR 6120:2019
+# Compensado 12mm + longarinas + vigas de escoramento ≈ 0.5 kN/m²
+Q_FORMA_DEFAULT = 0.50
 
 # Sobrecarga mínima de trabalho (kN/m²) — NBR 15696:2009
 # Inclui operários, equipamentos e impacto de lançamento
@@ -49,9 +54,10 @@ CONTRA_FLECHA = {
 # Distância mínima da escora à borda da laje (m)
 DISTANCIA_BORDA_MIN = 0.15
 
-# Distância mínima da escora ao pilar (m) — recomendação prática
-# O pilar já sustenta a estrutura; escoras muito próximas são redundantes
-# e atrapalham a circulação na obra. 0.70m da face do pilar.
+# Distância mínima da escora ao pilar (m) — NBR 6118:2023 + prática
+# Zona crítica de punção (NBR 6118 §19.5): 2d da face do pilar.
+# Para laje h=12cm, d≈10cm → zona = 0.20m. Adicionamos margem prática
+# para circulação na obra. 0.70m da face do pilar.
 DISTANCIA_PILAR_MIN = 0.70
 
 # Espessura padrão de laje quando não especificada (m)

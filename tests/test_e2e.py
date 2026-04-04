@@ -86,7 +86,8 @@ class TestE2ESimpleSlab:
         assert result.slab.thickness_m == pytest.approx(0.12)
         assert result.self_weight_kn == pytest.approx(72.0)
         assert result.live_load_kn == pytest.approx(36.0)
-        assert result.total_load_kn == pytest.approx(151.2)
+        # Total = (72.0 + 12.0 forma + 36.0) × 1.4 = 168.0
+        assert result.total_load_kn == pytest.approx(168.0)
 
         # Verificar escoramento
         assert len(result.shores) > 0
