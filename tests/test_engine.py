@@ -48,19 +48,19 @@ class TestLoadCalculator:
         assert load == pytest.approx(36.0)
 
     def test_total_load(self, simple_slab):
-        # (72 + 36) × 1.4 = 151.2 kN
+        # (72 concreto + 12 forma + 36 sobrecarga) × 1.4 = 168.0 kN
         total = calculate_total_load(simple_slab)
-        assert total == pytest.approx(151.2)
+        assert total == pytest.approx(168.0)
 
     def test_total_load_custom_sobrecarga(self, simple_slab):
-        # (72 + 24×2.5) × 1.4 = (72 + 60) × 1.4 = 184.8 kN
+        # (72 + 12 forma + 24×2.5) × 1.4 = (72 + 12 + 60) × 1.4 = 201.6 kN
         total = calculate_total_load(simple_slab, q_sobrecarga=2.5)
-        assert total == pytest.approx(184.8)
+        assert total == pytest.approx(201.6)
 
     def test_linear_load(self):
-        # (0.12 × 25 + 1.5) × 1.4 = (3.0 + 1.5) × 1.4 = 6.3 kN/m²
+        # (0.12 × 25 + 0.5 forma + 1.5) × 1.4 = (3.0 + 0.5 + 1.5) × 1.4 = 7.0 kN/m²
         q = calculate_linear_load(0.12)
-        assert q == pytest.approx(6.3)
+        assert q == pytest.approx(7.0)
 
     def test_thick_slab_self_weight(self, thick_slab):
         # 80m² × 0.25m × 25 kN/m³ = 500 kN

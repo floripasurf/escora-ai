@@ -1,10 +1,10 @@
-"""Cálculo de escoramento para vigas conforme NBR 15696:2009."""
+"""Cálculo de escoramento para vigas conforme NBR 15696:2009 e NBR 6120:2019."""
 
 import math
 from typing import List, Tuple
 from src.models.shore import ShoreCatalogEntry, PositionedShore
 from src.utils.constants import (
-    GAMMA_CONCRETO, Q_SOBRECARGA_DEFAULT, GAMMA_F,
+    GAMMA_CONCRETO, Q_SOBRECARGA_DEFAULT, Q_FORMA_DEFAULT, GAMMA_F,
     ESPACAMENTO_MIN, ESPACAMENTO_MAX_VIGA, CONTRA_FLECHA,
 )
 
@@ -23,21 +23,24 @@ def calculate_beam_total_linear_load(
     slab_thickness_m: float = 0.12,
     influence_width_m: float = 1.5,
     q_sobrecarga: float = Q_SOBRECARGA_DEFAULT,
+    q_forma: float = Q_FORMA_DEFAULT,
     gamma_f: float = GAMMA_F,
 ) -> float:
     """
     Carga linear total majorada sobre a viga (kN/m).
 
-    Inclui:
-    - Peso próprio da viga
+    Inclui (NBR 6120:2019 + NBR 15696:2009):
+    - Peso próprio da viga (concreto armado 25 kN/m³)
     - Carga da laje transferida (faixa de influência)
-    - Sobrecarga
+    - Peso próprio das fôrmas (0.5 kN/m²)
+    - Sobrecarga de trabalho (operários + equipamentos)
     """
     g_viga = calculate_beam_self_weight(width_m, height_m)
     g_laje_transfer = slab_thickness_m * GAMMA_CONCRETO * influence_width_m
+    g_forma = q_forma * influence_width_m
     q_transfer = q_sobrecarga * influence_width_m
 
-    return (g_viga + g_laje_transfer + q_transfer) * gamma_f
+    return (g_viga + g_laje_transfer + g_forma + q_transfer) * gamma_f
 
 
 def distribute_beam_shores(
