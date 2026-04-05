@@ -96,6 +96,16 @@ class DimensionEntity:
 
 
 @dataclass
+class DiagonalEntity:
+    """A non-axis-aligned line segment (potential shaft X marker)."""
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+    layer: str = ""
+
+
+@dataclass
 class ArcEntity:
     """An arc entity (potential curved structural element or corner fillet)."""
     cx: float
@@ -119,14 +129,16 @@ class ParseResult:
     hatches: List[HatchEntity] = field(default_factory=list)
     dimensions: List[DimensionEntity] = field(default_factory=list)
     arcs: List[ArcEntity] = field(default_factory=list)
+    diagonals: List[DiagonalEntity] = field(default_factory=list)
     raw_entities: List[dict] = field(default_factory=list)
 
 
 def _add_line_segment(
     x1: float, y1: float, x2: float, y2: float,
     layer: str, segments: List[SegmentEntity],
+    diagonals: Optional[List] = None,
 ) -> None:
-    """Add a line as H or V segment if it's axis-aligned."""
+    """Add a line as H or V segment if it's axis-aligned, or diagonal otherwise."""
     if abs(y1 - y2) < HV_TOLERANCE:  # horizontal
         segments.append(SegmentEntity(
             type="H", y=(y1 + y2) / 2,
@@ -136,6 +148,10 @@ def _add_line_segment(
         segments.append(SegmentEntity(
             type="V", x=(x1 + x2) / 2,
             y_min=min(y1, y2), y_max=max(y1, y2), layer=layer,
+        ))
+    elif diagonals is not None:
+        diagonals.append(DiagonalEntity(
+            x1=x1, y1=y1, x2=x2, y2=y2, layer=layer,
         ))
 
 
@@ -407,6 +423,7 @@ def parse_dxf(filepath: str) -> ParseResult:
     hatches: List[HatchEntity] = []
     dimensions: List[DimensionEntity] = []
     arcs: List[ArcEntity] = []
+    diagonals: List[DiagonalEntity] = []
     raw_entities: List[dict] = []
 
     for entity in msp:
@@ -423,7 +440,7 @@ def parse_dxf(filepath: str) -> ParseResult:
         elif etype == "LINE":
             x1, y1 = entity.dxf.start.x, entity.dxf.start.y
             x2, y2 = entity.dxf.end.x, entity.dxf.end.y
-            _add_line_segment(x1, y1, x2, y2, layer, segments)
+            _add_line_segment(x1, y1, x2, y2, layer, segments, diagonals)
 
         elif etype == "SOLID":
             pts = [entity.dxf.vtx0, entity.dxf.vtx1, entity.dxf.vtx2, entity.dxf.vtx3]
@@ -491,7 +508,8 @@ def parse_dxf(filepath: str) -> ParseResult:
     logger.info(
         f"Parsed {filename}: {len(segments)} segments, {len(rects)} rects, "
         f"{len(circles)} circles, {len(texts)} texts, {len(hatches)} hatches, "
-        f"{len(dimensions)} dimensions, {len(polylines)} polylines, {len(arcs)} arcs"
+        f"{len(dimensions)} dimensions, {len(polylines)} polylines, {len(arcs)} arcs, "
+        f"{len(diagonals)} diagonals"
     )
 
     return ParseResult(
@@ -506,5 +524,6 @@ def parse_dxf(filepath: str) -> ParseResult:
         hatches=hatches,
         dimensions=dimensions,
         arcs=arcs,
+        diagonals=diagonals,
         raw_entities=raw_entities,
     )

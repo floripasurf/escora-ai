@@ -237,6 +237,8 @@ def run_pipeline(filepath: str, scale_override: Optional[float] = None) -> Pipel
                 beam_layer_segments=all_beam_layer_segs,
                 slab_hatches=all_hatches,
                 slab_polylines=all_polylines,
+                shaft_diagonals=parse.diagonals,
+                shaft_texts=parse.texts,
             )
             warnings.extend(calculation.warnings)
         except Exception as e:
