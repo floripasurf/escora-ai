@@ -89,14 +89,16 @@ class TestLearningStore:
 
     def test_common_sections(self, tmp_path):
         store = LearningStore(path=tmp_path / "learning.json")
-        for _ in range(3):
+        # Use different filenames — dedup keeps only latest per file
+        for i in range(3):
             record = extract_learning(_pipeline_result(beams=5))
+            record.filename = f"FILE_{i}.DXF"
             store.add(record)
 
         sections = store.get_common_sections()
         assert len(sections) >= 1
         assert sections[0][0] == "14x40"
-        assert sections[0][1] == 15  # 5 beams * 3 runs
+        assert sections[0][1] == 15  # 5 beams * 3 unique files
 
     def test_default_section_height(self, tmp_path):
         store = LearningStore(path=tmp_path / "learning.json")
@@ -112,7 +114,7 @@ class TestLearningStore:
         store.add(record)
 
         summary = store.summary()
-        assert "Total de execuções: 1" in summary
+        assert "Arquivos únicos: 1" in summary
         assert "14x40" in summary
 
     def test_empty_summary(self, tmp_path):
@@ -132,4 +134,4 @@ class TestLearningStore:
 
         assert store.run_count == 2
         summary = store.summary()
-        assert "Arquivos processados: 2" in summary
+        assert "Arquivos únicos: 2" in summary

@@ -6,6 +6,12 @@ On subsequent runs, accumulated knowledge adjusts detection behavior:
 - Layer names that consistently map to beams/pillars get priority
 - Common section dimensions become fallback defaults
 - Confidence thresholds adapt based on historical accuracy
+
+V2 improvements:
+- Per-file deduplication: only the LATEST run per filename is kept
+- Per-file weighting: each unique file counts once (not 300x)
+- Temporal decay: recent runs have more weight than old ones
+- Quality gates: minimum detection thresholds to store layer data
 """
 
 import json
@@ -19,6 +25,12 @@ from collections import Counter
 logger = logging.getLogger(__name__)
 
 DEFAULT_STORE_PATH = Path("data/learning.json")
+
+# Maximum records to keep (per-file dedup means this = max unique files)
+MAX_RECORDS = 200
+
+# Temporal decay: records older than this many days get halved weight
+DECAY_DAYS = 30
 
 
 @dataclass
@@ -77,7 +89,11 @@ class LearningRecord:
 
 
 class LearningStore:
-    """Persistent store for learning records."""
+    """Persistent store for learning records.
+
+    V2: Per-file deduplication — only the latest run per filename is kept.
+    This prevents a single file run 300x from dominating the knowledge base.
+    """
 
     def __init__(self, path: Optional[Path] = None):
         self.path = path or DEFAULT_STORE_PATH
@@ -99,19 +115,37 @@ class LearningStore:
     def save(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         data = {
-            "version": 1,
+            "version": 2,
             "updated": datetime.now().isoformat(),
             "record_count": len(self._records),
+            "unique_files": len(set(r.filename for r in self._records)),
             "records": [asdict(r) for r in self._records],
         }
         self.path.write_text(json.dumps(data, indent=2, ensure_ascii=False))
 
     def add(self, record: LearningRecord):
+        """Add a record, replacing any previous run of the same file.
+
+        Per-file deduplication: only the latest run per filename is kept.
+        This prevents a file run 300x from having 300x the influence.
+        """
+        # Remove previous records for the same file
+        self._records = [
+            r for r in self._records if r.filename != record.filename
+        ]
         self._records.append(record)
+
+        # Cap total records
+        if len(self._records) > MAX_RECORDS:
+            # Keep most recent records
+            self._records.sort(key=lambda r: r.timestamp)
+            self._records = self._records[-MAX_RECORDS:]
+
         self.save()
         logger.info(
             f"Learning record added: {record.filename} "
-            f"({record.beam_count} beams, {record.pillar_count} pillars)"
+            f"({record.beam_count} beams, {record.pillar_count} pillars, "
+            f"{record.slab_count} slabs) — {len(self._records)} unique files"
         )
 
     @property
@@ -122,41 +156,55 @@ class LearningStore:
     def run_count(self) -> int:
         return len(self._records)
 
+    def _record_weight(self, record: LearningRecord) -> float:
+        """Calculate temporal weight for a record (1.0 = recent, 0.5 = old).
+
+        Records older than DECAY_DAYS get halved weight, allowing recent
+        runs (with improved detection) to have more influence.
+        """
+        try:
+            ts = datetime.fromisoformat(record.timestamp)
+            age_days = (datetime.now() - ts).days
+            if age_days > DECAY_DAYS:
+                return 0.5
+        except (ValueError, TypeError):
+            return 0.5
+        return 1.0
+
     # === LEARNED KNOWLEDGE QUERIES ===
 
     def get_known_beam_layers(self) -> Dict[str, float]:
         """Layers that historically contained beams, with confidence (0-1).
 
-        Returns {layer_name: confidence} where confidence is the fraction
-        of runs where that layer had beam candidates.
+        Returns {layer_name: confidence} where confidence is the weighted
+        fraction of unique files where that layer had valid beam candidates.
 
-        Filters out low-quality entries: layers must have beam_count >= 3
-        AND detection_rate >= 0.02 per run to count as a valid beam detection.
-        This prevents contamination from layers with 1-2 accidental beam matches.
+        Quality gates: beam_count >= 3 AND detection_rate >= 0.02 per record.
         """
         MIN_BEAM_COUNT_THRESHOLD = 3
         MIN_DETECTION_RATE_THRESHOLD = 0.02
 
-        layer_beam_counts: Counter = Counter()
-        layer_appearances: Counter = Counter()
+        layer_beam_weight: Dict[str, float] = {}
+        layer_total_weight: Dict[str, float] = {}
 
         for r in self._records:
+            w = self._record_weight(r)
             seen_layers = set()
             for layer in r.layers:
                 name = layer["layer_name"]
                 if name not in seen_layers:
-                    layer_appearances[name] += 1
+                    layer_total_weight[name] = layer_total_weight.get(name, 0) + w
                     seen_layers.add(name)
                 beam_count = layer.get("beam_count", 0)
                 detection_rate = layer.get("detection_rate", 0.0)
                 if (beam_count >= MIN_BEAM_COUNT_THRESHOLD
                         and detection_rate >= MIN_DETECTION_RATE_THRESHOLD):
-                    layer_beam_counts[name] += 1
+                    layer_beam_weight[name] = layer_beam_weight.get(name, 0) + w
 
         result = {}
-        for layer, count in layer_beam_counts.items():
-            total = layer_appearances[layer]
-            result[layer] = count / total if total > 0 else 0
+        for layer, weight in layer_beam_weight.items():
+            total = layer_total_weight.get(layer, 1)
+            result[layer] = weight / total if total > 0 else 0
         return result
 
     def purge_low_quality(self) -> int:
@@ -178,31 +226,55 @@ class LearningStore:
             logger.info(f"Purged {cleaned} low-quality beam layer entries")
         return cleaned
 
+    def deduplicate(self) -> int:
+        """Deduplicate records: keep only the latest run per filename.
+
+        Returns the number of records removed.
+        """
+        before = len(self._records)
+        # Group by filename, keep latest (by timestamp)
+        by_file: Dict[str, LearningRecord] = {}
+        for r in self._records:
+            existing = by_file.get(r.filename)
+            if existing is None or r.timestamp > existing.timestamp:
+                by_file[r.filename] = r
+
+        self._records = list(by_file.values())
+        removed = before - len(self._records)
+        if removed > 0:
+            self.save()
+            logger.info(
+                f"Deduplicated: {before} → {len(self._records)} records "
+                f"({removed} duplicates removed)"
+            )
+        return removed
+
     def get_known_pillar_layers(self) -> Dict[str, float]:
         """Layers that historically contained pillars, with confidence."""
-        layer_pillar_counts: Counter = Counter()
-        layer_appearances: Counter = Counter()
+        layer_pillar_weight: Dict[str, float] = {}
+        layer_total_weight: Dict[str, float] = {}
 
         for r in self._records:
+            w = self._record_weight(r)
             seen_layers = set()
             for layer in r.layers:
                 name = layer["layer_name"]
                 if name not in seen_layers:
-                    layer_appearances[name] += 1
+                    layer_total_weight[name] = layer_total_weight.get(name, 0) + w
                     seen_layers.add(name)
                 if layer.get("pillar_count", 0) > 0:
-                    layer_pillar_counts[name] += 1
+                    layer_pillar_weight[name] = layer_pillar_weight.get(name, 0) + w
 
         result = {}
-        for layer, count in layer_pillar_counts.items():
-            total = layer_appearances[layer]
-            result[layer] = count / total if total > 0 else 0
+        for layer, weight in layer_pillar_weight.items():
+            total = layer_total_weight.get(layer, 1)
+            result[layer] = weight / total if total > 0 else 0
         return result
 
     def get_common_sections(self, top_n: int = 5) -> List[Tuple[str, int]]:
-        """Most common beam section dimensions across all runs.
+        """Most common beam section dimensions across unique files.
 
-        Returns [(section_str, total_count), ...] sorted by frequency.
+        Each file contributes its section counts once (no duplicate inflation).
         """
         total: Counter = Counter()
         for r in self._records:
@@ -231,7 +303,7 @@ class LearningStore:
         return most_common_cm / 100.0
 
     def get_avg_beam_score(self) -> Optional[float]:
-        """Average beam confidence score across all runs."""
+        """Average beam confidence score across unique files."""
         scores = [r.beam_score_avg for r in self._records if r.beam_score_avg > 0]
         return sum(scores) / len(scores) if scores else None
 
@@ -245,15 +317,34 @@ class LearningStore:
             return None
         return values.most_common(1)[0][0]
 
+    def get_slab_thickness_history(self) -> Optional[float]:
+        """Most commonly found slab thickness value."""
+        values: Counter = Counter()
+        for r in self._records:
+            if r.slab_thickness_found and r.slab_thickness_m is not None:
+                values[round(r.slab_thickness_m, 2)] += 1
+        if not values:
+            return None
+        return values.most_common(1)[0][0]
+
+    def get_file_stats(self, filename: str) -> Optional[LearningRecord]:
+        """Get the latest learning record for a specific file."""
+        for r in reversed(self._records):
+            if r.filename == filename:
+                return r
+        return None
+
     def summary(self) -> str:
         """Human-readable summary of accumulated knowledge."""
         if not self._records:
             return "Nenhum dado de aprendizado acumulado."
 
+        unique_files = len(set(r.filename for r in self._records))
+
         lines = [
-            f"=== Escora.AI — Base de Aprendizado ===",
-            f"Total de execuções: {len(self._records)}",
-            f"Arquivos processados: {len(set(r.filename for r in self._records))}",
+            f"=== Escora.AI — Base de Aprendizado (v2) ===",
+            f"Arquivos únicos: {unique_files}",
+            f"Records armazenados: {len(self._records)}",
             "",
         ]
 
@@ -280,13 +371,15 @@ class LearningStore:
                 lines.append(f"  \"{layer}\" — {conf:.0%}")
             lines.append("")
 
-        # Stats
+        # Stats (per unique file, not inflated)
         total_beams = sum(r.beam_count for r in self._records)
         total_pillars = sum(r.pillar_count for r in self._records)
         total_shores = sum(r.total_shores for r in self._records)
-        lines.append(f"Totais acumulados:")
+        total_slabs = sum(r.slab_count for r in self._records)
+        lines.append(f"Totais (por arquivo único):")
         lines.append(f"  Vigas detectadas: {total_beams}")
         lines.append(f"  Pilares detectados: {total_pillars}")
+        lines.append(f"  Painéis de laje: {total_slabs}")
         lines.append(f"  Escoras calculadas: {total_shores}")
 
         pe = self.get_pe_direito_history()
@@ -296,5 +389,18 @@ class LearningStore:
         default_h = self.get_default_section_height()
         if default_h:
             lines.append(f"  Altura de seção mais comum: {default_h:.2f}m")
+
+        esp = self.get_slab_thickness_history()
+        if esp:
+            lines.append(f"  Espessura de laje mais comum: {esp:.2f}m")
+
+        # Quality metrics
+        valid_runs = sum(1 for r in self._records if r.is_valid)
+        lines.append("")
+        lines.append(f"Qualidade:")
+        lines.append(f"  Runs válidos: {valid_runs}/{len(self._records)}")
+        avg_score = self.get_avg_beam_score()
+        if avg_score:
+            lines.append(f"  Score médio vigas: {avg_score:.0%}")
 
         return "\n".join(lines)
