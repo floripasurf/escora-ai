@@ -196,7 +196,12 @@ O sistema busca automaticamente nos textos do DXF:
    - **Tier 2 — Eixos estendidos:** Se Tier 1 produz poucos painéis, usa todos os candidatos a viga com tolerância de 2,0m para fechar gaps em pilares
    - **Tier 3 — Contornos do DXF:** Extrai polígonos diretamente de HATCH (preenchimentos CONCRETE, SOLID, ANSI31) e POLYLINE fechados em layers de laje (LAJE, FORMA, SLAB, PISO)
    - **Merge inteligente:** Combina resultados dos 3 tiers, eliminando duplicatas (sobreposição > 50% = duplicata)
-4. **Detecção de lajes em balanço:** Painéis fora do envelope de pilares → espaçamento reduzido
+4. **Detecção de shafts/vazios:** Identifica aberturas de elevadores, poços e furos por 3 métodos:
+   - **Padrão X:** Detecta linhas diagonais cruzadas (marcação padrão CAD para aberturas)
+   - **Texto:** Reconhece rótulos como "ELEVADOR", "POÇO", "FURO", "VAZIO"
+   - **Layer:** Entidades em layers com palavras-chave de abertura (ABER, FURO, SHAFT)
+   - Regiões de shaft são **excluídas** do cálculo de laje (não recebem escoras)
+5. **Detecção de lajes em balanço:** Painéis fora do envelope de pilares → espaçamento reduzido
 
 #### 7b. Cálculo de Cargas por Elemento
 

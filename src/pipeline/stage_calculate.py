@@ -32,6 +32,7 @@ from src.engine.tower_selector import (
 )
 from src.engine.validator import validate_result
 from src.engine.nervura_detector import detect_nervura_regions, distribute_nervura_shores
+from src.engine.shaft_detector import detect_all_shafts, filter_slab_polygons_by_shafts
 from src.ml.predictor import ShoringPredictor
 from src.utils.constants import (
     GAMMA_F, Q_SOBRECARGA_DEFAULT, ESPESSURA_DEFAULT, ALTURA_DEFAULT,
@@ -233,6 +234,8 @@ def run_calculation(
     beam_layer_segments: Optional[List[Dict[str, Any]]] = None,
     slab_hatches: Optional[List[Dict[str, Any]]] = None,
     slab_polylines: Optional[List[Dict[str, Any]]] = None,
+    shaft_diagonals: Optional[list] = None,
+    shaft_texts: Optional[list] = None,
 ) -> CalculationResult:
     """Run the full calculation pipeline.
 
@@ -593,11 +596,43 @@ def run_calculation(
                     f"área total {total_area:.0f}m²"
                 )
 
+    # === SHAFT/VOID DETECTION ===
+    # Detect elevator shafts, pipe openings, etc. and exclude from slab shoring
+    shaft_regions = detect_all_shafts(
+        diagonals=shaft_diagonals or [],
+        texts=shaft_texts or [],
+        hatches=slab_hatches or [],
+        polylines=slab_polylines or [],
+        scale=1.0,
+    )
+
+    if shaft_regions:
+        before = len(slab_polygons)
+        slab_polygons, removed_indices = filter_slab_polygons_by_shafts(
+            slab_polygons, shaft_regions,
+        )
+        if removed_indices:
+            warnings.append(
+                f"Shafts detectados: {len(shaft_regions)} abertura(s) — "
+                f"{len(removed_indices)} painel(éis) de laje excluído(s)"
+            )
+
     cantilever_flags = detect_cantilever_slabs(slab_polygons, pillars)
 
     pillar_exclusions = _build_pillar_exclusions(pillars)
     beam_exclusions = _build_beam_exclusions(valid_beams)
-    all_exclusions = pillar_exclusions + beam_exclusions
+    # Add shaft regions as exclusion zones to prevent shores inside voids
+    shaft_exclusions = []
+    if shaft_regions:
+        for sr in shaft_regions:
+            shaft_exclusions.append(PillarExclusion(
+                cx=(sr.x_min + sr.x_max) / 2,
+                cy=(sr.y_min + sr.y_max) / 2,
+                width_m=sr.x_max - sr.x_min,
+                depth_m=sr.y_max - sr.y_min,
+                margin=0.0,
+            ))
+    all_exclusions = pillar_exclusions + beam_exclusions + shaft_exclusions
 
     slab_results: List[SlabShoringResult] = []
 
