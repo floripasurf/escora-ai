@@ -191,7 +191,11 @@ O sistema busca automaticamente nos textos do DXF:
 
 1. **Associação viga-pilar:** Para cada viga, identifica quais pilares estão a menos de 1,0m do eixo
 2. **Detecção de balanço:** Se a extremidade da viga não tem pilar → balanço (cantilever)
-3. **Derivação de lajes:** Poligoniza a malha de vigas → cada polígono fechado = 1 painel de laje
+3. **Derivação de lajes (3 estratégias com merge):**
+   - **Tier 1 — Malha de vigas:** Poligoniza o grid de vigas (Shapely polygonize) → cada polígono fechado = 1 painel de laje
+   - **Tier 2 — Eixos estendidos:** Se Tier 1 produz poucos painéis, usa todos os candidatos a viga com tolerância de 2,0m para fechar gaps em pilares
+   - **Tier 3 — Contornos do DXF:** Extrai polígonos diretamente de HATCH (preenchimentos CONCRETE, SOLID, ANSI31) e POLYLINE fechados em layers de laje (LAJE, FORMA, SLAB, PISO)
+   - **Merge inteligente:** Combina resultados dos 3 tiers, eliminando duplicatas (sobreposição > 50% = duplicata)
 4. **Detecção de lajes em balanço:** Painéis fora do envelope de pilares → espaçamento reduzido
 
 #### 7b. Cálculo de Cargas por Elemento
@@ -390,7 +394,7 @@ Tabela exportável com:
 
 3. **Pilares aparecem como SOLID fills** — não como retângulos explícitos. O parser precisa reconstruir geometria a partir de preenchimentos triangulares.
 
-4. **Lajes não existem no DXF** — são derivadas matematicamente (polygonize) da malha de vigas. Se a malha não fecha (gap no pilar), não há laje.
+4. **Lajes precisam de detecção multi-estratégia** — não existe entidade "LAJE" no DXF. O sistema usa 3 estratégias simultâneas: (1) polygonize da malha de vigas, (2) extensão de eixos com tolerância de 2m, (3) extração direta de contornos a partir de HATCH e POLYLINE fechados em layers de laje. Se uma falha, as outras cobrem.
 
 5. **Textos "V1 (14x40)" podem estar a 3 metros da viga** — o sistema precisa associar texto a elemento por proximidade ao eixo inteiro, não apenas ao ponto mais próximo.
 
