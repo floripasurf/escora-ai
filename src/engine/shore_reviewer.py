@@ -25,13 +25,12 @@ logger = logging.getLogger(__name__)
 MIN_GLOBAL_SHORE_DIST = 0.50
 
 # Minimum distance from shore center to pillar face (m)
-# Pillar already supports structure — shore is redundant near pillar.
-# Engineering reasoning: within ~1.0m of pillar face, the slab/beam is well-supported
-# by the pillar itself (pillar influence zone). Also accounts for:
-# - Pillar graphic footprint in DXF (text labels, hatching, dimension lines)
-# - Practical working clearance on site
-# - NBR 6118 critical shear zone near pillar face
-MIN_PILLAR_FACE_DIST = 1.00
+# Must match the placement threshold used in beam_calculator.py (DIST_MIN_APOIO)
+# and constants.py (DISTANCIA_PILAR_MIN = 0.70m).
+# Previously 1.00m — caused shores placed at 0.70-1.00m to be removed here,
+# creating gaps near beam-pillar junctions.
+from src.utils.constants import DISTANCIA_PILAR_MIN
+MIN_PILLAR_FACE_DIST = DISTANCIA_PILAR_MIN
 
 # Minimum distance from slab shore to beam axis (m)
 # Beam already has its own shores — slab shore on beam is redundant

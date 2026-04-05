@@ -43,6 +43,112 @@ def calculate_beam_total_linear_load(
     return (g_viga + g_laje_transfer + g_forma + q_transfer) * gamma_f
 
 
+def _split_into_spans(
+    beam_length_m: float,
+    support_positions: List[float],
+    is_cantilever_start: bool,
+    is_cantilever_end: bool,
+) -> List[Tuple[float, float, bool, bool]]:
+    """Split a beam into independent spans between supports.
+
+    Returns list of (start, end, is_cant_start, is_cant_end) tuples.
+    Each span is treated independently for shore distribution.
+
+    A 15m beam with supports at [0, 5, 10, 15] produces 3 spans:
+    (0, 5, False, False), (5, 10, False, False), (10, 15, False, False)
+    """
+    if not support_positions:
+        return [(0.0, beam_length_m, is_cantilever_start, is_cantilever_end)]
+
+    # Deduplicate and sort supports, clamp to beam range
+    supports = sorted(set(
+        max(0.0, min(beam_length_m, sp)) for sp in support_positions
+    ))
+
+    # Build span boundaries: [0, support1, support2, ..., beam_length]
+    boundaries = []
+    if supports[0] > 0.01:  # beam starts before first support
+        boundaries.append(0.0)
+    boundaries.extend(supports)
+    if supports[-1] < beam_length_m - 0.01:  # beam extends past last support
+        boundaries.append(beam_length_m)
+
+    if len(boundaries) < 2:
+        return [(0.0, beam_length_m, is_cantilever_start, is_cantilever_end)]
+
+    spans = []
+    for i in range(len(boundaries) - 1):
+        span_start = boundaries[i]
+        span_end = boundaries[i + 1]
+        span_len = span_end - span_start
+        if span_len < 0.10:  # skip negligible spans
+            continue
+
+        # Cantilever flags: first span inherits start, last inherits end
+        cant_start = is_cantilever_start if span_start < 0.01 else False
+        cant_end = is_cantilever_end if span_end > beam_length_m - 0.01 else False
+
+        spans.append((span_start, span_end, cant_start, cant_end))
+
+    return spans if spans else [(0.0, beam_length_m, is_cantilever_start, is_cantilever_end)]
+
+
+def _distribute_single_span(
+    span_start: float,
+    span_end: float,
+    is_cant_start: bool,
+    is_cant_end: bool,
+    max_spacing: float,
+) -> List[float]:
+    """Distribute shore positions along a single span (relative to beam start).
+
+    Returns absolute positions along the beam axis.
+    """
+    DIST_MIN_APOIO = 0.70
+    span_len = span_end - span_start
+
+    n = math.ceil(span_len / max_spacing) + 1
+    n = max(n, 2)
+    spacing = span_len / (n - 1)
+
+    # Generate candidate positions (absolute along beam)
+    candidates = []
+    for i in range(n):
+        pos = span_start + i * spacing
+        candidates.append(pos)
+
+    # Filter positions too close to span boundaries (which are supports)
+    filtered = []
+    for pos in candidates:
+        # Distance to start support (skip if cantilever — no support there)
+        if not is_cant_start and abs(pos - span_start) < DIST_MIN_APOIO:
+            continue
+        # Distance to end support (skip if cantilever — no support there)
+        if not is_cant_end and abs(pos - span_end) < DIST_MIN_APOIO:
+            continue
+        filtered.append(pos)
+    candidates = filtered
+
+    # Cantilever: ensure shore near free end
+    if is_cant_start and candidates:
+        if candidates[0] > span_start + 0.20:
+            candidates.insert(0, span_start + 0.10)
+    if is_cant_end and candidates:
+        if candidates[-1] < span_end - 0.20:
+            candidates.append(span_end - 0.10)
+
+    # Enforce minimum inter-shore spacing
+    if len(candidates) > 1:
+        candidates.sort()
+        spaced = [candidates[0]]
+        for pos in candidates[1:]:
+            if pos - spaced[-1] >= ESPACAMENTO_MIN:
+                spaced.append(pos)
+        candidates = spaced
+
+    return candidates
+
+
 def distribute_beam_shores(
     beam_length_m: float,
     beam_width_m: float,
@@ -60,79 +166,48 @@ def distribute_beam_shores(
     """
     Distribui escoras ao longo de uma viga conforme NBR 6118/15696.
 
-    Condições de contorno (NBR 6118):
-    - Apoio (pilar ou cruzamento de viga): não posicionar escora no apoio
-    - Balanço: extremidade livre precisa de escora próxima à ponta
-    - O espaçamento é mais denso em trechos em balanço
-
-    support_positions: coordenadas ao longo do eixo (em metros desde o início)
-        onde há apoios (pilares ou cruzamento de vigas). Escoras não devem
-        ser posicionadas a menos de 0.15m destes pontos.
-    is_cantilever_start: início da viga é extremidade livre (balanço)
-    is_cantilever_end: fim da viga é extremidade livre (balanço)
+    Multi-span aware: splits beam at support positions and distributes
+    shores independently per span, then merges results.
 
     Retorna: (shores, n_shores, spacing_efetivo)
     """
-    # Distância mínima entre escora e ponto de apoio (pilar/cruzamento)
-    # Prática: pilar já sustenta a viga, escora próxima é redundante.
-    # Mínimo 0.70m da face do apoio.
-    DIST_MIN_APOIO = 0.70
-
-    n = math.ceil(beam_length_m / max_spacing) + 1
-    n = max(n, 2)
-    spacing = beam_length_m / (n - 1)
-
     total_load = total_linear_load_kn_m * beam_length_m
 
-    # Gerar posições candidatas ao longo do eixo da viga
-    candidates = []
-    for i in range(n):
-        pos = i * spacing  # posição relativa ao início da viga
-        candidates.append(pos)
+    # Split beam into independent spans
+    spans = _split_into_spans(
+        beam_length_m,
+        support_positions or [],
+        is_cantilever_start,
+        is_cantilever_end,
+    )
 
-    # Filtrar posições que caem sobre pontos de apoio
-    if support_positions:
-        filtered = []
-        for pos in candidates:
-            on_support = False
-            for sp in support_positions:
-                if abs(pos - sp) < DIST_MIN_APOIO:
-                    on_support = True
-                    break
-            if not on_support:
-                filtered.append(pos)
-        candidates = filtered
+    # Distribute shores per span, collect all positions
+    all_positions: List[float] = []
+    for span_start, span_end, cant_s, cant_e in spans:
+        span_positions = _distribute_single_span(
+            span_start, span_end, cant_s, cant_e, max_spacing,
+        )
+        all_positions.extend(span_positions)
 
-    # Para balanço: garantir escora próxima à extremidade livre
-    # NBR 6118 — extremidade livre deve ter suporte (concreto fresco)
-    if is_cantilever_start and candidates:
-        if candidates[0] > 0.20:
-            candidates.insert(0, 0.10)
-    if is_cantilever_end and candidates:
-        if candidates[-1] < beam_length_m - 0.20:
-            candidates.append(beam_length_m - 0.10)
+    # Deduplicate positions that are too close (from adjacent spans)
+    if all_positions:
+        all_positions.sort()
+        deduped = [all_positions[0]]
+        for pos in all_positions[1:]:
+            if pos - deduped[-1] >= ESPACAMENTO_MIN:
+                deduped.append(pos)
+        all_positions = deduped
 
-    # Enforce minimum inter-shore spacing — remove shores that are
-    # too close to each other (clusters near vertices/supports)
-    if len(candidates) > 1:
-        candidates.sort()
-        spaced = [candidates[0]]
-        for pos in candidates[1:]:
-            if pos - spaced[-1] >= ESPACAMENTO_MIN:
-                spaced.append(pos)
-        candidates = spaced
-
-    if not candidates:
-        # Viga curta totalmente apoiada — sem necessidade de escoras
+    if not all_positions:
         return [], 0, 0.0
 
-    # Recalcular carga por escora
-    n_effective = len(candidates)
+    # Calculate load per shore based on total count
+    n_effective = len(all_positions)
     load_per_shore = total_load / n_effective
     utilization = load_per_shore / shore.load_capacity_kn
 
     shores: List[PositionedShore] = []
-    for pos in candidates:
+    for pos in all_positions:
         if direction == "x":
             x = start_x + pos
             y = start_y
@@ -150,7 +225,7 @@ def distribute_beam_shores(
             )
         )
 
-    actual_spacing = spacing
+    actual_spacing = beam_length_m / max(n_effective - 1, 1)
     return shores, n_effective, actual_spacing
 
 

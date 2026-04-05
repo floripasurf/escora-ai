@@ -17,7 +17,9 @@ from src.models.pipeline_models import ClassifiedElement, ElementType
 MIN_SLAB_AREA = 0.5  # m2 -- anything smaller is noise
 
 # Max gap to bridge between beam endpoints and perpendicular beams (pillar width)
-SNAP_TOLERANCE = 0.60  # m — typical pillar is 0.20-0.50m wide
+# Increased from 0.60m: real pillars are 0.20-1.0m wide, and beams stop at
+# pillar faces, leaving gaps of pillar_width + beam_offset ≈ 0.5-1.5m
+SNAP_TOLERANCE = 1.20  # m
 
 # Extended tolerance for beam axes — bridges larger gaps across pillars
 # Real pillar widths range from 0.20m to 1.0m+, and beams stop at pillar faces

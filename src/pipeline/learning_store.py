@@ -129,7 +129,14 @@ class LearningStore:
 
         Returns {layer_name: confidence} where confidence is the fraction
         of runs where that layer had beam candidates.
+
+        Filters out low-quality entries: layers must have beam_count >= 3
+        AND detection_rate >= 0.02 per run to count as a valid beam detection.
+        This prevents contamination from layers with 1-2 accidental beam matches.
         """
+        MIN_BEAM_COUNT_THRESHOLD = 3
+        MIN_DETECTION_RATE_THRESHOLD = 0.02
+
         layer_beam_counts: Counter = Counter()
         layer_appearances: Counter = Counter()
 
@@ -140,7 +147,10 @@ class LearningStore:
                 if name not in seen_layers:
                     layer_appearances[name] += 1
                     seen_layers.add(name)
-                if layer.get("beam_count", 0) > 0:
+                beam_count = layer.get("beam_count", 0)
+                detection_rate = layer.get("detection_rate", 0.0)
+                if (beam_count >= MIN_BEAM_COUNT_THRESHOLD
+                        and detection_rate >= MIN_DETECTION_RATE_THRESHOLD):
                     layer_beam_counts[name] += 1
 
         result = {}
@@ -148,6 +158,25 @@ class LearningStore:
             total = layer_appearances[layer]
             result[layer] = count / total if total > 0 else 0
         return result
+
+    def purge_low_quality(self) -> int:
+        """Remove low-quality layer entries from all records.
+
+        Clears beam_count for layers with detection_rate < 0.02 or beam_count < 3.
+        Returns the number of entries cleaned.
+        """
+        cleaned = 0
+        for r in self._records:
+            for layer in r.layers:
+                beam_count = layer.get("beam_count", 0)
+                detection_rate = layer.get("detection_rate", 0.0)
+                if beam_count > 0 and (beam_count < 3 or detection_rate < 0.02):
+                    layer["beam_count"] = 0
+                    cleaned += 1
+        if cleaned > 0:
+            self.save()
+            logger.info(f"Purged {cleaned} low-quality beam layer entries")
+        return cleaned
 
     def get_known_pillar_layers(self) -> Dict[str, float]:
         """Layers that historically contained pillars, with confidence."""

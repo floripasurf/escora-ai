@@ -161,29 +161,26 @@ def _classify_layers(
 
     result = {}
 
-    # Best beam layer: uses a combined score of detection rate AND absolute count.
-    # Pure rate favors tiny layers with 1 accidental beam (e.g., 1/13 = 7.7%).
-    # Pure count favors huge noisy layers. Combined score balances both:
-    #   score = beam_count * rate  (rewards layers with many beams at decent rate)
-    # Minimum 3 beams to avoid fluky single-pair detections.
+    # Multi-layer beam selection: accept ALL layers that qualify.
+    # Real DXFs often have beams on 2-3 layers (e.g., main beams on one layer,
+    # secondary beams on another). Selecting only the best layer misses beams.
+    # Minimum rate threshold prevents noise layers from being included.
     MIN_BEAM_COUNT = 3
-    best_beam_layer = None
-    best_beam_score = 0
+    MIN_BEAM_LAYER_RATE = 0.03  # 3% of segments must be beams
+    found_beam_layer = False
     for layer, seg_dicts in segs_by_layer.items():
         beams = find_beam_candidates(seg_dicts)
         if not beams or len(beams) < MIN_BEAM_COUNT:
             continue
         rate = len(beams) / max(len(seg_dicts), 1)
-        score = len(beams) * rate
-        if score > best_beam_score:
-            best_beam_score = score
-            best_beam_layer = layer
-    if best_beam_layer:
-        result[best_beam_layer] = ElementType.BEAM
+        if rate >= MIN_BEAM_LAYER_RATE:
+            result[layer] = ElementType.BEAM
+            found_beam_layer = True
 
     # Fallback: if no layer has MIN_BEAM_COUNT, pick the one with best rate
-    if not best_beam_layer:
+    if not found_beam_layer:
         best_rate = 0
+        best_beam_layer = None
         for layer, seg_dicts in segs_by_layer.items():
             beams = find_beam_candidates(seg_dicts)
             if not beams:

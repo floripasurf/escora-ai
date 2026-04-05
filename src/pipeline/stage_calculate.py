@@ -523,34 +523,9 @@ def run_calculation(
         warnings.extend(_contra_flecha_warnings(beam_length, beam_name))
 
     # === PILLAR PROXIMITY FILTER FOR BEAM SHORES ===
-    # The beam distributor only knows about support positions along the axis.
-    # A shore may still be placed on a beam axis that passes near a pillar
-    # in the perpendicular direction. Remove those here.
-    import math
-    from src.utils.constants import DISTANCIA_PILAR_MIN
-
-    for br in beam_results:
-        filtered_shores = []
-        for s in br.shores:
-            too_close = False
-            for p in pillars:
-                if not p.geometry:
-                    continue
-                px, py = p.geometry[0]
-                pw = (p.section_width_m or 0.20) / 2
-                pd = (p.section_height_m or 0.20) / 2
-                # Distance from shore to pillar face (not center)
-                dx = max(0, abs(s.x - px) - pw)
-                dy = max(0, abs(s.y - py) - pd)
-                dist = math.hypot(dx, dy)
-                if dist < DISTANCIA_PILAR_MIN:
-                    too_close = True
-                    break
-            if not too_close:
-                filtered_shores.append(s)
-        if len(filtered_shores) < len(br.shores):
-            br.shores = filtered_shores
-            br.shore_count = len(filtered_shores)
+    # Removed — shore_reviewer.py now handles this with the same threshold
+    # (DISTANCIA_PILAR_MIN = 0.70m). Having two filters with different thresholds
+    # caused shores placed at 0.70-1.00m to be incorrectly removed.
 
     # === NERVURA DETECTION (disabled — requires more learning from executed files) ===
     # TODO: re-enable once we have reference projects with correct nervura shoring
@@ -561,11 +536,13 @@ def run_calculation(
 
     # Fallback: if classified beams produce too few slabs, use ALL beam
     # candidates from the beam layer with extended snapping tolerance.
-    # This finds slab panels that the sparse classified beam set misses.
-    # Previously only triggered on 0 slabs — now triggers when < 3 slabs
-    # (a real floor always has multiple slab panels).
+    # Triggers when: fewer than 3 slabs OR we have many beams but very few slabs
+    # (indicates the beam grid isn't closing into polygons properly).
     MIN_SLAB_PANELS = 3
-    if len(slab_polygons) < MIN_SLAB_PANELS and beam_layer_segments:
+    beams_vs_slabs_mismatch = (
+        len(valid_beams) >= 5 and len(slab_polygons) < len(valid_beams) * 0.3
+    )
+    if (len(slab_polygons) < MIN_SLAB_PANELS or beams_vs_slabs_mismatch) and beam_layer_segments:
         from src.parser.segment_classifier import find_beam_candidates
         all_candidates = find_beam_candidates(beam_layer_segments)
         if all_candidates:
