@@ -6,13 +6,21 @@ Algorithm:
 3. Union all beam lines into a geometry network
 4. Use shapely.ops.polygonize() to extract closed regions
 5. Each polygon = one slab panel
+
+Also supports direct slab extraction from:
+- DXF HATCH entities (boundary polygons)
+- Closed LWPOLYLINE/POLYLINE entities
 """
 
-from typing import List, Tuple
+import logging
+from typing import List, Tuple, Dict, Any
 from shapely.geometry import LineString, Point, MultiPoint
 from shapely.ops import polygonize, unary_union, snap
 from shapely.geometry.polygon import Polygon
+from shapely.validation import make_valid
 from src.models.pipeline_models import ClassifiedElement, ElementType
+
+logger = logging.getLogger(__name__)
 
 MIN_SLAB_AREA = 0.5  # m2 -- anything smaller is noise
 
@@ -226,6 +234,190 @@ def derive_slabs_from_axes(
     merged = unary_union(lines)
     polygons = list(polygonize(merged))
     return [p for p in polygons if p.area >= MIN_SLAB_AREA]
+
+
+# Layer name patterns that indicate slab boundaries
+_SLAB_LAYER_KEYWORDS = {
+    "laje", "lajes", "slab", "forma", "piso", "forro",
+}
+
+# Maximum realistic slab area (m²) — filter out full-floor hatches
+MAX_SLAB_AREA = 500.0
+
+# Minimum overlap to consider two polygons as duplicates
+DEDUP_OVERLAP_RATIO = 0.50
+
+
+def _is_slab_layer(layer_name: str) -> bool:
+    """Check if a layer name suggests slab content."""
+    lower = layer_name.lower().strip()
+    for kw in _SLAB_LAYER_KEYWORDS:
+        if kw in lower:
+            return True
+    return False
+
+
+def _points_to_polygon(
+    points: List[Tuple[float, float]], scale: float = 1.0,
+) -> Polygon | None:
+    """Convert a list of points to a valid Shapely Polygon.
+
+    Returns None if the polygon is invalid, too small, or degenerate.
+    """
+    if len(points) < 3:
+        return None
+
+    scaled = [(x * scale, y * scale) for x, y in points]
+
+    # Close the ring if not already closed
+    if scaled[0] != scaled[-1]:
+        scaled.append(scaled[0])
+
+    try:
+        poly = Polygon(scaled)
+        if not poly.is_valid:
+            poly = make_valid(poly)
+        if poly.is_empty or poly.area < MIN_SLAB_AREA:
+            return None
+        if poly.area > MAX_SLAB_AREA:
+            return None
+        return poly
+    except Exception:
+        return None
+
+
+def _deduplicate_polygons(
+    polygons: List[Polygon], overlap_ratio: float = DEDUP_OVERLAP_RATIO,
+) -> List[Polygon]:
+    """Remove duplicate/overlapping polygons, keeping the larger one."""
+    if len(polygons) <= 1:
+        return polygons
+
+    # Sort by area descending — keep larger polygons first
+    sorted_polys = sorted(polygons, key=lambda p: p.area, reverse=True)
+    kept = []
+
+    for poly in sorted_polys:
+        is_dup = False
+        for existing in kept:
+            try:
+                intersection = poly.intersection(existing)
+                overlap = intersection.area / poly.area if poly.area > 0 else 0
+                if overlap >= overlap_ratio:
+                    is_dup = True
+                    break
+            except Exception:
+                continue
+        if not is_dup:
+            kept.append(poly)
+
+    return kept
+
+
+def derive_slabs_from_boundaries(
+    hatches: List[Dict[str, Any]],
+    polylines: List[Dict[str, Any]],
+    scale: float = 1.0,
+) -> List[Polygon]:
+    """Extract slab panels directly from DXF HATCH and closed POLYLINE entities.
+
+    This is a direct extraction method that doesn't depend on beam grid
+    polygonization. Many DXFs have explicit slab boundaries drawn as:
+    - HATCH fills (concrete pattern, solid fill) on slab layers
+    - Closed LWPOLYLINE/POLYLINE on LAJE/FORMA/SLAB layers
+
+    Args:
+        hatches: List of dicts with keys: points, layer, pattern_name, is_solid, area
+        polylines: List of dicts with keys: points, layer, is_closed
+        scale: Coordinate scale factor (1.0 for real meters)
+
+    Returns:
+        List of Shapely Polygon representing slab panels.
+    """
+    candidates: List[Polygon] = []
+
+    # Extract from hatches
+    for h in hatches:
+        layer = h.get("layer", "")
+        points = h.get("points", [])
+        is_solid = h.get("is_solid", False)
+        pattern = h.get("pattern_name", "").upper()
+
+        # Accept hatches on slab layers, or solid/concrete fills anywhere
+        is_slab_hatch = (
+            _is_slab_layer(layer)
+            or is_solid
+            or pattern in ("CONCRETE", "ANSI31", "ANSI32", "AR-CONC", "SOLID")
+        )
+        if not is_slab_hatch:
+            continue
+
+        poly = _points_to_polygon(points, scale)
+        if poly is not None:
+            candidates.append(poly)
+
+    # Extract from closed polylines
+    for pl in polylines:
+        if not pl.get("is_closed", False):
+            continue
+        layer = pl.get("layer", "")
+        if not _is_slab_layer(layer):
+            continue
+
+        points = pl.get("points", [])
+        poly = _points_to_polygon(points, scale)
+        if poly is not None:
+            candidates.append(poly)
+
+    if not candidates:
+        return []
+
+    # Deduplicate overlapping polygons
+    result = _deduplicate_polygons(candidates)
+
+    if result:
+        total_area = sum(p.area for p in result)
+        logger.info(
+            f"Slab boundaries: {len(result)} panels from "
+            f"hatches/polylines (total {total_area:.0f}m²)"
+        )
+
+    return result
+
+
+def merge_slab_sources(
+    beam_slabs: List[Polygon],
+    boundary_slabs: List[Polygon],
+) -> List[Polygon]:
+    """Merge slab polygons from beam grid and boundary extraction.
+
+    Strategy:
+    - Start with beam-grid slabs (more precise, aligned to beams)
+    - Add boundary slabs that don't overlap significantly with existing ones
+    - This captures slabs that the beam grid misses
+    """
+    if not boundary_slabs:
+        return beam_slabs
+    if not beam_slabs:
+        return boundary_slabs
+
+    merged = list(beam_slabs)
+
+    for bslab in boundary_slabs:
+        is_covered = False
+        for existing in merged:
+            try:
+                intersection = bslab.intersection(existing)
+                overlap = intersection.area / bslab.area if bslab.area > 0 else 0
+                if overlap >= DEDUP_OVERLAP_RATIO:
+                    is_covered = True
+                    break
+            except Exception:
+                continue
+        if not is_covered:
+            merged.append(bslab)
+
+    return merged
 
 
 def detect_cantilever_slabs(

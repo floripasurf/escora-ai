@@ -206,6 +206,25 @@ def run_pipeline(filepath: str, scale_override: Optional[float] = None) -> Pipel
                         "y_min": s.y_min * scale, "y_max": s.y_max * scale,
                     })
 
+        # Collect hatches and closed polylines for direct slab boundary detection
+        all_hatches = []
+        all_polylines = []
+        for seg in level_segments:
+            for h in seg.hatches:
+                all_hatches.append({
+                    "points": h.points,
+                    "layer": h.layer,
+                    "pattern_name": h.pattern_name,
+                    "is_solid": h.is_solid,
+                    "area": h.area,
+                })
+            for pl in seg.polylines:
+                all_polylines.append({
+                    "points": pl.points,
+                    "layer": pl.layer,
+                    "is_closed": pl.is_closed,
+                })
+
         try:
             calculation = run_calculation(
                 elements=all_elements,
@@ -216,6 +235,8 @@ def run_pipeline(filepath: str, scale_override: Optional[float] = None) -> Pipel
                 slab_type=classification.slab_type.value,
                 nervura_rects=all_rects,
                 beam_layer_segments=all_beam_layer_segs,
+                slab_hatches=all_hatches,
+                slab_polylines=all_polylines,
             )
             warnings.extend(calculation.warnings)
         except Exception as e:

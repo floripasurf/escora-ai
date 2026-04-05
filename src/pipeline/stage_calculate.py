@@ -14,7 +14,10 @@ from src.models.calculation_models import (
     BeamShoringResult, SlabShoringResult, CalculationResult,
 )
 from src.models.slab import Slab
-from src.engine.slab_builder import derive_slabs_from_beams, derive_slabs_from_axes, detect_cantilever_slabs
+from src.engine.slab_builder import (
+    derive_slabs_from_beams, derive_slabs_from_axes, detect_cantilever_slabs,
+    derive_slabs_from_boundaries, merge_slab_sources,
+)
 from src.engine.load_calculator import calculate_total_load
 from src.engine.beam_calculator import (
     calculate_beam_total_linear_load,
@@ -228,6 +231,8 @@ def run_calculation(
     slab_type: str = "solid",
     nervura_rects: Optional[List[Dict[str, Any]]] = None,
     beam_layer_segments: Optional[List[Dict[str, Any]]] = None,
+    slab_hatches: Optional[List[Dict[str, Any]]] = None,
+    slab_polylines: Optional[List[Dict[str, Any]]] = None,
 ) -> CalculationResult:
     """Run the full calculation pipeline.
 
@@ -532,12 +537,15 @@ def run_calculation(
     nervura_regions = []
 
     # === SLAB SHORING ===
+    # Strategy: 3-tier slab detection with merge
+    # Tier 1: Beam grid polygonize (most precise, aligned to beams)
+    # Tier 2: Beam axes with extended tolerance (fallback for sparse grids)
+    # Tier 3: Direct boundary extraction from DXF hatches/polylines
+
+    # Tier 1: Beam grid
     slab_polygons = derive_slabs_from_beams(valid_beams)
 
-    # Fallback: if classified beams produce too few slabs, use ALL beam
-    # candidates from the beam layer with extended snapping tolerance.
-    # Triggers when: fewer than 3 slabs OR we have many beams but very few slabs
-    # (indicates the beam grid isn't closing into polygons properly).
+    # Tier 2: Extended beam axes (when beam grid produces too few slabs)
     MIN_SLAB_PANELS = 3
     beams_vs_slabs_mismatch = (
         len(valid_beams) >= 5 and len(slab_polygons) < len(valid_beams) * 0.3
@@ -554,12 +562,34 @@ def run_calculation(
                 (bc.axis_coord, bc.start, bc.end)
                 for bc in all_candidates if bc.direction == "y"
             ]
-            slab_polygons = derive_slabs_from_axes(h_axes, v_axes)
-            if slab_polygons:
-                total_area = sum(p.area for p in slab_polygons)
+            axes_slabs = derive_slabs_from_axes(h_axes, v_axes)
+            if axes_slabs:
+                slab_polygons = merge_slab_sources(slab_polygons, axes_slabs)
+                total_area = sum(p.area for p in axes_slabs)
                 warnings.append(
                     f"Lajes derivadas de {len(all_candidates)} eixos de viga "
-                    f"(tolerância estendida) — {len(slab_polygons)} painéis, "
+                    f"(tolerância estendida) — {len(axes_slabs)} painéis, "
+                    f"área total {total_area:.0f}m²"
+                )
+
+    # Tier 3: Direct boundary extraction from DXF hatches/polylines
+    # Catches slabs that beam grid misses entirely (e.g., when beams
+    # don't form closed polygons, or slab boundaries are explicit in DXF)
+    if slab_hatches or slab_polylines:
+        boundary_slabs = derive_slabs_from_boundaries(
+            hatches=slab_hatches or [],
+            polylines=slab_polylines or [],
+            scale=1.0,  # Already in real coordinates
+        )
+        if boundary_slabs:
+            before = len(slab_polygons)
+            slab_polygons = merge_slab_sources(slab_polygons, boundary_slabs)
+            added = len(slab_polygons) - before
+            if added > 0:
+                total_area = sum(p.area for p in boundary_slabs)
+                warnings.append(
+                    f"Lajes detectadas em hatches/polylines do DXF — "
+                    f"{added} painel(éis) adicionais, "
                     f"área total {total_area:.0f}m²"
                 )
 
