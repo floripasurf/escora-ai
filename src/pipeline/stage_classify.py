@@ -9,7 +9,9 @@ import math
 from typing import List, Set, Dict, Optional
 from src.pipeline.stage_segment import LevelSegment
 from src.pipeline.stage_parse import TextEntity
-from src.parser.segment_classifier import find_beam_candidates, find_pillar_candidates
+from src.parser.segment_classifier import (
+    find_beam_candidates, find_centerline_beam_candidates, find_pillar_candidates,
+)
 from src.parser.text_classifier import classify_text, extract_section, TextClassification
 from src.models.pipeline_models import ClassifiedElement, ElementType
 from src.models.confidence import calculate_confidence
@@ -278,8 +280,35 @@ def classify_elements(
         else:
             seg_dicts.append({"type": "V", "x": s.x * scale, "y_min": s.y_min * scale, "y_max": s.y_max * scale})
 
-    # Beams from geometry
+    # Beams from geometry (parallel pairs + centerlines)
     beam_candidates = find_beam_candidates(seg_dicts)
+
+    # Also detect centerline beams (single lines, e.g. eixos on layer 42)
+    # Only from layers that DON'T already have parallel-pair beams —
+    # those are "axis-only" layers (beam centerlines without outlines)
+    pair_beam_layers = set()
+    for s in level.segments:
+        if beam_layers and s.layer in beam_layers:
+            pair_beam_layers.add(s.layer)
+    centerline_segs = []
+    for s in level.segments:
+        if s.layer in pair_beam_layers:
+            continue  # skip layers that already have parallel-pair beams
+        if s.type == "H":
+            centerline_segs.append({
+                "type": "H", "y": s.y * scale,
+                "x_min": s.x_min * scale, "x_max": s.x_max * scale,
+            })
+        else:
+            centerline_segs.append({
+                "type": "V", "x": s.x * scale,
+                "y_min": s.y_min * scale, "y_max": s.y_max * scale,
+            })
+    centerline_beams = find_centerline_beam_candidates(
+        centerline_segs, existing_beams=beam_candidates,
+    )
+    beam_candidates = beam_candidates + centerline_beams
+
     for bc in beam_candidates:
         if bc.direction == "x":
             beam_geometry = [(bc.start, bc.axis_coord), (bc.end, bc.axis_coord)]
