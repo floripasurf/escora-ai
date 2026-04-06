@@ -167,30 +167,12 @@ def _generate_output_dxf(input_path: str, calc, output_path: str):
 
     for layer_name, color in [
         ("ESCORAS_VIGA", 1), ("ESCORAS_LAJE", 3),
-        ("INFO_ESCORAS", 5), ("VIGAS_DET", 6), ("LAJES_DET", 4),
+        ("INFO_ESCORAS", 5),
     ]:
         if layer_name not in doc.layers:
             doc.layers.add(layer_name, color=color)
 
-    # Draw beam centerlines
-    for br in calc.beam_results:
-        b = br.beam
-        if len(b.geometry) >= 2:
-            p1, p2 = b.geometry[0], b.geometry[1]
-            msp.add_line(p1, p2, dxfattribs={"layer": "VIGAS_DET", "lineweight": 50})
-            mx = (p1[0] + p2[0]) / 2
-            my = (p1[1] + p2[1]) / 2
-            name = b.name or "?"
-            w = b.section_width_m or 0
-            h = b.section_height_m or "?"
-            msp.add_text(
-                f"{name} {w}x{h}", height=0.15,
-                dxfattribs={"layer": "INFO_ESCORAS", "insert": (mx + 0.1, my + 0.1)},
-            )
-
     # Draw beam shores — crosshair + circle for visibility
-    # Marker total diameter should be < half the minimum shore spacing
-    # to avoid visual overlap between adjacent shores
     shore_radius = 0.12  # 12cm radius — clear but compact
     cross_size = 0.15    # 15cm crosshair arm length
     for br in calc.beam_results:
@@ -200,7 +182,6 @@ def _generate_output_dxf(input_path: str, calc, output_path: str):
                 center=(cx, cy), radius=shore_radius,
                 dxfattribs={"layer": "ESCORAS_VIGA"},
             )
-            # Crosshair for visibility
             msp.add_line(
                 (cx - cross_size, cy), (cx + cross_size, cy),
                 dxfattribs={"layer": "ESCORAS_VIGA"},
@@ -210,12 +191,8 @@ def _generate_output_dxf(input_path: str, calc, output_path: str):
                 dxfattribs={"layer": "ESCORAS_VIGA"},
             )
 
-    # Draw slab contours and shores
+    # Draw slab shores
     for sr in calc.slab_results:
-        if hasattr(sr.polygon, "exterior"):
-            coords = list(sr.polygon.exterior.coords)
-            for k in range(len(coords) - 1):
-                msp.add_line(coords[k], coords[k + 1], dxfattribs={"layer": "LAJES_DET"})
         for shore in sr.shores:
             cx, cy = shore.x, shore.y
             msp.add_circle(
