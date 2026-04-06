@@ -365,6 +365,7 @@ def run_calculation(
             slab_thickness_m=thickness,
             span_m=beam_length,
             slab_type=slab_type,
+            element_type="beam",
         )
 
         # --- ML advisory prediction ---
@@ -706,6 +707,7 @@ def run_calculation(
             load_per_point_kn=load_per_shore_estimate,
             slab_thickness_m=thickness,
             slab_type=slab_type,
+            element_type="slab",
         )
 
         slab_tower = None

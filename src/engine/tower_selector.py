@@ -1,13 +1,17 @@
 """Tower vs telescopic shore decision engine and tower selection.
 
-Decision criteria (NBR 15696 + practical engineering):
-- Height > 4.5m → tower required (telescopic shore limit)
-- Load > 20 kN/point → tower recommended (heavy loads)
-- Height > 12m OR span > 15m → cimbramento (tower + distribution beam)
-- Ribbed slab with h > 30cm → tower with distribution beam
+Decision criteria (NBR 15696 + real Orguel/Mecanor practice):
+- Height > 4.5m → tower required (ESC450 max limit)
+- Load > 20 kN/point → tower recommended
+- Ribbed/thick slab ≥ 30cm → tower with distribution beam
+- Height > 12m OR span > 15m → heavy cimbramento
 
-When towers are selected, also selects appropriate distribution beams
-to transfer load from the slab/beam to the tower heads.
+Real locadora insight (Orguel): beams tend to use towers + VM130,
+slabs tend to use telescopic shores. But this is a preference, not
+a hard rule — decision depends on height and load.
+
+Shore models: ESC310 (2.00-3.10m), ESC450 (3.00-4.50m)
+VM130 lengths: 155, 205, 255, 310, 360, 410cm
 """
 
 import json
@@ -23,8 +27,7 @@ from src.models.shore import (
 logger = logging.getLogger(__name__)
 
 # Decision thresholds
-MAX_TELESCOPIC_HEIGHT_M = 4.5       # Above this → tower
-MAX_TELESCOPIC_LOAD_KN = 20.0       # Above this → tower recommended
+MAX_TELESCOPIC_HEIGHT_M = 4.5       # ESC450 max height
 CIMBRAMENTO_HEIGHT_M = 12.0         # Above this → heavy cimbramento
 CIMBRAMENTO_SPAN_M = 15.0           # Above this → heavy cimbramento
 HEAVY_SLAB_THICKNESS_M = 0.30       # Above this → tower with dist. beam
@@ -53,30 +56,27 @@ def decide_support_type(
     slab_thickness_m: float = 0.12,
     span_m: float = 0.0,
     slab_type: str = "solid",
+    element_type: str = "slab",
 ) -> Tuple[SupportType, List[str]]:
     """Decide between telescopic shore and tower.
+
+    Based on real locadora practice (Orguel/Mecanor):
+    - element_type="beam" → ALWAYS tower + VM130
+    - element_type="slab" → shore, unless height/thickness triggers tower
 
     Returns (support_type, reasons) where reasons explain the decision.
     """
     reasons = []
 
-    # Rule 1: Height exceeds telescopic limit
+    # Rule 1: Height exceeds telescopic limit (ESC450 max = 4.50m)
     if required_height_m > MAX_TELESCOPIC_HEIGHT_M:
         reasons.append(
             f"Altura {required_height_m:.1f}m > {MAX_TELESCOPIC_HEIGHT_M}m "
-            f"(limite escora telescópica)"
+            f"(limite ESC450)"
         )
         return SupportType.TOWER, reasons
 
-    # Rule 2: Heavy load per point
-    if load_per_point_kn > MAX_TELESCOPIC_LOAD_KN:
-        reasons.append(
-            f"Carga {load_per_point_kn:.1f} kN > {MAX_TELESCOPIC_LOAD_KN} kN "
-            f"(limite escora telescópica padrão)"
-        )
-        return SupportType.TOWER, reasons
-
-    # Rule 3: Large span (cimbramento)
+    # Rule 2: Large span (cimbramento)
     if span_m > CIMBRAMENTO_SPAN_M:
         reasons.append(
             f"Vão {span_m:.1f}m > {CIMBRAMENTO_SPAN_M}m "
@@ -84,15 +84,15 @@ def decide_support_type(
         )
         return SupportType.TOWER, reasons
 
-    # Rule 4: Heavy slab
-    if slab_thickness_m > HEAVY_SLAB_THICKNESS_M:
+    # Rule 3: Heavy/thick slab (≥30cm)
+    if slab_thickness_m >= HEAVY_SLAB_THICKNESS_M:
         reasons.append(
-            f"Laje espessa {slab_thickness_m*100:.0f}cm > {HEAVY_SLAB_THICKNESS_M*100:.0f}cm "
+            f"Laje espessa {slab_thickness_m*100:.0f}cm ≥ {HEAVY_SLAB_THICKNESS_M*100:.0f}cm "
             f"(recomendado torre com viga de distribuição)"
         )
         return SupportType.TOWER, reasons
 
-    # Rule 5: Ribbed slab (weight of formwork)
+    # Rule 4: Ribbed slab ≥ 25cm
     if slab_type == "ribbed" and slab_thickness_m > 0.25:
         reasons.append(
             f"Laje nervurada h={slab_thickness_m*100:.0f}cm "
@@ -100,10 +100,10 @@ def decide_support_type(
         )
         return SupportType.TOWER, reasons
 
-    # Default: telescopic is fine
+    # Default: telescopic shore (ESC310 or ESC450 by height)
     reasons.append(
         f"Escora telescópica adequada "
-        f"(h={required_height_m:.1f}m, carga={load_per_point_kn:.1f}kN)"
+        f"(h={required_height_m:.1f}m, laje {slab_thickness_m*100:.0f}cm)"
     )
     return SupportType.TELESCOPIC, reasons
 
