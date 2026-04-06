@@ -20,8 +20,10 @@ logger = logging.getLogger(__name__)
 
 # Nervura detection thresholds
 MIN_NERVURA_RECTS = 20      # Minimum rects to consider a nervura pattern
+MIN_NERVURA_RECT_SIDE = 0.25  # m — minimum dimension per side (filters pillar details)
 MAX_NERVURA_RECT_AREA = 2.0  # m² — individual rib fill max area
-NN_TIGHT_THRESHOLD = 0.50   # m — NN distance below which rects are "densely packed"
+MAX_NERVURA_SIZE_CV = 0.40  # Coefficient of variation — nervura rects are uniform
+NN_TIGHT_THRESHOLD = 1.20   # m — NN distance below which rects are "densely packed"
 NN_TIGHT_RATIO = 0.50       # >50% of rects must be densely packed
 
 # Rib grid extraction
@@ -103,11 +105,26 @@ def detect_nervura_regions(
     regions = []
 
     for layer, layer_rects in by_layer.items():
-        # Filter to small rects only
-        small_rects = [r for r in layer_rects
-                       if r["area"] <= MAX_NERVURA_RECT_AREA and r["area"] > 0.001]
+        # Filter to small rects with minimum side length
+        # (filters out tiny pillar section details like 0.1×0.4m)
+        small_rects = [
+            r for r in layer_rects
+            if r["area"] <= MAX_NERVURA_RECT_AREA
+            and r["area"] > 0.001
+            and r["width"] >= MIN_NERVURA_RECT_SIDE
+            and r["height"] >= MIN_NERVURA_RECT_SIDE
+        ]
         if len(small_rects) < MIN_NERVURA_RECTS:
             continue
+
+        # Check size uniformity — nervura caixões are all the same size
+        areas = [r["area"] for r in small_rects]
+        mean_area = sum(areas) / len(areas)
+        if mean_area > 0:
+            std_area = (sum((a - mean_area) ** 2 for a in areas) / len(areas)) ** 0.5
+            cv = std_area / mean_area
+            if cv > MAX_NERVURA_SIZE_CV:
+                continue  # Too much size variation — not a uniform nervura grid
 
         # Check density — nervura rects are tightly packed
         positions = [(r["cx"], r["cy"]) for r in small_rects]
@@ -126,19 +143,64 @@ def detect_nervura_regions(
         if tight_count / len(small_rects) < NN_TIGHT_RATIO:
             continue  # Not densely packed enough
 
-        # This layer is nervura — extract rib grid
-        region = _extract_rib_grid(small_rects, beams)
-        if region:
-            logger.info(
-                f"Nervura detected on layer '{layer}': "
-                f"{len(small_rects)} rects, "
-                f"{len(region.h_rib_lines)} H ribs, "
-                f"{len(region.v_rib_lines)} V ribs, "
-                f"area {region.area_m2:.1f}m²"
-            )
-            regions.append(region)
+        # Spatially cluster rects into separate nervura zones
+        # (one layer can have multiple nervura regions)
+        clusters = _spatial_cluster_rects(small_rects, gap=3.0)
+
+        for cluster in clusters:
+            if len(cluster) < MIN_NERVURA_RECTS:
+                continue
+            region = _extract_rib_grid(cluster, beams)
+            if region:
+                logger.info(
+                    f"Nervura detected on layer '{layer}': "
+                    f"{len(cluster)} rects, "
+                    f"{len(region.h_rib_lines)} H ribs, "
+                    f"{len(region.v_rib_lines)} V ribs, "
+                    f"area {region.area_m2:.1f}m²"
+                )
+                regions.append(region)
 
     return regions
+
+
+def _spatial_cluster_rects(
+    rects: List[dict],
+    gap: float = 3.0,
+) -> List[List[dict]]:
+    """Cluster rects into spatially separate groups.
+
+    Uses simple flood-fill: two rects are in the same cluster if their
+    centers are within `gap` meters of each other (directly or transitively).
+    """
+    n = len(rects)
+    if n == 0:
+        return []
+
+    visited = [False] * n
+    clusters: List[List[dict]] = []
+
+    for i in range(n):
+        if visited[i]:
+            continue
+        # BFS from rect i
+        cluster = []
+        queue = [i]
+        visited[i] = True
+        while queue:
+            idx = queue.pop(0)
+            cluster.append(rects[idx])
+            cx1, cy1 = rects[idx]["cx"], rects[idx]["cy"]
+            for j in range(n):
+                if visited[j]:
+                    continue
+                cx2, cy2 = rects[j]["cx"], rects[j]["cy"]
+                if math.hypot(cx2 - cx1, cy2 - cy1) <= gap:
+                    visited[j] = True
+                    queue.append(j)
+        clusters.append(cluster)
+
+    return clusters
 
 
 def _extract_rib_grid(

@@ -157,6 +157,89 @@ def _deduplicate_beams(beams: List[BeamCandidate]) -> List[BeamCandidate]:
     return result
 
 
+MIN_CENTERLINE_LENGTH = 2.5  # m — minimum length for centerline beams
+MAX_CENTERLINE_LENGTH = 20.0  # m — maximum length (longer = grid/dimension line)
+DEFAULT_CENTERLINE_WIDTH = 0.14  # m — assumed width when no pair available
+
+
+def find_centerline_beam_candidates(
+    segments: List[dict],
+    existing_beams: List[BeamCandidate] = None,
+    min_length: float = MIN_CENTERLINE_LENGTH,
+) -> List[BeamCandidate]:
+    """Detect beam centerlines: single H/V segments that are beam axes.
+
+    Some DXFs represent beams as single lines (centerlines/eixos) rather
+    than parallel pairs. This function finds long H/V segments that don't
+    overlap with already-detected parallel-pair beams.
+
+    Args:
+        segments: Segment dicts with x, y, x_min, y_min, x_max, y_max, type.
+        existing_beams: Already detected parallel-pair beams to avoid duplicates.
+        min_length: Minimum segment length to consider.
+
+    Returns:
+        List of BeamCandidate with default width.
+    """
+    existing_beams = existing_beams or []
+
+    h_segs = [s for s in segments if s["type"] == "H"]
+    v_segs = [s for s in segments if s["type"] == "V"]
+    candidates = []
+
+    for s in h_segs:
+        length = s["x_max"] - s["x_min"]
+        if length < min_length or length > MAX_CENTERLINE_LENGTH:
+            continue
+        axis_y = s["y"]
+        if _overlaps_existing(axis_y, s["x_min"], s["x_max"], "x", existing_beams):
+            continue
+        candidates.append(BeamCandidate(
+            axis_coord=axis_y,
+            start=s["x_min"], end=s["x_max"],
+            width_m=DEFAULT_CENTERLINE_WIDTH,
+            length_m=length,
+            direction="x",
+            score=0.40,  # lower confidence than parallel-pair beams
+        ))
+
+    for s in v_segs:
+        length = s["y_max"] - s["y_min"]
+        if length < min_length or length > MAX_CENTERLINE_LENGTH:
+            continue
+        axis_x = s["x"]
+        if _overlaps_existing(axis_x, s["y_min"], s["y_max"], "y", existing_beams):
+            continue
+        candidates.append(BeamCandidate(
+            axis_coord=axis_x,
+            start=s["y_min"], end=s["y_max"],
+            width_m=DEFAULT_CENTERLINE_WIDTH,
+            length_m=length,
+            direction="y",
+            score=0.40,
+        ))
+
+    return _deduplicate_beams(candidates)
+
+
+def _overlaps_existing(
+    axis: float, start: float, end: float,
+    direction: str, existing: List[BeamCandidate],
+    axis_tol: float = 1.0,
+) -> bool:
+    """Check if a centerline overlaps an existing parallel-pair beam."""
+    for b in existing:
+        if b.direction != direction:
+            continue
+        if abs(b.axis_coord - axis) > axis_tol:
+            continue
+        # Check span overlap
+        overlap = min(end, b.end) - max(start, b.start)
+        if overlap > 0.5 * (end - start):
+            return True
+    return False
+
+
 def find_pillar_candidates(
     rects: List[dict],
     max_area: float = MAX_PILLAR_AREA,

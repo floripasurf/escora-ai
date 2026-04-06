@@ -536,9 +536,11 @@ def run_calculation(
     # (DISTANCIA_PILAR_MIN = 0.70m). Having two filters with different thresholds
     # caused shores placed at 0.70-1.00m to be incorrectly removed.
 
-    # === NERVURA DETECTION (disabled — requires more learning from executed files) ===
-    # TODO: re-enable once we have reference projects with correct nervura shoring
-    nervura_regions = []
+    # === NERVURA DETECTION ===
+    nervura_regions = detect_nervura_regions(
+        rects=nervura_rects or [],
+        beams=valid_beams,
+    )
 
     # === SLAB SHORING ===
     # Strategy: 4-tier slab detection with merge
