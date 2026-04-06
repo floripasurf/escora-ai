@@ -87,8 +87,8 @@ def generate_dxf(
     beam_shore_count = 0
     slab_shore_count = 0
 
-    # Draw structural elements (clean mode or overlay enrichment)
-    if elements:
+    # Draw structural elements only in clean mode — overlay already has them
+    if elements and mode == "clean":
         _draw_pillars(msp, [e for e in elements if e.element_type == ElementType.PILLAR])
         _draw_beams(msp, [e for e in elements if e.element_type == ElementType.BEAM])
 
