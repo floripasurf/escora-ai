@@ -7,7 +7,7 @@ Pillars: small closed rectangles (area < MAX_PILLAR_AREA).
 from dataclasses import dataclass
 from typing import List
 
-MAX_BEAM_WIDTH = 0.50
+MAX_BEAM_WIDTH = 0.65  # m — allows beams up to 60cm wide (NBR 6118)
 MIN_BEAM_WIDTH = 0.08
 MIN_BEAM_LENGTH_RATIO = 5.0  # length/width — real beams are elongated
 MAX_PILLAR_AREA = 1.00  # m² — allows large columns (e.g. 0.87x0.94m)
