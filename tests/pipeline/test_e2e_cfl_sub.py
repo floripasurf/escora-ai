@@ -33,13 +33,15 @@ class TestCFLSUBRegression:
         # CFL-SUB has 83 pillars (manual count) — expect at least 60 detected
         assert len(pillars) >= 60
 
-    def test_detects_circular_pillars(self):
+    def test_detects_square_section_pillars(self):
         result = run_pipeline(str(DXF_PATH))
         all_elements = result.levels[0].elements
         pillars = [e for e in all_elements if e.element_type == ElementType.PILLAR]
-        # Some pillars are circular (diameter == width == height)
-        circular = [p for p in pillars if p.section_width_m == p.section_height_m]
-        assert len(circular) >= 10
+        # Some pillars have square sections (width == height)
+        # Note: r=0.25 circles on layer 1 are level markers (cota de nível),
+        # not circular pillars — they have cross patterns and elevation text
+        square = [p for p in pillars if p.section_width_m == p.section_height_m]
+        assert len(square) >= 3
 
     def test_detects_scale(self):
         result = run_pipeline(str(DXF_PATH))
