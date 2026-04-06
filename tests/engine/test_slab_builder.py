@@ -1,93 +1,137 @@
-"""Test slab derivation from beam grid via Shapely polygonize."""
+"""Tests for slab detection from beam pairs and edge closure."""
 
 import pytest
-from shapely.geometry import LineString, box
-from src.engine.slab_builder import derive_slabs_from_beams, detect_cantilever_slabs
+from src.engine.slab_builder import (
+    derive_slabs_from_beam_pairs,
+    _close_open_beam_cells,
+)
 from src.models.pipeline_models import ClassifiedElement, ElementType
+from shapely.geometry import LineString
 
 
-def _beam(x1, y1, x2, y2, **kwargs):
+def _make_beam(x1, y1, x2, y2, name="V1"):
+    """Create a minimal ClassifiedElement beam."""
     return ClassifiedElement(
         element_type=ElementType.BEAM,
+        name=name,
+        layer="BEAM",
         geometry=[(x1, y1), (x2, y2)],
-        score_geometric=0.85, score_textual=0.0, score_final=0.75,
-        section_width_m=kwargs.get("width", 0.14),
-        section_height_m=kwargs.get("height", 0.40),
-        length_m=((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5,
+        section_width_m=0.14,
+        section_height_m=0.40,
     )
 
 
-def _pillar(cx, cy):
-    return ClassifiedElement(
-        element_type=ElementType.PILLAR,
-        geometry=[(cx, cy)],
-        score_geometric=0.80, score_textual=0.0, score_final=0.70,
-        section_width_m=0.20, section_height_m=0.40,
-    )
-
-
-class TestDeriveSlabs:
-    def test_simple_rectangle_grid(self):
-        """4 beams forming a rectangle -> 1 slab panel."""
+class TestBeamPairSlabs:
+    def test_two_parallel_h_beams(self):
+        """Two horizontal beams should produce one slab."""
         beams = [
-            _beam(0, 0, 10, 0),
-            _beam(0, 6, 10, 6),
-            _beam(0, 0, 0, 6),
-            _beam(10, 0, 10, 6),
+            _make_beam(0, 0, 10, 0, "V1"),
+            _make_beam(0, 5, 10, 5, "V2"),
         ]
-        slabs = derive_slabs_from_beams(beams)
+        slabs = derive_slabs_from_beam_pairs(beams)
         assert len(slabs) == 1
-        assert slabs[0].area > 50
+        assert slabs[0].area == pytest.approx(50.0, abs=0.1)
 
-    def test_two_panel_grid(self):
-        """5 beams forming 2 adjacent panels -> 2 slab panels."""
+    def test_two_parallel_v_beams(self):
+        """Two vertical beams should produce one slab."""
         beams = [
-            _beam(0, 0, 10, 0),
-            _beam(0, 6, 10, 6),
-            _beam(0, 0, 0, 6),
-            _beam(5, 0, 5, 6),
-            _beam(10, 0, 10, 6),
+            _make_beam(0, 0, 0, 8, "P1"),
+            _make_beam(5, 0, 5, 8, "P2"),
         ]
-        slabs = derive_slabs_from_beams(beams)
-        assert len(slabs) == 2
+        slabs = derive_slabs_from_beam_pairs(beams)
+        assert len(slabs) == 1
+        assert slabs[0].area == pytest.approx(40.0, abs=0.1)
 
-    def test_no_closed_regions(self):
-        """Open beams (not forming closed polygon) -> 0 slabs."""
+    def test_partial_overlap(self):
+        """Beams with partial overlap produce slab of overlap area."""
         beams = [
-            _beam(0, 0, 10, 0),
-            _beam(0, 0, 0, 6),
+            _make_beam(0, 0, 10, 0, "V1"),
+            _make_beam(5, 4, 15, 4, "V2"),
         ]
-        slabs = derive_slabs_from_beams(beams)
+        slabs = derive_slabs_from_beam_pairs(beams)
+        assert len(slabs) == 1
+        assert slabs[0].area == pytest.approx(20.0, abs=0.1)
+
+    def test_no_overlap(self):
+        """Non-overlapping beams produce no slab."""
+        beams = [
+            _make_beam(0, 0, 5, 0, "V1"),
+            _make_beam(10, 4, 15, 4, "V2"),
+        ]
+        slabs = derive_slabs_from_beam_pairs(beams)
         assert len(slabs) == 0
 
-    def test_three_by_two_grid(self):
-        """Grid of 3x2 panels -> 6 slab panels."""
-        beams = []
-        for y in [0, 4, 8]:
-            beams.append(_beam(0, y, 15, y))
-        for x in [0, 5, 10, 15]:
-            beams.append(_beam(x, 0, x, 8))
-        slabs = derive_slabs_from_beams(beams)
-        assert len(slabs) == 6
-
-
-class TestCantileverSlabs:
-    def test_slab_outside_pillar_hull_is_cantilever(self):
-        pillars = [
-            _pillar(2, 2), _pillar(8, 2),
-            _pillar(2, 6), _pillar(8, 6),
+    def test_too_far_apart(self):
+        """Beams > max_span apart produce no slab."""
+        beams = [
+            _make_beam(0, 0, 10, 0, "V1"),
+            _make_beam(0, 12, 10, 12, "V2"),
         ]
-        slabs = [box(8, 0, 12, 6)]
-        result = detect_cantilever_slabs(slabs, pillars)
-        assert len(result) == 1
-        assert result[0] is True
+        slabs = derive_slabs_from_beam_pairs(beams, max_span=8.0)
+        assert len(slabs) == 0
 
-    def test_slab_inside_pillar_hull_is_not_cantilever(self):
-        pillars = [
-            _pillar(0, 0), _pillar(10, 0),
-            _pillar(0, 8), _pillar(10, 8),
+    def test_short_beams_filtered(self):
+        """Beams shorter than 2.5m are filtered (pillar outlines)."""
+        beams = [
+            _make_beam(0, 0, 2.0, 0, "V1"),
+            _make_beam(0, 5, 2.0, 5, "V2"),
         ]
-        slabs = [box(2, 2, 8, 6)]
-        result = detect_cantilever_slabs(slabs, pillars)
-        assert len(result) == 1
-        assert result[0] is False
+        slabs = derive_slabs_from_beam_pairs(beams)
+        assert len(slabs) == 0
+
+    def test_intermediate_beam_splits(self):
+        """An intermediate beam prevents pairing across it."""
+        beams = [
+            _make_beam(0, 0, 10, 0, "V1"),
+            _make_beam(0, 3, 10, 3, "V2"),
+            _make_beam(0, 6, 10, 6, "V3"),
+        ]
+        slabs = derive_slabs_from_beam_pairs(beams)
+        assert len(slabs) == 2
+        areas = sorted(s.area for s in slabs)
+        assert areas[0] == pytest.approx(30.0, abs=0.1)
+        assert areas[1] == pytest.approx(30.0, abs=0.1)
+
+    def test_grid_produces_multiple_slabs(self):
+        """A 2x2 grid of beams should produce at least 1 slab per cell."""
+        beams = [
+            _make_beam(0, 0, 10, 0, "H1"),
+            _make_beam(0, 5, 10, 5, "H2"),
+            _make_beam(0, 0, 0, 5, "V1"),
+            _make_beam(5, 0, 5, 5, "V2"),
+        ]
+        slabs = derive_slabs_from_beam_pairs(beams)
+        assert len(slabs) >= 1
+
+
+class TestEdgeClosure:
+    def test_closes_u_shape(self):
+        """Free endpoints at same Y get connected."""
+        lines = [
+            LineString([(0, 0), (0, 5)]),
+            LineString([(4, 0), (4, 5)]),
+            LineString([(0, 0), (4, 0)]),
+        ]
+        closed = _close_open_beam_cells(lines)
+        assert len(closed) == len(lines) + 1
+
+    def test_no_closure_when_closed(self):
+        """Fully closed grid needs no closures."""
+        lines = [
+            LineString([(0, 0), (0, 5)]),
+            LineString([(4, 0), (4, 5)]),
+            LineString([(0, 0), (4, 0)]),
+            LineString([(0, 5), (4, 5)]),
+        ]
+        closed = _close_open_beam_cells(lines)
+        assert len(closed) == len(lines)
+
+    def test_gap_too_large(self):
+        """Free endpoints too far apart should not be closed."""
+        lines = [
+            LineString([(0, 0), (0, 5)]),
+            LineString([(20, 0), (20, 5)]),
+            LineString([(0, 0), (20, 0)]),
+        ]
+        closed = _close_open_beam_cells(lines, max_gap=10.0)
+        assert len(closed) == len(lines)

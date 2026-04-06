@@ -15,7 +15,8 @@ from src.models.calculation_models import (
 )
 from src.models.slab import Slab
 from src.engine.slab_builder import (
-    derive_slabs_from_beams, derive_slabs_from_axes, detect_cantilever_slabs,
+    derive_slabs_from_beams, derive_slabs_from_beam_pairs,
+    derive_slabs_from_axes, detect_cantilever_slabs,
     derive_slabs_from_boundaries, merge_slab_sources,
 )
 from src.engine.load_calculator import calculate_total_load
@@ -540,13 +541,23 @@ def run_calculation(
     nervura_regions = []
 
     # === SLAB SHORING ===
-    # Strategy: 3-tier slab detection with merge
+    # Strategy: 4-tier slab detection with merge
     # Tier 1: Beam grid polygonize (most precise, aligned to beams)
+    # Tier 1.5: Adjacent beam pairs (cantilever/edge slabs without full closure)
     # Tier 2: Beam axes with extended tolerance (fallback for sparse grids)
     # Tier 3: Direct boundary extraction from DXF hatches/polylines
 
     # Tier 1: Beam grid
     slab_polygons = derive_slabs_from_beams(valid_beams)
+
+    # Tier 1.5: Beam pair slabs (cantilever/edge slabs)
+    pair_slabs = derive_slabs_from_beam_pairs(valid_beams)
+    if pair_slabs:
+        slab_polygons = merge_slab_sources(slab_polygons, pair_slabs)
+        logger.info(
+            f"Tier 1.5: {len(pair_slabs)} beam-pair slab candidates, "
+            f"{len(slab_polygons)} total after merge"
+        )
 
     # Tier 2: Extended beam axes (when beam grid produces too few slabs)
     MIN_SLAB_PANELS = 3

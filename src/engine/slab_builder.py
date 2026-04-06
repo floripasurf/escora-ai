@@ -194,12 +194,251 @@ def _extend_axes_to_grid(
     return lines
 
 
+def _close_open_beam_cells(
+    lines: List[LineString],
+    max_gap: float = 10.0,
+    min_gap: float = 0.3,
+) -> List[LineString]:
+    """Add virtual closure lines for cantilever/edge slab detection.
+
+    In cantilever slabs and building edges, beams form 3 sides of a cell
+    but the 4th side is open (no beam). This finds pairs of free endpoints
+    (degree-1 nodes) at similar X or Y coordinates and connects them,
+    closing the cell so polygonize can extract the slab polygon.
+
+    Args:
+        lines: Beam axis LineStrings from _extend_beams_to_grid.
+        max_gap: Maximum distance between free endpoints to close (m).
+        min_gap: Minimum distance to avoid degenerate closures (m).
+
+    Returns:
+        Original lines + virtual closure lines.
+    """
+    from collections import Counter
+
+    def rnd(pt: Tuple[float, float]) -> Tuple[float, float]:
+        return (round(pt[0], 2), round(pt[1], 2))
+
+    # Build node degree map
+    node_deg: Counter = Counter()
+    for line in lines:
+        coords = list(line.coords)
+        node_deg[rnd(coords[0])] += 1
+        node_deg[rnd(coords[-1])] += 1
+
+    # Free endpoints: exactly 1 line meets here
+    free = [pt for pt, deg in node_deg.items() if deg == 1]
+
+    if len(free) < 2:
+        return lines
+
+    closure: List[LineString] = []
+    used: set = set()
+
+    # --- Horizontal closures: pair free endpoints at similar Y ---
+    by_y = sorted(free, key=lambda p: (round(p[1], 1), p[0]))
+    for i in range(len(by_y)):
+        if by_y[i] in used:
+            continue
+        # Try to pair with the next endpoint at similar Y
+        for j in range(i + 1, len(by_y)):
+            if by_y[j] in used:
+                continue
+            p1, p2 = by_y[i], by_y[j]
+            dy = abs(p2[1] - p1[1])
+            dx = abs(p2[0] - p1[0])
+            if dy > 0.2:
+                break  # sorted by Y, no more candidates at this Y level
+            if min_gap < dx < max_gap:
+                closure.append(LineString([p1, p2]))
+                used.add(p1)
+                used.add(p2)
+                break
+
+    # --- Vertical closures: pair free endpoints at similar X ---
+    by_x = sorted(free, key=lambda p: (round(p[0], 1), p[1]))
+    for i in range(len(by_x)):
+        if by_x[i] in used:
+            continue
+        for j in range(i + 1, len(by_x)):
+            if by_x[j] in used:
+                continue
+            p1, p2 = by_x[i], by_x[j]
+            dx = abs(p2[0] - p1[0])
+            dy = abs(p2[1] - p1[1])
+            if dx > 0.2:
+                break
+            if min_gap < dy < max_gap:
+                closure.append(LineString([p1, p2]))
+                used.add(p1)
+                used.add(p2)
+                break
+
+    if closure:
+        logger.info(
+            f"Edge closure: {len(closure)} virtual boundaries "
+            f"for cantilever/edge slabs"
+        )
+
+    return lines + closure
+
+
+def derive_slabs_from_beam_pairs(
+    beams: List[ClassifiedElement],
+    max_span: float = 8.0,
+    min_overlap: float = 1.5,
+    min_slab_area: float = MIN_SLAB_AREA,
+) -> List[Polygon]:
+    """Derive slab panels from pairs of adjacent parallel beams.
+
+    Unlike polygonize (which requires fully closed regions), this finds
+    slabs between pairs of parallel beams even when the grid is open.
+    Handles cantilever slabs, edge slabs, and sparse grids.
+
+    Algorithm:
+    1. Sort H beams by Y, V beams by X
+    2. For each pair of consecutive parallel beams:
+       - Compute X/Y overlap span
+       - If gap < max_span and overlap > min_overlap, create slab polygon
+    3. Filter by area and deduplicate
+
+    Args:
+        beams: Classified beam elements.
+        max_span: Maximum gap between parallel beams to form a slab (m).
+        min_overlap: Minimum overlap span to be a valid slab (m).
+        min_slab_area: Minimum slab area threshold (m²).
+    """
+    h_beams: List[Tuple[float, float, float]] = []  # (y, x_min, x_max)
+    v_beams: List[Tuple[float, float, float]] = []  # (x, y_min, y_max)
+
+    for beam in beams:
+        if beam.element_type != ElementType.BEAM or len(beam.geometry) < 2:
+            continue
+        start, end = beam.geometry[0], beam.geometry[1]
+        direction = _classify_beam_direction(start, end)
+        if direction == "H":
+            y = (start[1] + end[1]) / 2
+            x_min = min(start[0], end[0])
+            x_max = max(start[0], end[0])
+            # Skip very short segments (pillar outlines, not real beams)
+            if x_max - x_min < 2.5:
+                continue
+            h_beams.append((y, x_min, x_max))
+        else:
+            x = (start[0] + end[0]) / 2
+            y_min = min(start[1], end[1])
+            y_max = max(start[1], end[1])
+            if y_max - y_min < 2.5:
+                continue
+            v_beams.append((x, y_min, y_max))
+
+    candidates: List[Polygon] = []
+
+    def _has_intermediate_h(y1: float, y2: float, x_lo: float, x_hi: float) -> bool:
+        """Check if any H beam lies between y1 and y2 overlapping [x_lo, x_hi]."""
+        for ym, xm_min, xm_max in h_beams:
+            if ym <= y1 + 0.3 or ym >= y2 - 0.3:
+                continue
+            # Check X overlap with the slab region
+            overlap = min(xm_max, x_hi) - max(xm_min, x_lo)
+            if overlap >= min_overlap:
+                return True
+        return False
+
+    def _has_intermediate_v(x1: float, x2: float, y_lo: float, y_hi: float) -> bool:
+        """Check if any V beam lies between x1 and x2 overlapping [y_lo, y_hi]."""
+        for xm, ym_min, ym_max in v_beams:
+            if xm <= x1 + 0.3 or xm >= x2 - 0.3:
+                continue
+            overlap = min(ym_max, y_hi) - max(ym_min, y_lo)
+            if overlap >= min_overlap:
+                return True
+        return False
+
+    # --- H beam pairs: slab between two horizontal beams ---
+    h_beams.sort(key=lambda b: b[0])  # sort by Y
+    for i in range(len(h_beams)):
+        y1, x1_min, x1_max = h_beams[i]
+        for j in range(i + 1, len(h_beams)):
+            y2, x2_min, x2_max = h_beams[j]
+            gap = y2 - y1
+            if gap < 0.5:
+                continue  # same Y level, skip
+            if gap > max_span:
+                break  # sorted, no more candidates for this beam
+
+            # Compute X overlap
+            overlap_min = max(x1_min, x2_min)
+            overlap_max = min(x1_max, x2_max)
+            overlap = overlap_max - overlap_min
+            if overlap < min_overlap:
+                continue
+
+            # Skip if an intermediate H beam splits this region
+            if _has_intermediate_h(y1, y2, overlap_min, overlap_max):
+                continue
+
+            poly = Polygon([
+                (overlap_min, y1), (overlap_max, y1),
+                (overlap_max, y2), (overlap_min, y2),
+            ])
+            if poly.area >= min_slab_area:
+                candidates.append(poly)
+
+    # --- V beam pairs: slab between two vertical beams ---
+    v_beams.sort(key=lambda b: b[0])  # sort by X
+    for i in range(len(v_beams)):
+        x1, y1_min, y1_max = v_beams[i]
+        for j in range(i + 1, len(v_beams)):
+            x2, y2_min, y2_max = v_beams[j]
+            gap = x2 - x1
+            if gap < 0.5:
+                continue
+            if gap > max_span:
+                break
+
+            overlap_min = max(y1_min, y2_min)
+            overlap_max = min(y1_max, y2_max)
+            overlap = overlap_max - overlap_min
+            if overlap < min_overlap:
+                continue
+
+            # Skip if an intermediate V beam splits this region
+            if _has_intermediate_v(x1, x2, overlap_min, overlap_max):
+                continue
+
+            poly = Polygon([
+                (x1, overlap_min), (x2, overlap_min),
+                (x2, overlap_max), (x1, overlap_max),
+            ])
+            if poly.area >= min_slab_area:
+                candidates.append(poly)
+
+    if not candidates:
+        return []
+
+    result = _deduplicate_polygons(candidates)
+    if result:
+        logger.info(
+            f"Beam-pair slabs: {len(result)} panels from "
+            f"adjacent parallel beams"
+        )
+    return result
+
+
 def derive_slabs_from_beams(beams: List[ClassifiedElement]) -> List[Polygon]:
-    """Extract closed slab panels from the beam grid."""
+    """Extract closed slab panels from the beam grid.
+
+    After extending beams to bridge pillar gaps, adds virtual closure
+    lines at open edges (cantilever/edge slabs) before polygonizing.
+    """
     lines = _extend_beams_to_grid(beams)
 
     if not lines:
         return []
+
+    # Close open cells for cantilever/edge slabs
+    lines = _close_open_beam_cells(lines)
 
     merged = unary_union(lines)
     polygons = list(polygonize(merged))
@@ -230,6 +469,9 @@ def derive_slabs_from_axes(
 
     if not lines:
         return []
+
+    # Close open cells for cantilever/edge slabs
+    lines = _close_open_beam_cells(lines)
 
     merged = unary_union(lines)
     polygons = list(polygonize(merged))
