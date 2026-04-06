@@ -252,10 +252,6 @@ def _fix_global_overlaps(
             key2 = (t2, r2, s2)
             if key2 in to_remove:
                 continue
-            # Same slab's shores are already handled by grid spacing
-            if t1 == "slab" and t2 == "slab" and r1 == r2:
-                continue
-
             dist = math.hypot(x2 - x1, y2 - y1)
             if dist < MIN_GLOBAL_SHORE_DIST:
                 # Decide which to remove: prefer removing slab over beam,

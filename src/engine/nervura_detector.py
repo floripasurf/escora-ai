@@ -75,8 +75,7 @@ def detect_nervura_regions(
     if len(rects) < MIN_NERVURA_RECTS:
         return []
 
-    # Compute structural bounding box from beams — only consider rects
-    # within this area (filters out cross-section details, legends, etc.)
+    # Compute structural bounding box — filters out cross-section details, legends
     beam_xs = []
     beam_ys = []
     for b in beams:
@@ -84,14 +83,19 @@ def detect_nervura_regions(
             for pt in b.geometry:
                 beam_xs.append(pt[0])
                 beam_ys.append(pt[1])
-    if not beam_xs:
-        return []
 
-    struct_margin = 2.0  # m — margin around beam bounding box
-    struct_x_min = min(beam_xs) - struct_margin
-    struct_x_max = max(beam_xs) + struct_margin
-    struct_y_min = min(beam_ys) - struct_margin
-    struct_y_max = max(beam_ys) + struct_margin
+    struct_margin = 5.0  # m — generous margin around structural area
+    if beam_xs:
+        struct_x_min = min(beam_xs) - struct_margin
+        struct_x_max = max(beam_xs) + struct_margin
+        struct_y_min = min(beam_ys) - struct_margin
+        struct_y_max = max(beam_ys) + struct_margin
+    else:
+        # No beams: derive bounding box from rects themselves
+        struct_x_min = min(r["cx"] for r in rects) - struct_margin
+        struct_x_max = max(r["cx"] for r in rects) + struct_margin
+        struct_y_min = min(r["cy"] for r in rects) - struct_margin
+        struct_y_max = max(r["cy"] for r in rects) + struct_margin
 
     # Group rects by layer, filtered to structural area
     by_layer = {}

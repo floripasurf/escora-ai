@@ -5,7 +5,7 @@ from typing import List, Tuple, Optional
 from shapely.geometry import Point
 from src.models.slab import Slab
 from src.models.shore import PositionedShore, ShoreCatalogEntry
-from src.utils.constants import ESPACAMENTO_MAX_DEFAULT, DISTANCIA_BORDA_MIN, DISTANCIA_PILAR_MIN
+from src.utils.constants import ESPACAMENTO_MAX_DEFAULT, DISTANCIA_BORDA_MIN, DISTANCIA_PILAR_MIN, ESPACAMENTO_MIN
 
 
 class PillarExclusion:
@@ -104,6 +104,15 @@ def distribute_shores(
 
             # 2. Verificar zonas de exclusão de pilares
             if exclusions and any(exc.contains(x, y) for exc in exclusions):
+                continue
+
+            # 3. Enforce minimum spacing between shores
+            too_close = False
+            for existing in shores:
+                if math.hypot(x - existing.x, y - existing.y) < ESPACAMENTO_MIN:
+                    too_close = True
+                    break
+            if too_close:
                 continue
 
             shores.append(
