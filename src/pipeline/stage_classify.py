@@ -386,6 +386,54 @@ def classify_elements(
     MIN_CIRCLE_CLUSTER = 5  # minimum circles at same radius to be structural
     CIRCLE_CLUSTER_TOLERANCE = 0.10  # m — deduplicate overlapping circles
 
+    # --- Filter out level marker circles (cota de nível) ---
+    # These are annotation circles with a cross through the center and nearby
+    # elevation text (+3,80 etc.). They are NOT structural pillars.
+    import re as _re
+    _ELEVATION_PATTERN = _re.compile(r"[+\-]\s*\d+[,\.]\d+")
+
+    level_marker_positions: set = set()
+    for c in level.circles:
+        cx_s, cy_s = c.cx * scale, c.cy * scale
+        r_s = c.radius * scale
+
+        # Check for nearby elevation text (within 2× radius)
+        has_elevation_text = False
+        for t in level.texts:
+            dist = math.hypot(c.cx - t.x, c.cy - t.y)
+            if dist < max(2.0 / scale, c.radius * 6):
+                if _ELEVATION_PATTERN.search(t.content):
+                    has_elevation_text = True
+                    break
+
+        if not has_elevation_text:
+            continue
+
+        # Check for cross pattern: H and V segments passing through center
+        cross_count = 0
+        for seg in level.segments:
+            if seg.type == "H":
+                # H segment must pass through circle vertically
+                if abs(seg.y - c.cy) < c.radius * 0.8:
+                    if seg.x_min <= c.cx + c.radius * 0.5 and seg.x_max >= c.cx - c.radius * 0.5:
+                        seg_len = seg.x_max - seg.x_min
+                        if seg_len < c.radius * 4:  # short segment, not a beam
+                            cross_count += 1
+            elif seg.type == "V":
+                if abs(seg.x - c.cx) < c.radius * 0.8:
+                    if seg.y_min <= c.cy + c.radius * 0.5 and seg.y_max >= c.cy - c.radius * 0.5:
+                        seg_len = seg.y_max - seg.y_min
+                        if seg_len < c.radius * 4:
+                            cross_count += 1
+
+        # Require BOTH elevation text AND cross pattern to be confident
+        # it's a level marker (just elevation text nearby could be coincidence)
+        if cross_count >= 2 and has_elevation_text:
+            level_marker_positions.add(
+                (round(cx_s / CIRCLE_CLUSTER_TOLERANCE) * CIRCLE_CLUSTER_TOLERANCE,
+                 round(cy_s / CIRCLE_CLUSTER_TOLERANCE) * CIRCLE_CLUSTER_TOLERANCE)
+            )
+
     # Count circles by rounded radius to find structural patterns
     from collections import Counter
     radius_counts: Counter = Counter()
@@ -407,6 +455,9 @@ def classify_elements(
             key = (round(c.cx * scale / CIRCLE_CLUSTER_TOLERANCE) * CIRCLE_CLUSTER_TOLERANCE,
                    round(c.cy * scale / CIRCLE_CLUSTER_TOLERANCE) * CIRCLE_CLUSTER_TOLERANCE)
             if key in seen_circles:
+                continue
+            # Skip level marker circles (cota de nível)
+            if key in level_marker_positions:
                 continue
             seen_circles.add(key)
 
