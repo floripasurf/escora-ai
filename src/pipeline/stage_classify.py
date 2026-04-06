@@ -159,26 +159,25 @@ def _classify_layers(
             "cx": r.cx, "cy": r.cy, "width": r.width, "height": r.height, "area": r.area,
         })
 
-    result = {}
+    # A layer can be BOTH beam and pillar (e.g., layer "1" contains
+    # the main structural grid with both beam outlines and pillar fills).
+    # We track beam and pillar layers independently, then merge.
+    beam_layers: set = set()
+    pillar_layers: set = set()
 
     # Multi-layer beam selection: accept ALL layers that qualify.
-    # Real DXFs often have beams on 2-3 layers (e.g., main beams on one layer,
-    # secondary beams on another). Selecting only the best layer misses beams.
-    # Minimum rate threshold prevents noise layers from being included.
     MIN_BEAM_COUNT = 3
     MIN_BEAM_LAYER_RATE = 0.03  # 3% of segments must be beams
-    found_beam_layer = False
     for layer, seg_dicts in segs_by_layer.items():
         beams = find_beam_candidates(seg_dicts)
         if not beams or len(beams) < MIN_BEAM_COUNT:
             continue
         rate = len(beams) / max(len(seg_dicts), 1)
         if rate >= MIN_BEAM_LAYER_RATE:
-            result[layer] = ElementType.BEAM
-            found_beam_layer = True
+            beam_layers.add(layer)
 
     # Fallback: if no layer has MIN_BEAM_COUNT, pick the one with best rate
-    if not found_beam_layer:
+    if not beam_layers:
         best_rate = 0
         best_beam_layer = None
         for layer, seg_dicts in segs_by_layer.items():
@@ -190,14 +189,12 @@ def _classify_layers(
                 best_rate = rate
                 best_beam_layer = layer
         if best_beam_layer:
-            result[best_beam_layer] = ElementType.BEAM
+            beam_layers.add(best_beam_layer)
 
     # Accept additional beam layers from learning history
-    # Only if they have candidates in this DXF, high historical confidence,
-    # AND a reasonable detection rate (filters rebar/detailing noise)
     for layer, confidence in known_beam_layers.items():
-        if layer in result:
-            continue  # Already selected
+        if layer in beam_layers:
+            continue
         if confidence < MIN_LEARNED_LAYER_CONFIDENCE:
             continue
         if layer not in segs_by_layer:
@@ -206,28 +203,25 @@ def _classify_layers(
         if beams:
             rate = len(beams) / max(len(segs_by_layer[layer]), 1)
             if rate >= MIN_LEARNED_LAYER_RATE:
-                result[layer] = ElementType.BEAM
+                beam_layers.add(layer)
 
     # Pillar layers: accept ALL layers that contain valid pillar candidates.
-    # Unlike beams (where only 1 layer typically has parallel pairs), pillar fills
-    # are often spread across multiple layers (e.g., layers 21-24 for SOLID fills).
-    # Selecting only 1 layer misses pillars and breaks slab grid detection.
-    MAX_REALISTIC_PILLARS = 60  # Real buildings rarely have >60 pillars per floor
-    MIN_PILLAR_RATE = 0.05  # Minimum detection rate to accept a pillar layer
-    MIN_PILLAR_COUNT = 2  # At least 2 pillars to consider a layer structural
+    MAX_REALISTIC_PILLARS = 60
+    MIN_PILLAR_RATE = 0.05
+    MIN_PILLAR_COUNT = 2
     for layer, rect_dicts in rects_by_layer.items():
         pillars = find_pillar_candidates(rect_dicts)
         if not pillars or len(pillars) < MIN_PILLAR_COUNT:
             continue
         if _is_nervura_layer(pillars, MAX_REALISTIC_PILLARS):
-            continue  # Skip — nervura/waffle slab layer
+            continue
         rate = len(pillars) / max(len(rect_dicts), 1)
         if rate >= MIN_PILLAR_RATE:
-            result[layer] = ElementType.PILLAR
+            pillar_layers.add(layer)
 
     # Accept additional pillar layers from learning history
     for layer, confidence in known_pillar_layers.items():
-        if layer in result:
+        if layer in pillar_layers:
             continue
         if confidence < MIN_LEARNED_LAYER_CONFIDENCE:
             continue
@@ -236,10 +230,19 @@ def _classify_layers(
         pillars = find_pillar_candidates(rects_by_layer[layer])
         if pillars:
             if _is_nervura_layer(pillars, MAX_REALISTIC_PILLARS):
-                continue  # Skip — nervura/waffle slab layer
+                continue
             rate = len(pillars) / max(len(rects_by_layer[layer]), 1)
             if rate >= MIN_LEARNED_LAYER_RATE:
-                result[layer] = ElementType.PILLAR
+                pillar_layers.add(layer)
+
+    # Merge: beam layers take priority in the result dict (since classify_elements
+    # uses result to filter segments for beam detection). Pillar detection runs
+    # on rects independently and doesn't need layer filtering.
+    result = {}
+    for layer in pillar_layers:
+        result[layer] = ElementType.PILLAR
+    for layer in beam_layers:
+        result[layer] = ElementType.BEAM  # Overwrite pillar if dual-purpose
 
     return result
 
@@ -260,6 +263,9 @@ def classify_elements(
     )
     beam_layers = {l for l, t in layer_types.items() if t == ElementType.BEAM}
     pillar_layers = {l for l, t in layer_types.items() if t == ElementType.PILLAR}
+    # Layers classified as BEAM can also contain pillar rects (shared structural layers).
+    # Include beam layers in pillar search so their rects are not filtered out.
+    pillar_layers = pillar_layers | beam_layers
 
     # Strict layer filter: when beam layers are identified, ONLY use those layers
     # This eliminates dimension lines, hatching, and other noise from unclassified layers
