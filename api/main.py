@@ -1,15 +1,21 @@
 """FastAPI application — Escora.AI SaaS MVP."""
 
+import logging
 from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+
 from api.routes.jobs import router as jobs_router
 from api.routes.auth import router as auth_router
 from api.config import settings
+from api.services import job_service
 
-app = FastAPI(title="Escora.AI", version="0.2.0")
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title="Escora.AI", version="0.3.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -27,13 +33,43 @@ if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
+@app.on_event("startup")
+def _startup() -> None:
+    import os
+    import shutil
+
+    settings.ensure_dirs()
+
+    # Seed persistent locadoras.json from the image-baked default on first boot.
+    # On subsequent starts the file already exists on the volume and is left alone,
+    # so password changes, new users, etc. survive restarts.
+    loc_target = os.environ.get("ESCORA_LOCADORAS_FILE")
+    if loc_target:
+        target = Path(loc_target)
+        if not target.exists():
+            source = Path(__file__).parent.parent / "data" / "locadoras.json"
+            if source.exists():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, target)
+                logger.info(f"Seeded locadoras from {source} → {target}")
+
+    job_service.init_db()
+    swept = job_service.sweep_orphan_processing()
+    if swept:
+        logger.warning(f"Startup: marked {swept} orphan job(s) as error")
+    # Session store (SQLite) warm-up.
+    from src.auth.branches import init_sessions_db
+    init_sessions_db()
+
+
 @app.get("/api/v1/health")
 def health():
-    from api.services.job_service import _jobs
+    jobs = job_service.all_jobs()
     return {
         "status": "ok",
-        "jobs_count": len(_jobs),
-        "version": "0.2.0",
+        "jobs_count": len(jobs),
+        "version": "0.3.0",
+        "data_dir": str(settings.data_root),
     }
 
 

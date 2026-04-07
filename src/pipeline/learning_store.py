@@ -16,6 +16,7 @@ V2 improvements:
 
 import json
 import logging
+import os
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
@@ -24,8 +25,22 @@ from collections import Counter
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_STORE_PATH = Path("data/learning.json")
-BRANCH_STORE_DIR = Path("data/learning")
+
+def _data_root() -> Path:
+    return Path(os.environ.get("ESCORA_DATA_DIR", "./data"))
+
+
+def _default_store_path() -> Path:
+    return _data_root() / "learning.json"
+
+
+def _branch_store_dir() -> Path:
+    return _data_root() / "learning"
+
+
+# Legacy constants — kept for backwards-compat imports, but resolved lazily.
+DEFAULT_STORE_PATH = _default_store_path()
+BRANCH_STORE_DIR = _branch_store_dir()
 
 # Maximum records to keep (per-file dedup means this = max unique files)
 MAX_RECORDS = 200
@@ -123,9 +138,9 @@ class LearningStore:
         if path is not None:
             self.path = path
         elif branch_id:
-            self.path = BRANCH_STORE_DIR / f"{branch_id}.json"
+            self.path = _branch_store_dir() / f"{branch_id}.json"
         else:
-            self.path = DEFAULT_STORE_PATH
+            self.path = _default_store_path()
         self.branch_id = branch_id
         self._records: List[LearningRecord] = []
         self._load()

@@ -13,8 +13,11 @@ COPY . .
 # Install Python deps
 RUN pip install --no-cache-dir .
 
-# Create dirs
-RUN mkdir -p uploads output
+# Create data dirs (will be overlaid by the Fly volume at /data)
+RUN mkdir -p /data/uploads /data/output /data/learning
+
+# Runtime data dir — overridden by Fly env but set here for local docker runs
+ENV ESCORA_DATA_DIR=/data
 
 EXPOSE 8000
 
