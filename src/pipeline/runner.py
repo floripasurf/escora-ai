@@ -28,16 +28,39 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_SCALE = 0.02  # 1:50 fallback
-REAL_COORDS_THRESHOLD = 5.0  # If bounding box > 5 units, assume real-world meters
+
+# $INSUNITS value → meters multiplier
+_INSUNITS_TO_METERS = {
+    1: 0.0254,   # inches
+    2: 0.3048,   # feet
+    4: 0.001,    # millimeters
+    5: 0.01,     # centimeters
+    6: 1.0,      # meters
+}
 
 
 def _detect_coordinate_scale(parse) -> float:
-    """Auto-detect if DXF coordinates are in real meters or drawing units.
+    """Auto-detect coordinate-to-meters multiplier using three methods.
 
-    Most modern CAD files use model space in real-world meters.
-    The 'ESC 1:50' text is a print/layout scale, not coordinate scale.
-    If the coordinate range exceeds REAL_COORDS_THRESHOLD, assume real meters.
+    Priority:
+    1. $INSUNITS DXF header (authoritative if present)
+    2. Dimension entity calibration (compare measurement vs coordinate distance)
+    3. Coordinate range heuristic (improved to handle cm-scale files)
+
+    Returns a float multiplier: coordinates * scale = meters.
     """
+    import math
+
+    # --- Method 1: $INSUNITS header ---
+    if parse.insunits is not None and parse.insunits in _INSUNITS_TO_METERS:
+        scale = _INSUNITS_TO_METERS[parse.insunits]
+        logger.info(
+            f"Scale detection: $INSUNITS={parse.insunits} → scale={scale} "
+            f"(method: DXF header)"
+        )
+        return scale
+
+    # Collect coordinate ranges (needed for methods 2 and 3)
     all_y = [s.y for s in parse.segments if s.type == "H"]
     all_x = [s.x for s in parse.segments if s.type == "V"]
     all_y.extend(s.y_min for s in parse.segments if s.type == "V")
@@ -46,15 +69,126 @@ def _detect_coordinate_scale(parse) -> float:
     all_x.extend(s.x_max for s in parse.segments if s.type == "H")
 
     if not all_x or not all_y:
+        logger.info("Scale detection: no segments found, using text scale or default")
         return parse.detected_scale or DEFAULT_SCALE
 
     x_range = max(all_x) - min(all_x)
     y_range = max(all_y) - min(all_y)
+    coord_range = max(x_range, y_range)
 
-    if max(x_range, y_range) > REAL_COORDS_THRESHOLD:
-        return 1.0  # Coordinates are already in meters
+    # --- Method 2: Dimension entity calibration ---
+    if parse.dimensions:
+        ratios = []
+        for dim in parse.dimensions:
+            if dim.measurement <= 0 or dim.defpoint is None or dim.defpoint2 is None:
+                continue
+            dx = dim.defpoint[0] - dim.defpoint2[0]
+            dy = dim.defpoint[1] - dim.defpoint2[1]
+            coord_dist = math.hypot(dx, dy)
+            if coord_dist < 1e-6:
+                continue
+            ratio = dim.measurement / coord_dist
+            ratios.append(ratio)
 
-    return parse.detected_scale or DEFAULT_SCALE
+        if len(ratios) >= 2:
+            # Use median for robustness against outliers
+            ratios.sort()
+            median_ratio = ratios[len(ratios) // 2]
+            # The ratio tells us: measurement_in_drawing_units / coord_distance
+            # If ratio ≈ 1.0 → coords match measurements (both same unit)
+            # If ratio ≈ 0.01 → measurements are 100x smaller (coords in cm, measurements in m)
+            # We need to figure out what unit the measurement is in.
+            # In construction DXFs, dimension measurements are typically in the
+            # drawing's native unit. So the ratio itself IS the scale if measurements
+            # represent meters, or we use it to detect unit mismatch.
+            #
+            # Common cases:
+            #   coords=cm, measurement=cm → ratio ≈ 1.0, but coords are cm → scale=0.01
+            #   coords=m, measurement=m → ratio ≈ 1.0, coords are m → scale=1.0
+            #   coords=mm, measurement=mm → ratio ≈ 1.0, coords are mm → scale=0.001
+            # The ratio alone can't distinguish, so we combine with coord_range.
+            #
+            # If ratio ≈ 1.0, fall through to heuristic (method 3) with high confidence.
+            # If ratio ≈ 0.01, coords are likely 100x the measurement unit.
+            # If ratio ≈ 0.001, coords are likely 1000x the measurement unit.
+            if 0.005 < median_ratio < 0.05:
+                # measurement ≈ coord / 100 → coords are cm, measurements are m
+                logger.info(
+                    f"Scale detection: dimension calibration ratio={median_ratio:.4f} "
+                    f"({len(ratios)} dims) → scale=0.01 (method: dimension calibration, "
+                    f"coords in cm)"
+                )
+                return 0.01
+            elif 0.0005 < median_ratio < 0.005:
+                # measurement ≈ coord / 1000 → coords are mm, measurements are m
+                logger.info(
+                    f"Scale detection: dimension calibration ratio={median_ratio:.4f} "
+                    f"({len(ratios)} dims) → scale=0.001 (method: dimension calibration, "
+                    f"coords in mm)"
+                )
+                return 0.001
+            elif 0.5 < median_ratio < 2.0:
+                # ratio ≈ 1.0 → coords and measurements in same unit.
+                # Determine which unit by examining measurement values:
+                # - If typical measurements are 10-100 → likely cm (10cm-1m beams)
+                # - If typical measurements are 100-1000 → likely mm
+                # - If typical measurements are 0.1-10 → likely meters
+                median_meas = sorted([d.measurement for d in parse.dimensions
+                                      if d.measurement > 0])[len(ratios) // 2]
+                if 5 < median_meas < 200:
+                    # Measurements like 50, 60, 100 → centimeters
+                    logger.info(
+                        f"Scale detection: ratio≈1.0, median_meas={median_meas:.1f} "
+                        f"→ scale=0.01 (method: dimension calibration, coords in cm)"
+                    )
+                    return 0.01
+                elif median_meas >= 200:
+                    logger.info(
+                        f"Scale detection: ratio≈1.0, median_meas={median_meas:.1f} "
+                        f"→ scale=0.001 (method: dimension calibration, coords in mm)"
+                    )
+                    return 0.001
+                else:
+                    logger.info(
+                        f"Scale detection: ratio≈1.0, median_meas={median_meas:.2f} "
+                        f"→ scale=1.0 (method: dimension calibration, coords in m)"
+                    )
+                    return 1.0
+
+    # --- Method 3: Coordinate range heuristic (improved) ---
+    # Use the shorter dimension (Y typically) to avoid multi-view X inflation
+    min_range = min(x_range, y_range)
+    if min_range > 500:
+        # Short dimension > 500 → not meters (500m building is unrealistic)
+        # Distinguish cm vs mm by short dimension:
+        # - cm: short dim 500-5000 (5m-50m buildings)
+        # - mm: short dim 5000-50000 (5m-50m buildings)
+        if min_range > 5000:
+            scale = 0.001  # millimeters
+            logger.info(
+                f"Scale detection: min_range={min_range:.1f} > 5000 → scale=0.001 "
+                f"(method: range heuristic, likely mm)"
+            )
+        else:
+            scale = 0.01  # centimeters
+            logger.info(
+                f"Scale detection: min_range={min_range:.1f} in 500-5000 → scale=0.01 "
+                f"(method: range heuristic, likely cm)"
+            )
+        return scale
+    elif coord_range > 5.0:
+        logger.info(
+            f"Scale detection: coord_range={coord_range:.1f} > 5.0 → scale=1.0 "
+            f"(method: range heuristic, likely meters)"
+        )
+        return 1.0
+    else:
+        scale = parse.detected_scale or DEFAULT_SCALE
+        logger.info(
+            f"Scale detection: coord_range={coord_range:.1f} <= 5.0 → scale={scale} "
+            f"(method: text scale / default)"
+        )
+        return scale
 
 
 def run_pipeline(filepath: str, scale_override: Optional[float] = None) -> PipelineResult:
@@ -188,7 +322,7 @@ def run_pipeline(filepath: str, scale_override: Optional[float] = None) -> Pipel
             # Get beam layers for this level (same logic as stage_classify)
             from src.pipeline.stage_classify import _classify_layers
             from src.models.pipeline_models import ElementType as _ET
-            layer_types = _classify_layers(seg)
+            layer_types = _classify_layers(seg, scale=scale)
             beam_layers = {l for l, t in layer_types.items() if t == _ET.BEAM}
             if not beam_layers:
                 continue

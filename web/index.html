@@ -513,6 +513,7 @@
                             ${job.has_relatorio ? `<a href="${API}/jobs/${job.id}/download/pdf/relatorio" class="btn btn-pdf">&#128196; Relatorio PDF</a>` : ''}
                             ${job.has_memoria_calculo ? `<a href="${API}/jobs/${job.id}/download/pdf/memoria_calculo" class="btn btn-pdf">&#128196; Memoria Calculo</a>` : ''}
                             ${job.has_orcamento ? `<a href="${API}/jobs/${job.id}/download/pdf/orcamento" class="btn btn-pdf">&#128196; Orcamento PDF</a>` : ''}
+                            ${job.has_ifc ? `<a href="${API}/jobs/${job.id}/download/ifc" class="btn btn-accent">&#128736; IFC (BIM)</a>` : ''}
                             <button class="btn btn-green" onclick="uploadRevision('${job.id}')">
                                 &#8679; Enviar Revisao
                             </button>

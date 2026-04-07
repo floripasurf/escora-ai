@@ -45,6 +45,7 @@ class JobStatusResponse(BaseModel):
     warnings: Optional[List[str]] = None
     has_output_dxf: bool = False
     has_csv: bool = False
+    has_ifc: bool = False
     has_relatorio: bool = False
     has_memoria_calculo: bool = False
     has_orcamento: bool = False

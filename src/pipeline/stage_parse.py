@@ -93,6 +93,9 @@ class DimensionEntity:
     y: float
     dim_type: int  # 0=linear, 1=aligned, 2=angular, etc.
     layer: str = ""
+    # Definition points for coordinate-distance calibration
+    defpoint: Optional[Tuple[float, float]] = None   # (x, y) of first definition point
+    defpoint2: Optional[Tuple[float, float]] = None   # (x, y) of second definition point
 
 
 @dataclass
@@ -131,6 +134,7 @@ class ParseResult:
     arcs: List[ArcEntity] = field(default_factory=list)
     diagonals: List[DiagonalEntity] = field(default_factory=list)
     raw_entities: List[dict] = field(default_factory=list)
+    insunits: Optional[int] = None  # DXF $INSUNITS: 1=in, 2=ft, 4=mm, 5=cm, 6=m
 
 
 def _add_line_segment(
@@ -401,9 +405,19 @@ def _process_dimension(
 
         dim_type = entity.dimtype if hasattr(entity, "dimtype") else 0
 
+        # Extract extension line origins for coordinate-distance calibration
+        # defpoint2 = first extension line origin, defpoint3 = second
+        dp2 = None
+        dp3 = None
+        if hasattr(entity.dxf, "defpoint2"):
+            dp2 = (entity.dxf.defpoint2.x, entity.dxf.defpoint2.y)
+        if hasattr(entity.dxf, "defpoint3"):
+            dp3 = (entity.dxf.defpoint3.x, entity.dxf.defpoint3.y)
+
         dimensions.append(DimensionEntity(
             measurement=measurement, text=display_text,
             x=x, y=y, dim_type=dim_type, layer=layer,
+            defpoint=dp2, defpoint2=dp3,
         ))
     except Exception as e:
         logger.debug(f"DIMENSION extraction failed: {e}")
@@ -414,6 +428,13 @@ def parse_dxf(filepath: str) -> ParseResult:
     msp = doc.modelspace()
     filename = Path(filepath).name
     layers = [layer.dxf.name for layer in doc.layers]
+
+    # Read $INSUNITS header variable for coordinate scale detection
+    insunits = None
+    try:
+        insunits = doc.header.get('$INSUNITS', None)
+    except Exception:
+        pass
 
     texts: List[TextEntity] = []
     segments: List[SegmentEntity] = []
@@ -526,4 +547,5 @@ def parse_dxf(filepath: str) -> ParseResult:
         arcs=arcs,
         diagonals=diagonals,
         raw_entities=raw_entities,
+        insunits=insunits,
     )

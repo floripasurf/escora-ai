@@ -38,6 +38,7 @@ def _run_pipeline(job_id: str):
             results_data=results,
             output_dxf_path=results.get("output_dxf_path"),
             csv_path=results.get("csv_path"),
+            ifc_path=results.get("ifc_path"),
         )
         logger.info(f"Job {job_id} done: {results['total_shores']} shores")
 
@@ -108,6 +109,7 @@ async def get_status(job_id: str):
         "updated_at": job["updated_at"],
         "has_output_dxf": job.get("output_dxf_path") is not None,
         "has_csv": job.get("csv_path") is not None,
+        "has_ifc": job.get("ifc_path") is not None,
         "has_relatorio": bool(results.get("relatorio")),
         "has_memoria_calculo": bool(results.get("memoria_calculo")),
         "has_orcamento": bool(results.get("orcamento")),
@@ -170,6 +172,27 @@ async def download_csv(job_id: str):
     return FileResponse(
         csv_path,
         media_type="text/csv",
+        filename=filename,
+    )
+
+
+@router.get("/{job_id}/download/ifc")
+async def download_ifc(job_id: str):
+    """Download the IFC (BIM) export with slabs, beams, pillars, shores."""
+    job = job_service.get_job(job_id)
+    if not job:
+        raise HTTPException(404, "Job nao encontrado")
+    if job["status"] != "done":
+        raise HTTPException(400, "Processamento ainda nao concluido")
+
+    ifc_path = job.get("ifc_path")
+    if not ifc_path or not Path(ifc_path).exists():
+        raise HTTPException(404, "Arquivo IFC nao encontrado")
+
+    filename = Path(job["filename"]).stem + ".ifc"
+    return FileResponse(
+        ifc_path,
+        media_type="application/x-step",
         filename=filename,
     )
 

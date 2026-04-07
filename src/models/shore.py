@@ -1,7 +1,7 @@
 """Modelo Pydantic para escoras e torres."""
 
 from enum import Enum
-from typing import Optional
+from typing import List, Optional, Tuple
 from pydantic import BaseModel, Field
 
 
@@ -26,6 +26,34 @@ class ShoreCatalogEntry(BaseModel):
     base_plate_mm: float
     price_reference_brl: float
     notes: str = ""
+    capacity_curve: Optional[List[Tuple[float, float]]] = Field(
+        default=None,
+        description="List of [height_m, capacity_kn] pairs for Euler derating",
+    )
+
+    def effective_capacity(self, height_m: float) -> float:
+        """Return derated load capacity at the given extension height.
+
+        Telescopic shores behave as Euler columns: P_crit ∝ 1/L². When a
+        capacity_curve is defined, linearly interpolate between the provided
+        [height, capacity] points. Outside the range, clamp to the nearest
+        endpoint. If no curve is defined, fall back to the static rating
+        (backward compat).
+        """
+        if not self.capacity_curve:
+            return self.load_capacity_kn
+        curve = sorted(self.capacity_curve, key=lambda p: p[0])
+        if height_m <= curve[0][0]:
+            return curve[0][1]
+        if height_m >= curve[-1][0]:
+            return curve[-1][1]
+        for (h0, c0), (h1, c1) in zip(curve, curve[1:]):
+            if h0 <= height_m <= h1:
+                if h1 == h0:
+                    return c0
+                t = (height_m - h0) / (h1 - h0)
+                return c0 + t * (c1 - c0)
+        return curve[-1][1]
 
 
 class TowerCatalogEntry(BaseModel):
