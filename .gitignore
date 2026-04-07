@@ -32,3 +32,4 @@ output/
 !src/output/
 !tests/output/
 uploads/
+.vercel
