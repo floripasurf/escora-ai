@@ -15,7 +15,14 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./escora.db"  # legacy, unused
     redis_url: str = "redis://localhost:6379"
     default_tenant_id: str = "pilot"
-    max_file_size_mb: int = 200
+    # Hard cap on uploaded DXF size. ezdxf can expand a compressed DXF
+    # 10-50x in RAM (entity graph + lookup tables); on a 2 GB VM anything
+    # beyond ~30 MB risks an OOM kill that leaves jobs stuck.
+    max_file_size_mb: int = 30
+    # Wall-clock budget for a single pipeline run before we SIGKILL it.
+    # Must be shorter than job_service.PROCESSING_TIMEOUT_SECONDS so the
+    # subprocess kill happens *before* the watchdog flips the job to error.
+    pipeline_timeout_seconds: int = 8 * 60
 
     class Config:
         env_file = ".env"

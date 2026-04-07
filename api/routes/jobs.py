@@ -7,6 +7,7 @@ session token (Authorization: Bearer ...) plus X-Branch-Id header via
 """
 
 import logging
+import multiprocessing as mp
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import FileResponse
@@ -27,16 +28,25 @@ router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
 
 MAX_FILE_SIZE = settings.max_file_size_mb * 1024 * 1024
 
+# Force `fork` so the child inherits the already-loaded ezdxf/shapely/ifcopenshell
+# modules without paying the import cost twice. Linux only — fine for Fly.
+try:
+    _MP_CTX = mp.get_context("fork")
+except ValueError:  # pragma: no cover - non-Linux dev box
+    _MP_CTX = mp.get_context("spawn")
 
-def _run_pipeline(job_id: str):
-    """Background task: run the pipeline on an uploaded DXF."""
-    job = job_service.get_job(job_id)
-    if not job:
-        return
 
-    job_service.update_job(job_id, status="processing")
+def _pipeline_worker(job_id: str) -> None:
+    """Subprocess entry point — runs the actual pipeline.
 
+    Kept side-effect-only: writes results straight to the jobs DB so the
+    parent doesn't need IPC. Any uncaught exception is converted to an
+    `error` row before the process exits.
+    """
     try:
+        job = job_service.get_job(job_id)
+        if not job:
+            return
         results = process_dxf(
             job["input_path"],
             job_id,
@@ -44,11 +54,9 @@ def _run_pipeline(job_id: str):
             inventory_name=job.get("inventory_name"),
             branch_id=job.get("branch_id"),
         )
-
         if "error" in results:
             job_service.update_job(job_id, status="error", error_message=results["error"])
             return
-
         job_service.update_job(
             job_id,
             status="done",
@@ -57,11 +65,61 @@ def _run_pipeline(job_id: str):
             csv_path=results.get("csv_path"),
             ifc_path=results.get("ifc_path"),
         )
-        logger.info(f"Job {job_id} done: {results['total_shores']} shores")
+        logger.info(f"Job {job_id} done: {results.get('total_shores')} shores")
+    except Exception as e:  # pragma: no cover - defensive
+        logger.exception(f"Job {job_id} failed in worker")
+        try:
+            job_service.update_job(job_id, status="error", error_message=str(e))
+        except Exception:
+            pass
 
-    except Exception as e:
-        logger.exception(f"Job {job_id} failed")
-        job_service.update_job(job_id, status="error", error_message=str(e))
+
+def _run_pipeline(job_id: str) -> None:
+    """Background task: spawn a subprocess and enforce a hard wall-clock timeout.
+
+    Why a subprocess and not BackgroundTasks alone:
+      - FastAPI BackgroundTasks share the uvicorn process. If the pipeline
+        hangs (pathological DXF, infinite loop in shapely, runaway memory),
+        there is no way to kill it from inside the same process. The job
+        sits in `processing` forever and the UI spins.
+      - A `multiprocessing.Process` can be SIGTERM'd / SIGKILL'd from the
+        parent the moment we exceed the budget, and the parent then writes
+        a clean `error` row to the DB.
+      - On OOM the kernel kills only the child, the API stays up.
+    """
+    job_service.update_job(job_id, status="processing")
+    proc = _MP_CTX.Process(target=_pipeline_worker, args=(job_id,), daemon=True)
+    proc.start()
+    proc.join(timeout=settings.pipeline_timeout_seconds)
+    if proc.is_alive():
+        logger.warning(f"Job {job_id} exceeded {settings.pipeline_timeout_seconds}s — killing worker")
+        proc.terminate()
+        proc.join(timeout=5)
+        if proc.is_alive():
+            proc.kill()
+            proc.join(timeout=5)
+        job_service.update_job(
+            job_id,
+            status="error",
+            error_message=(
+                "Processamento excedeu o limite de tempo. "
+                "Arquivo muito grande ou geometria complexa — tente dividir o pavimento."
+            ),
+        )
+        return
+    # If the child crashed (OOM kill, segfault) before writing a result row,
+    # the job will still be in `processing`. Surface that explicitly.
+    if proc.exitcode not in (0, None):
+        current = job_service.get_job(job_id) or {}
+        if current.get("status") == "processing":
+            job_service.update_job(
+                job_id,
+                status="error",
+                error_message=(
+                    f"Worker terminou inesperadamente (codigo {proc.exitcode}). "
+                    "Provavel falta de memoria — tente um arquivo menor."
+                ),
+            )
 
 
 @router.post("", status_code=201, response_model=JobCreateResponse)
