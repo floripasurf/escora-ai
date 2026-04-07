@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from src.auth.branches import (
     Branch,
     authenticate_user,
+    change_password,
     create_session,
     get_locadora_of_user,
     resolve_session,
@@ -29,6 +30,11 @@ router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
 
 
 class BranchDTO(BaseModel):
@@ -78,6 +84,27 @@ async def login(body: LoginRequest):
             for b in locadora.branches
         ],
     )
+
+
+@router.post("/change-password")
+async def change_password_endpoint(
+    body: ChangePasswordRequest,
+    authorization: Optional[str] = Header(default=None),
+):
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Sessão obrigatória")
+    token = authorization.split(" ", 1)[1].strip()
+    session = resolve_session(token)
+    if session is None:
+        raise HTTPException(status_code=401, detail="Sessão inválida ou expirada")
+    if len(body.new_password) < 6:
+        raise HTTPException(status_code=400, detail="A nova senha precisa ter ao menos 6 caracteres")
+    ok = change_password(session["username"], body.old_password, body.new_password)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Senha atual incorreta")
+    # Revoke current session so the user re-logs with the new password.
+    revoke_session(token)
+    return {"message": "Senha atualizada. Faça login novamente."}
 
 
 @router.post("/logout")

@@ -11,6 +11,7 @@ from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import FileResponse
 from typing import Optional
+from api.config import settings
 from api.services import job_service, storage
 from api.services import pipeline_service
 from api.services.pipeline_service import process_dxf
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
 
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+MAX_FILE_SIZE = settings.max_file_size_mb * 1024 * 1024
 
 
 def _run_pipeline(job_id: str):
@@ -79,15 +80,13 @@ async def upload_dxf(
     if not file.filename.lower().endswith((".dxf", ".dwg")):
         raise HTTPException(400, "Formato nao suportado. Envie .dxf ou .dwg")
 
-    content = await file.read()
-    if len(content) > MAX_FILE_SIZE:
-        raise HTTPException(413, "Arquivo excede 50MB")
-
     if optimization_mode not in ("price", "inventory"):
         optimization_mode = "price"
 
     job = job_service.create_job(file.filename, "", branch_id=branch.id)
-    input_path = storage.save_upload(content, file.filename, job["id"])
+    input_path = await storage.save_upload_stream(
+        file, file.filename, job["id"], max_bytes=MAX_FILE_SIZE
+    )
     job_service.update_job(
         job["id"],
         input_path=input_path,
@@ -414,12 +413,10 @@ async def upload_revision(
     if not file.filename.lower().endswith((".dxf",)):
         raise HTTPException(400, "Envie o arquivo .dxf revisado")
 
-    content = await file.read()
-    if len(content) > MAX_FILE_SIZE:
-        raise HTTPException(413, "Arquivo excede 50MB")
-
-    # Save revision
-    revision_path = storage.save_upload(content, f"revisao_{file.filename}", job_id)
+    # Save revision (streamed to disk, never buffered in RAM)
+    revision_path = await storage.save_upload_stream(
+        file, f"revisao_{file.filename}", job_id, max_bytes=MAX_FILE_SIZE
+    )
     job_service.update_job(job_id, revision_path=revision_path)
 
     # Analyze diff

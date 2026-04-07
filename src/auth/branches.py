@@ -180,3 +180,31 @@ def revoke_session(token: str) -> None:
 def clear_sessions() -> None:
     """Test helper: forget all in-memory sessions."""
     _SESSIONS.clear()
+
+
+def change_password(username: str, old_password: str, new_password: str) -> bool:
+    """Verify old password and replace it in the locadoras JSON on disk.
+
+    Returns True on success, False if the old password didn't match or the
+    user isn't in the registry. Writes to whatever path `_locadoras_path()`
+    resolves to (respecting `ESCORA_LOCADORAS_FILE`).
+    """
+    if not new_password or len(new_password) < 6:
+        return False
+    path = _locadoras_path()
+    if not path.exists():
+        return False
+    data = json.loads(path.read_text(encoding="utf-8"))
+    updated = False
+    for entry in data.get("locadoras", []):
+        for u in entry.get("users", []):
+            if u["username"] == username and verify_password(old_password, u["password_hash"]):
+                u["password_hash"] = hash_password(new_password)
+                updated = True
+                break
+        if updated:
+            break
+    if not updated:
+        return False
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    return True
