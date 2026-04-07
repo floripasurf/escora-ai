@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from api.routes.jobs import router as jobs_router
+from api.routes.auth import router as auth_router
 from api.config import settings
 
 app = FastAPI(title="Escora.AI", version="0.2.0")
@@ -17,6 +18,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
 app.include_router(jobs_router)
 
 # Serve static frontend

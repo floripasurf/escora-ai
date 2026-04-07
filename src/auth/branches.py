@@ -1,0 +1,182 @@
+"""Locadora / branch / user registry with password login and session tokens.
+
+Data model:
+    Locadora (employer / customer, e.g. "Orguel")
+        ├── Branches (units, e.g. "Orguel São José dos Campos")
+        │     → own inventory JSON, own learning store
+        └── Users (engineer accounts that log in with username/password)
+              → at login, the engineer picks which branch of their locadora
+                they are currently working on. The chosen branch determines
+                inventory and the learning partition used by the pipeline.
+
+Storage: a single JSON file (default: data/locadoras.json). Human-editable;
+swap for a real DB later without touching the rest of the codebase.
+
+Passwords are stored with PBKDF2-HMAC-SHA256 (Python stdlib only — no new
+dependency). Sessions are opaque tokens kept in process memory for MVP.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import logging
+import os
+import secrets
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_LOCADORAS_PATH = (
+    Path(__file__).parent.parent.parent / "data" / "locadoras.json"
+)
+
+SESSION_TTL_SECONDS = 60 * 60 * 12  # 12 hours
+
+# In-memory session store: token → (username, locadora_id, expires_at)
+_SESSIONS: Dict[str, Dict] = {}
+
+
+# ---------- Data classes ----------
+
+@dataclass
+class Branch:
+    id: str
+    branch_name: str
+    inventory_name: str
+    locadora_id: str = ""
+    locadora_name: str = ""
+
+    @property
+    def display_name(self) -> str:
+        return f"{self.locadora_name} — {self.branch_name}".strip(" —")
+
+
+@dataclass
+class User:
+    username: str
+    name: str
+    password_hash: str
+    locadora_id: str
+
+
+@dataclass
+class Locadora:
+    id: str
+    name: str
+    branches: List[Branch] = field(default_factory=list)
+    users: List[User] = field(default_factory=list)
+
+
+# ---------- Loader ----------
+
+def _locadoras_path() -> Path:
+    override = os.environ.get("ESCORA_LOCADORAS_FILE")
+    return Path(override) if override else DEFAULT_LOCADORAS_PATH
+
+
+def load_registry() -> Dict[str, Locadora]:
+    path = _locadoras_path()
+    if not path.exists():
+        logger.warning(f"Locadoras file not found: {path}")
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    out: Dict[str, Locadora] = {}
+    for entry in data.get("locadoras", []):
+        loc = Locadora(id=entry["id"], name=entry["name"])
+        for b in entry.get("branches", []):
+            loc.branches.append(Branch(
+                id=b["id"],
+                branch_name=b["branch_name"],
+                inventory_name=b["inventory_name"],
+                locadora_id=loc.id,
+                locadora_name=loc.name,
+            ))
+        for u in entry.get("users", []):
+            loc.users.append(User(
+                username=u["username"],
+                name=u.get("name", u["username"]),
+                password_hash=u["password_hash"],
+                locadora_id=loc.id,
+            ))
+        out[loc.id] = loc
+    return out
+
+
+def get_branch(branch_id: str) -> Optional[Branch]:
+    for loc in load_registry().values():
+        for b in loc.branches:
+            if b.id == branch_id:
+                return b
+    return None
+
+
+def get_locadora_of_user(username: str) -> Optional[Locadora]:
+    for loc in load_registry().values():
+        for u in loc.users:
+            if u.username == username:
+                return loc
+    return None
+
+
+# ---------- Password hashing (stdlib only) ----------
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 100000)
+    return f"pbkdf2:sha256:100000${salt}${dk.hex()}"
+
+
+def verify_password(password: str, stored: str) -> bool:
+    try:
+        algo, salt, hex_hash = stored.split("$")
+        if not algo.startswith("pbkdf2:sha256"):
+            return False
+        iters = int(algo.split(":")[-1])
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), iters)
+        return hmac.compare_digest(dk.hex(), hex_hash)
+    except Exception:
+        return False
+
+
+# ---------- Login & session ----------
+
+def authenticate_user(username: str, password: str) -> Optional[User]:
+    for loc in load_registry().values():
+        for u in loc.users:
+            if u.username == username and verify_password(password, u.password_hash):
+                return u
+    return None
+
+
+def create_session(user: User) -> str:
+    token = secrets.token_urlsafe(32)
+    _SESSIONS[token] = {
+        "username": user.username,
+        "locadora_id": user.locadora_id,
+        "expires_at": time.time() + SESSION_TTL_SECONDS,
+    }
+    return token
+
+
+def resolve_session(token: str) -> Optional[Dict]:
+    sess = _SESSIONS.get(token)
+    if not sess:
+        return None
+    if sess["expires_at"] < time.time():
+        _SESSIONS.pop(token, None)
+        return None
+    return sess
+
+
+def revoke_session(token: str) -> None:
+    _SESSIONS.pop(token, None)
+
+
+def clear_sessions() -> None:
+    """Test helper: forget all in-memory sessions."""
+    _SESSIONS.clear()

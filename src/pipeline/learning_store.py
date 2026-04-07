@@ -25,6 +25,7 @@ from collections import Counter
 logger = logging.getLogger(__name__)
 
 DEFAULT_STORE_PATH = Path("data/learning.json")
+BRANCH_STORE_DIR = Path("data/learning")
 
 # Maximum records to keep (per-file dedup means this = max unique files)
 MAX_RECORDS = 200
@@ -87,6 +88,16 @@ class LearningRecord:
     warning_count: int = 0
     error_count: int = 0
 
+    # Revision feedback (populated only after engineer uploads validated DXF)
+    revision_uploaded: bool = False
+    revision_beam_shore_delta: int = 0   # +N = under-shored, -N = over-shored
+    revision_slab_shore_delta: int = 0
+    revision_beam_match_rate: float = 0.0
+    revision_slab_match_rate: float = 0.0
+    revision_avg_position_error_m: float = 0.0
+    revision_added_layers: Dict[str, int] = field(default_factory=dict)
+    revision_removed_layers: Dict[str, int] = field(default_factory=dict)
+
 
 class LearningStore:
     """Persistent store for learning records.
@@ -95,8 +106,27 @@ class LearningStore:
     This prevents a single file run 300x from dominating the knowledge base.
     """
 
-    def __init__(self, path: Optional[Path] = None):
-        self.path = path or DEFAULT_STORE_PATH
+    def __init__(
+        self,
+        path: Optional[Path] = None,
+        branch_id: Optional[str] = None,
+    ):
+        """Create a learning store.
+
+        - If `path` is given, it overrides everything (used by tests).
+        - Else if `branch_id` is given, the store is scoped to
+          `data/learning/{branch_id}.json`, keeping each locadora branch's
+          knowledge isolated (engineer revisions from one branch do not
+          bias density corrections on another).
+        - Else the legacy single-tenant `data/learning.json` is used.
+        """
+        if path is not None:
+            self.path = path
+        elif branch_id:
+            self.path = BRANCH_STORE_DIR / f"{branch_id}.json"
+        else:
+            self.path = DEFAULT_STORE_PATH
+        self.branch_id = branch_id
         self._records: List[LearningRecord] = []
         self._load()
 
@@ -333,6 +363,120 @@ class LearningStore:
             if r.filename == filename:
                 return r
         return None
+
+    # === REVISION FEEDBACK ===
+
+    DENSITY_MIN = 0.7
+    DENSITY_MAX = 1.5
+
+    def get_shore_density_correction(self) -> float:
+        """Average over/under-shoring multiplier from engineer revisions.
+
+        For each record with revision data:
+            ratio = (original_total + delta_total) / original_total
+        Then weighted by temporal decay and clamped to [DENSITY_MIN, DENSITY_MAX].
+
+        Returns 1.0 if no revision data exists; >1.0 if engineers add shores
+        (we are under-shoring), <1.0 if they remove shores (we are over-shoring).
+        """
+        ratios: List[Tuple[float, float]] = []
+        for r in self._records:
+            if not r.revision_uploaded:
+                continue
+            original_total = r.total_shores
+            delta_total = r.revision_beam_shore_delta + r.revision_slab_shore_delta
+            if original_total <= 0:
+                continue
+            ratio = (original_total + delta_total) / original_total
+            ratios.append((ratio, self._record_weight(r)))
+
+        if not ratios:
+            return 1.0
+
+        total_w = sum(w for _, w in ratios)
+        if total_w <= 0:
+            return 1.0
+        weighted = sum(r * w for r, w in ratios) / total_w
+        return max(self.DENSITY_MIN, min(self.DENSITY_MAX, weighted))
+
+    def get_validated_layer_map(self) -> Dict[str, str]:
+        """Layers seen in revision_added_layers more often than removed_layers.
+
+        These layers had shores placed by a HUMAN engineer, so we treat
+        them as confirmed beam/slab carriers at confidence 1.0.
+
+        Returns {layer_name: element_type} where element_type is "beam" or "slab".
+        """
+        added: Counter = Counter()
+        removed: Counter = Counter()
+        for r in self._records:
+            if not r.revision_uploaded:
+                continue
+            for layer, count in r.revision_added_layers.items():
+                added[layer] += count
+            for layer, count in r.revision_removed_layers.items():
+                removed[layer] += count
+
+        result: Dict[str, str] = {}
+        for layer, n_added in added.items():
+            if n_added > removed.get(layer, 0):
+                upper = layer.upper()
+                if "VIGA" in upper:
+                    result[layer] = "beam"
+                elif "LAJE" in upper:
+                    result[layer] = "slab"
+                else:
+                    result[layer] = "beam"
+        return result
+
+    def update_record_with_revision(self, filename: str, diff: dict) -> None:
+        """Find existing record for filename and populate revision_* fields.
+
+        `diff` follows the shape returned by analyze_revision().
+        If no record exists for the filename, this is a no-op.
+        """
+        record = self.get_file_stats(filename)
+        if record is None:
+            logger.warning(
+                f"update_record_with_revision: no learning record for {filename}"
+            )
+            return
+
+        record.revision_uploaded = True
+        record.revision_beam_shore_delta = (
+            int(diff.get("beam_added", 0)) - int(diff.get("beam_removed", 0))
+        )
+        record.revision_slab_shore_delta = (
+            int(diff.get("slab_added", 0)) - int(diff.get("slab_removed", 0))
+        )
+        record.revision_beam_match_rate = (
+            float(diff.get("accuracy_beam", 0.0)) / 100.0
+        )
+        record.revision_slab_match_rate = (
+            float(diff.get("accuracy_slab", 0.0)) / 100.0
+        )
+        beam_moved = int(diff.get("beam_moved", 0))
+        record.revision_avg_position_error_m = 0.10 if beam_moved > 0 else 0.0
+
+        added_layers: Dict[str, int] = {}
+        removed_layers: Dict[str, int] = {}
+        if diff.get("beam_added", 0):
+            added_layers["ESCORAS_VIGA"] = int(diff["beam_added"])
+        if diff.get("slab_added", 0):
+            added_layers["ESCORAS_LAJE"] = int(diff["slab_added"])
+        if diff.get("beam_removed", 0):
+            removed_layers["ESCORAS_VIGA"] = int(diff["beam_removed"])
+        if diff.get("slab_removed", 0):
+            removed_layers["ESCORAS_LAJE"] = int(diff["slab_removed"])
+        record.revision_added_layers = added_layers
+        record.revision_removed_layers = removed_layers
+
+        record.timestamp = datetime.now().isoformat()
+        logger.info(
+            f"Revision learnings stored for {filename}: "
+            f"beam_delta={record.revision_beam_shore_delta}, "
+            f"slab_delta={record.revision_slab_shore_delta}"
+        )
 
     def summary(self) -> str:
         """Human-readable summary of accumulated knowledge."""

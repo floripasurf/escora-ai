@@ -100,6 +100,84 @@ class TestShoreSelector:
         assert shore is None
 
 
+class TestInventoryMode:
+    @pytest.fixture
+    def inv_no_esc310(self):
+        from src.engine.inventory import InventoryAvailability
+        return InventoryAvailability(
+            locadora="Test",
+            updated_at="2026-04-07",
+            items={"ESC310": 0, "ESC450": 50, "ESC-PESADA": 5},
+        )
+
+    @pytest.fixture
+    def inv_only_esc310(self):
+        from src.engine.inventory import InventoryAvailability
+        return InventoryAvailability(
+            locadora="Test",
+            updated_at="2026-04-07",
+            items={"ESC310": 100, "ESC450": 0, "ESC-PESADA": 0},
+        )
+
+    @pytest.fixture
+    def inv_no_towers(self):
+        from src.engine.inventory import InventoryAvailability
+        return InventoryAvailability(
+            locadora="Test",
+            updated_at="2026-04-07",
+            items={"ESC310": 100, "ESC450": 50},
+        )
+
+    def test_select_shore_inventory_mode_skips_out_of_stock(
+        self, catalog, inv_no_esc310,
+    ):
+        # height/load that ESC310 would otherwise satisfy as cheapest pick
+        shore = select_shore(
+            catalog,
+            required_height_m=2.8,
+            required_capacity_kn=8.0,
+            mode="inventory",
+            inventory=inv_no_esc310,
+        )
+        assert shore is not None
+        assert shore.id != "ESC310"
+
+    def test_select_shore_inventory_fallback_with_warning(
+        self, catalog, inv_only_esc310, caplog,
+    ):
+        # Requires ESC450 height range, but only ESC310 is in stock
+        with caplog.at_level("WARNING"):
+            shore = select_shore(
+                catalog,
+                required_height_m=4.0,
+                required_capacity_kn=10.0,
+                mode="inventory",
+                inventory=inv_only_esc310,
+            )
+        assert shore is not None
+        assert any("Sem estoque" in rec.message for rec in caplog.records)
+
+    def test_decide_support_type_inventory_no_towers_falls_back_to_shores(
+        self, catalog, inv_no_towers,
+    ):
+        from src.engine.tower_selector import decide_support_type
+        from src.models.shore import SupportType
+
+        # Heavy slab that would normally trigger TOWER (Rule 3, ≥20cm)
+        support, reasons = decide_support_type(
+            required_height_m=3.0,
+            load_per_point_kn=10.0,
+            slab_thickness_m=0.25,
+            slab_area_m2=60.0,
+            element_type="slab",
+            shore_catalog=catalog,
+            mode="inventory",
+            inventory=inv_no_towers,
+        )
+        assert support == SupportType.TELESCOPIC
+        assert any("Sem torres em estoque" in r for r in reasons)
+
+
 class TestGridDistributor:
     def test_grid_dimensions_small(self):
         nx, ny, sx, sy = calculate_grid_dimensions(4.0, 6.0, max_spacing=1.5)

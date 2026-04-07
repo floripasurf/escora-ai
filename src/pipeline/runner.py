@@ -191,19 +191,45 @@ def _detect_coordinate_scale(parse) -> float:
         return scale
 
 
-def run_pipeline(filepath: str, scale_override: Optional[float] = None) -> PipelineResult:
-    # Stage 0: Load learning store for accumulated knowledge
-    store = LearningStore()
+def run_pipeline(
+    filepath: str,
+    scale_override: Optional[float] = None,
+    mode: str = "price",
+    inventory_name: Optional[str] = None,
+    branch_id: Optional[str] = None,
+) -> PipelineResult:
+    # Stage 0: Load learning store for accumulated knowledge (per-branch when
+    # branch_id is provided, so each locadora unit keeps its own corrections).
+    store = LearningStore(branch_id=branch_id)
     known_beam_layers = store.get_known_beam_layers() if store.run_count > 0 else {}
     known_pillar_layers = store.get_known_pillar_layers() if store.run_count > 0 else {}
     learned_section_height = store.get_default_section_height() if store.run_count > 0 else None
     learned_pe_direito = store.get_pe_direito_history() if store.run_count > 0 else None
 
+    density_correction = (
+        store.get_shore_density_correction() if store.run_count > 0 else 1.0
+    )
+    validated_layers = (
+        store.get_validated_layer_map() if store.run_count > 0 else {}
+    )
+    for layer, etype in validated_layers.items():
+        if etype == "beam":
+            known_beam_layers[layer] = 1.0
+
+    inventory = None
+    if mode == "inventory":
+        try:
+            from src.engine.inventory import load_inventory
+            inventory = load_inventory(inventory_name or "orguel_sjc")
+        except Exception as e:
+            logger.warning(f"Inventory load failed (falling back to price mode): {e}")
+
     if store.run_count > 0:
         logger.info(
             f"Learning data loaded: {store.run_count} runs, "
             f"{len(known_beam_layers)} beam layers, "
-            f"{len(known_pillar_layers)} pillar layers"
+            f"{len(known_pillar_layers)} pillar layers, "
+            f"density_correction={density_correction:.2f}"
         )
 
     # Stage 1: Parse
@@ -373,6 +399,9 @@ def run_pipeline(filepath: str, scale_override: Optional[float] = None) -> Pipel
                 slab_polylines=all_polylines,
                 shaft_diagonals=parse.diagonals,
                 shaft_texts=parse.texts,
+                density_correction=density_correction,
+                mode=mode,
+                inventory=inventory,
             )
             warnings.extend(calculation.warnings)
         except Exception as e:

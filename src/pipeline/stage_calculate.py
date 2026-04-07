@@ -237,6 +237,9 @@ def run_calculation(
     slab_polylines: Optional[List[Dict[str, Any]]] = None,
     shaft_diagonals: Optional[list] = None,
     shaft_texts: Optional[list] = None,
+    density_correction: float = 1.0,
+    mode: str = "price",
+    inventory: Optional[Any] = None,
 ) -> CalculationResult:
     """Run the full calculation pipeline.
 
@@ -367,7 +370,10 @@ def run_calculation(
             slab_type=slab_type,
             element_type="beam",
             shore_catalog=catalog,
+            mode=mode,
+            inventory=inventory,
         )
+
 
         # --- ML advisory prediction ---
         if ml_predictor.is_loaded:
@@ -453,7 +459,7 @@ def run_calculation(
         tower_shore_entry = None  # Tower as ShoreCatalogEntry when applicable
 
         if support_type == SupportType.TOWER and tower_catalog:
-            selected_tower = select_tower(tower_catalog, shore_height, load_per_shore_estimate)
+            selected_tower = select_tower(tower_catalog, shore_height, load_per_shore_estimate, mode=mode, inventory=inventory)
             if selected_tower:
                 warnings.append(
                     f"Viga {beam.name or 'sem nome'} — torre {selected_tower.model} "
@@ -463,6 +469,7 @@ def run_calculation(
                 if dist_beam_catalog:
                     selected_dist_beam = select_distribution_beam(
                         dist_beam_catalog, span_m=1.0, load_kn_m=total_linear_load,
+                        mode=mode, inventory=inventory,
                     )
                 from src.models.shore import ShoreCatalogEntry
                 tower_shore_entry = ShoreCatalogEntry(
@@ -484,7 +491,7 @@ def run_calculation(
         if tower_shore_entry is not None:
             selected_shore = tower_shore_entry
         else:
-            selected_shore = select_shore(catalog, shore_height, load_per_shore_estimate) if catalog else None
+            selected_shore = select_shore(catalog, shore_height, load_per_shore_estimate, mode=mode, inventory=inventory) if catalog else None
 
         if not selected_shore:
             warnings.append(
@@ -504,6 +511,8 @@ def run_calculation(
         beam_max_spacing = ESPACAMENTO_MAX_VIGA
         if tower_shore_entry is not None:
             beam_max_spacing = max(ESPACAMENTO_MAX_VIGA * 2.0, 2.5)
+        if density_correction > 0:
+            beam_max_spacing = beam_max_spacing / density_correction
 
         shores, n_shores, spacing = distribute_beam_shores(
             beam_length_m=beam_length,
@@ -718,12 +727,15 @@ def run_calculation(
             element_type="slab",
             slab_area_m2=slab.area_m2,
             shore_catalog=catalog,
+            mode=mode,
+            inventory=inventory,
         )
+
 
         slab_tower = None
         use_tower_entry = None  # ShoreCatalogEntry representing the tower
         if slab_support_type == SupportType.TOWER and tower_catalog:
-            slab_tower = select_tower(tower_catalog, slab_shore_height, load_per_shore_estimate)
+            slab_tower = select_tower(tower_catalog, slab_shore_height, load_per_shore_estimate, mode=mode, inventory=inventory)
             if slab_tower:
                 warnings.append(
                     f"Laje (área {slab.area_m2:.1f}m²) — torre {slab_tower.model}: "
@@ -750,7 +762,7 @@ def run_calculation(
         if use_tower_entry is not None:
             selected_shore = use_tower_entry
         else:
-            selected_shore = select_shore(catalog, slab_shore_height, load_per_shore_estimate) if catalog else None
+            selected_shore = select_shore(catalog, slab_shore_height, load_per_shore_estimate, mode=mode, inventory=inventory) if catalog else None
 
         if not selected_shore:
             if slab_tower:
@@ -794,6 +806,8 @@ def run_calculation(
         # where our uniform-shore approach would place 500-1500 supports.
         if use_tower_entry is not None:
             max_spacing = max(max_spacing * 2.5, 2.5)
+        if density_correction > 0:
+            max_spacing = max_spacing / density_correction
 
         # Check if this panel is a nervura slab — use rib-based shore placement
         is_nervura_panel = nervura_regions and _panel_is_nervura(polygon)

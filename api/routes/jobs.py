@@ -1,14 +1,24 @@
-"""Job endpoints: upload, process, download, revision upload."""
+"""Job endpoints: upload, process, download, revision upload.
+
+All routes are tenant-scoped: the caller's branch is resolved from the
+session token (Authorization: Bearer ...) plus X-Branch-Id header via
+`get_current_branch`, and jobs belonging to other branches are invisible
+(treated as 404).
+"""
 
 import logging
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import FileResponse
 from typing import Optional
 from api.services import job_service, storage
+from api.services import pipeline_service
 from api.services.pipeline_service import process_dxf
 from api.services.revision_service import analyze_revision
 from api.models.schemas import JobCreateResponse, JobStatusResponse
+from api.deps import get_current_branch
+from src.auth.branches import Branch
+from src.pipeline.learning_store import LearningStore
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +36,13 @@ def _run_pipeline(job_id: str):
     job_service.update_job(job_id, status="processing")
 
     try:
-        results = process_dxf(job["input_path"], job_id)
+        results = process_dxf(
+            job["input_path"],
+            job_id,
+            mode=job.get("optimization_mode", "price"),
+            inventory_name=job.get("inventory_name"),
+            branch_id=job.get("branch_id"),
+        )
 
         if "error" in results:
             job_service.update_job(job_id, status="error", error_message=results["error"])
@@ -52,8 +68,14 @@ async def upload_dxf(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     office_name: Optional[str] = Form(None),
+    optimization_mode: Optional[str] = Form("price"),
+    branch: Branch = Depends(get_current_branch),
 ):
-    """Upload a DXF file and start processing."""
+    """Upload a DXF file and start processing.
+
+    The caller's branch (from session + X-Branch-Id) determines which
+    inventory and learning store are used.
+    """
     if not file.filename.lower().endswith((".dxf", ".dwg")):
         raise HTTPException(400, "Formato nao suportado. Envie .dxf ou .dwg")
 
@@ -61,9 +83,17 @@ async def upload_dxf(
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(413, "Arquivo excede 50MB")
 
-    job = job_service.create_job(file.filename, "")
+    if optimization_mode not in ("price", "inventory"):
+        optimization_mode = "price"
+
+    job = job_service.create_job(file.filename, "", branch_id=branch.id)
     input_path = storage.save_upload(content, file.filename, job["id"])
-    job_service.update_job(job["id"], input_path=input_path)
+    job_service.update_job(
+        job["id"],
+        input_path=input_path,
+        optimization_mode=optimization_mode,
+        inventory_name=branch.inventory_name,
+    )
 
     # Process in background
     background_tasks.add_task(_run_pipeline, job["id"])
@@ -77,9 +107,9 @@ async def upload_dxf(
 
 
 @router.get("", response_model=list)
-async def list_jobs():
-    """List all jobs."""
-    jobs = job_service.list_jobs()
+async def list_jobs(branch: Branch = Depends(get_current_branch)):
+    """List jobs belonging to the caller's branch."""
+    jobs = job_service.list_jobs(branch_id=branch.id)
     return [
         {
             "id": j["id"],
@@ -93,9 +123,12 @@ async def list_jobs():
 
 
 @router.get("/{job_id}/status", response_model=JobStatusResponse)
-async def get_status(job_id: str):
+async def get_status(
+    job_id: str,
+    branch: Branch = Depends(get_current_branch),
+):
     """Get job status and results."""
-    job = job_service.get_job(job_id)
+    job = job_service.get_job(job_id, branch_id=branch.id)
     if not job:
         raise HTTPException(404, "Job nao encontrado")
 
@@ -114,7 +147,11 @@ async def get_status(job_id: str):
         "has_memoria_calculo": bool(results.get("memoria_calculo")),
         "has_orcamento": bool(results.get("orcamento")),
         "has_revision": job.get("revision_path") is not None,
+        "has_validated": job.get("validated_dxf_path") is not None,
+        "optimization_mode": job.get("optimization_mode"),
+        "inventory_name": job.get("inventory_name"),
     }
+
 
     if results:
         response.update({
@@ -135,9 +172,12 @@ async def get_status(job_id: str):
 
 
 @router.get("/{job_id}/download")
-async def download_dxf(job_id: str):
+async def download_dxf(
+    job_id: str,
+    branch: Branch = Depends(get_current_branch),
+):
     """Download the output DXF with positioned shores."""
-    job = job_service.get_job(job_id)
+    job = job_service.get_job(job_id, branch_id=branch.id)
     if not job:
         raise HTTPException(404, "Job nao encontrado")
     if job["status"] != "done":
@@ -156,9 +196,12 @@ async def download_dxf(job_id: str):
 
 
 @router.get("/{job_id}/download/csv")
-async def download_csv(job_id: str):
+async def download_csv(
+    job_id: str,
+    branch: Branch = Depends(get_current_branch),
+):
     """Download the BOM (Bill of Materials) as CSV."""
-    job = job_service.get_job(job_id)
+    job = job_service.get_job(job_id, branch_id=branch.id)
     if not job:
         raise HTTPException(404, "Job nao encontrado")
     if job["status"] != "done":
@@ -177,9 +220,12 @@ async def download_csv(job_id: str):
 
 
 @router.get("/{job_id}/download/ifc")
-async def download_ifc(job_id: str):
+async def download_ifc(
+    job_id: str,
+    branch: Branch = Depends(get_current_branch),
+):
     """Download the IFC (BIM) export with slabs, beams, pillars, shores."""
-    job = job_service.get_job(job_id)
+    job = job_service.get_job(job_id, branch_id=branch.id)
     if not job:
         raise HTTPException(404, "Job nao encontrado")
     if job["status"] != "done":
@@ -198,9 +244,12 @@ async def download_ifc(job_id: str):
 
 
 @router.delete("/{job_id}")
-async def delete_job(job_id: str):
+async def delete_job(
+    job_id: str,
+    branch: Branch = Depends(get_current_branch),
+):
     """Delete a job and its files."""
-    job = job_service.get_job(job_id)
+    job = job_service.get_job(job_id, branch_id=branch.id)
     if not job:
         raise HTTPException(404, "Job nao encontrado")
 
@@ -220,12 +269,16 @@ async def delete_job(job_id: str):
 
 
 @router.get("/{job_id}/download/pdf/{report_type}")
-async def download_pdf(job_id: str, report_type: str):
+async def download_pdf(
+    job_id: str,
+    report_type: str,
+    branch: Branch = Depends(get_current_branch),
+):
     """Download a PDF report (relatorio, memoria_calculo, orcamento)."""
     if report_type not in ("relatorio", "memoria_calculo", "orcamento"):
         raise HTTPException(400, "Tipo invalido. Use: relatorio, memoria_calculo, orcamento")
 
-    job = job_service.get_job(job_id)
+    job = job_service.get_job(job_id, branch_id=branch.id)
     if not job:
         raise HTTPException(404, "Job nao encontrado")
     if job["status"] != "done":
@@ -249,10 +302,101 @@ async def download_pdf(job_id: str, report_type: str):
     )
 
 
+@router.get("/{job_id}/download/validated/dxf")
+async def download_validated_dxf(
+    job_id: str,
+    branch: Branch = Depends(get_current_branch),
+):
+    job = job_service.get_job(job_id, branch_id=branch.id)
+    if not job:
+        raise HTTPException(404, "Job nao encontrado")
+    path = job.get("validated_dxf_path")
+    if not path or not Path(path).exists():
+        raise HTTPException(404, "DXF validado nao encontrado")
+    filename = Path(job["filename"]).stem + "_escoras_validated.dxf"
+    return FileResponse(path, media_type="application/dxf", filename=filename)
+
+
+@router.get("/{job_id}/download/validated/csv")
+async def download_validated_csv(
+    job_id: str,
+    branch: Branch = Depends(get_current_branch),
+):
+    job = job_service.get_job(job_id, branch_id=branch.id)
+    if not job:
+        raise HTTPException(404, "Job nao encontrado")
+    path = job.get("validated_csv_path")
+    if not path or not Path(path).exists():
+        raise HTTPException(404, "CSV validado nao encontrado")
+    filename = Path(job["filename"]).stem + "_BOM_validated.csv"
+    return FileResponse(path, media_type="text/csv", filename=filename)
+
+
+@router.get("/{job_id}/download/validated/ifc")
+async def download_validated_ifc(
+    job_id: str,
+    branch: Branch = Depends(get_current_branch),
+):
+    job = job_service.get_job(job_id, branch_id=branch.id)
+    if not job:
+        raise HTTPException(404, "Job nao encontrado")
+    path = job.get("validated_ifc_path")
+    if not path or not Path(path).exists():
+        raise HTTPException(404, "IFC validado nao encontrado")
+    filename = Path(job["filename"]).stem + "_validated.ifc"
+    return FileResponse(path, media_type="application/x-step", filename=filename)
+
+
+@router.get("/{job_id}/download/validated/pdf")
+async def download_validated_pdf(
+    job_id: str,
+    branch: Branch = Depends(get_current_branch),
+):
+    job = job_service.get_job(job_id, branch_id=branch.id)
+    if not job:
+        raise HTTPException(404, "Job nao encontrado")
+    path = job.get("validated_pdf_path")
+    if not path or not Path(path).exists():
+        raise HTTPException(404, "Relatorio validado nao encontrado")
+    filename = Path(job["filename"]).stem + "_relatorio_validated.pdf"
+    return FileResponse(path, media_type="application/pdf", filename=filename)
+
+
+@router.get("/{job_id}/download/validated/memoria")
+async def download_validated_memoria(
+    job_id: str,
+    branch: Branch = Depends(get_current_branch),
+):
+    job = job_service.get_job(job_id, branch_id=branch.id)
+    if not job:
+        raise HTTPException(404, "Job nao encontrado")
+    path = job.get("validated_memoria_path")
+    if not path or not Path(path).exists():
+        raise HTTPException(404, "Memoria validada nao encontrada")
+    filename = Path(job["filename"]).stem + "_memoria_calculo_validated.pdf"
+    return FileResponse(path, media_type="application/pdf", filename=filename)
+
+
+@router.get("/{job_id}/download/validated/orcamento")
+async def download_validated_orcamento(
+    job_id: str,
+    branch: Branch = Depends(get_current_branch),
+):
+    job = job_service.get_job(job_id, branch_id=branch.id)
+    if not job:
+        raise HTTPException(404, "Job nao encontrado")
+    path = job.get("validated_orcamento_path")
+    if not path or not Path(path).exists():
+        raise HTTPException(404, "Orcamento validado nao encontrado")
+    filename = Path(job["filename"]).stem + "_orcamento_validated.pdf"
+    return FileResponse(path, media_type="application/pdf", filename=filename)
+
+
 @router.post("/{job_id}/revision")
 async def upload_revision(
     job_id: str,
     file: UploadFile = File(...),
+    branch: Branch = Depends(get_current_branch),
 ):
     """Upload the engineer's revised DXF for learning.
 
@@ -261,7 +405,7 @@ async def upload_revision(
     - Which shores were removed (over-shored areas)
     - Which shores were moved (positioning calibration)
     """
-    job = job_service.get_job(job_id)
+    job = job_service.get_job(job_id, branch_id=branch.id)
     if not job:
         raise HTTPException(404, "Job nao encontrado")
     if job["status"] != "done":
@@ -287,6 +431,35 @@ async def upload_revision(
         diff = analyze_revision(original_dxf, revision_path)
         job_service.update_job(job_id, revision_data=diff)
 
+        try:
+            store = LearningStore(branch_id=branch.id)
+            store.update_record_with_revision(filename=job["filename"], diff=diff)
+            store.save()
+        except Exception as learn_err:
+            logger.warning(f"Failed to persist revision learnings: {learn_err}")
+
+        validated_paths = {}
+        try:
+            validated = pipeline_service.regenerate_from_revision(
+                original_input_path=job["input_path"],
+                revised_input_path=revision_path,
+                job_id=job_id,
+                branch_id=branch.id,
+            )
+            if "error" not in validated:
+                validated_paths = {
+                    "validated_dxf_path": validated.get("output_dxf_path"),
+                    "validated_csv_path": validated.get("csv_path"),
+                    "validated_ifc_path": validated.get("ifc_path"),
+                    "validated_pdf_path": validated.get("relatorio"),
+                    "validated_memoria_path": validated.get("memoria_calculo"),
+                    "validated_orcamento_path": validated.get("orcamento"),
+                    "validated_results": validated,
+                }
+                job_service.update_job(job_id, **validated_paths)
+        except Exception as regen_err:
+            logger.exception(f"Validated regeneration failed: {regen_err}")
+
         return {
             "message": "Revisao recebida e analisada",
             "learnings": diff["learnings"],
@@ -296,6 +469,7 @@ async def upload_revision(
             "beam_removed": diff["beam_removed"],
             "slab_added": diff["slab_added"],
             "slab_removed": diff["slab_removed"],
+            "has_validated": bool(validated_paths),
         }
     except Exception as e:
         logger.exception("Revision analysis failed")

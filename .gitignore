@@ -16,6 +16,7 @@ htmlcov/
 *.dxf.bak
 .DS_Store
 data/learning.json
+data/learning/
 
 # Client files — never commit
 input/*.DXF

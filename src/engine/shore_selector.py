@@ -1,9 +1,13 @@
 """Seleção de modelo de escora do catálogo."""
 
 import json
+import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Literal, Optional
 from src.models.shore import ShoreCatalogEntry
+from src.engine.inventory import InventoryAvailability, in_stock
+
+logger = logging.getLogger(__name__)
 
 
 def load_catalog(catalog_path: Optional[str] = None) -> List[ShoreCatalogEntry]:
@@ -23,14 +27,14 @@ def select_shore(
     catalog: List[ShoreCatalogEntry],
     required_height_m: float,
     required_capacity_kn: float,
+    mode: Literal["price", "inventory"] = "price",
+    inventory: Optional[InventoryAvailability] = None,
 ) -> Optional[ShoreCatalogEntry]:
-    """
-    Seleciona a escora mais adequada do catálogo.
+    """Seleciona a escora mais adequada do catálogo.
 
-    Critérios:
-    1. Altura compatível (required_height dentro do range)
-    2. Capacidade de carga suficiente
-    3. Menor capacidade que atenda (mais econômica)
+    mode='price' (default): minimiza capacidade derateada (mais econômica).
+    mode='inventory': prefere modelos em estoque na locadora informada,
+        caindo de volta para 'price' se nada em estoque atende.
     """
     compatible = [
         shore for shore in catalog
@@ -39,7 +43,6 @@ def select_shore(
     ]
 
     if not compatible:
-        # Tenta sem filtro de altura (pode usar extensão)
         compatible = [
             shore for shore in catalog
             if shore.effective_capacity(required_height_m) >= required_capacity_kn
@@ -48,5 +51,17 @@ def select_shore(
     if not compatible:
         return None
 
-    # Retorna a mais econômica (menor capacidade derateada que atenda)
+    if mode == "inventory" and inventory is not None:
+        in_stock_items = [s for s in compatible if in_stock(inventory, s.id)]
+        if in_stock_items:
+            return min(
+                in_stock_items,
+                key=lambda s: s.effective_capacity(required_height_m),
+            )
+        chosen = min(
+            compatible, key=lambda s: s.effective_capacity(required_height_m),
+        )
+        logger.warning(f"Sem estoque {inventory.locadora}: usando {chosen.id}")
+        return chosen
+
     return min(compatible, key=lambda s: s.effective_capacity(required_height_m))

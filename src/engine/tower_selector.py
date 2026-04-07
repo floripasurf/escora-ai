@@ -21,11 +21,12 @@ import json
 import math
 import logging
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Literal, Optional, Tuple
 from src.models.shore import (
     ShoreCatalogEntry, TowerCatalogEntry, DistributionBeamEntry,
     SupportType,
 )
+from src.engine.inventory import InventoryAvailability, in_stock
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,8 @@ def decide_support_type(
     element_type: str = "slab",
     slab_area_m2: float = 0.0,
     shore_catalog: Optional[List[ShoreCatalogEntry]] = None,
+    mode: Literal["price", "inventory"] = "price",
+    inventory: Optional[InventoryAvailability] = None,
 ) -> Tuple[SupportType, List[str]]:
     """Decide between telescopic shore and tower.
 
@@ -82,6 +85,14 @@ def decide_support_type(
     Returns (support_type, reasons) where reasons explain the decision.
     """
     reasons = []
+
+    inventory_no_towers = False
+    if mode == "inventory" and inventory is not None:
+        inventory_no_towers = not any(
+            in_stock(inventory, model_id)
+            for model_id in inventory.items
+            if model_id.startswith("TWR-")
+        )
 
     # Rule 1: Height exceeds telescopic limit (ESC450 max = 4.50m)
     if required_height_m > MAX_TELESCOPIC_HEIGHT_M:
@@ -110,6 +121,12 @@ def decide_support_type(
                 f"para altura {required_height_m:.2f} m"
             )
             return SupportType.TOWER, reasons
+
+    if inventory_no_towers:
+        reasons.append(
+            f"Sem torres em estoque ({inventory.locadora}) — usando escora telescópica"
+        )
+        return SupportType.TELESCOPIC, reasons
 
     # Rule 2: Large span (cimbramento)
     if span_m > CIMBRAMENTO_SPAN_M:
@@ -155,13 +172,12 @@ def select_tower(
     towers: List[TowerCatalogEntry],
     required_height_m: float,
     required_capacity_kn: float,
+    mode: Literal["price", "inventory"] = "price",
+    inventory: Optional[InventoryAvailability] = None,
 ) -> Optional[TowerCatalogEntry]:
     """Select the most economical tower that meets height and load requirements.
 
-    Criteria:
-    1. Max height sufficient
-    2. Load capacity sufficient
-    3. Minimum cost (modules × price)
+    mode='inventory': prefer towers in stock; fall back to price-min if none.
     """
     compatible = [
         t for t in towers
@@ -170,7 +186,6 @@ def select_tower(
     ]
 
     if not compatible:
-        # Fallback: ignore height, select by capacity only
         compatible = [
             t for t in towers
             if t.load_capacity_kn >= required_capacity_kn
@@ -179,14 +194,29 @@ def select_tower(
     if not compatible:
         return None
 
-    # Select cheapest option for required height
+    if mode == "inventory" and inventory is not None:
+        in_stock_items = [t for t in compatible if in_stock(inventory, t.id)]
+        if in_stock_items:
+            return min(
+                in_stock_items,
+                key=lambda t: t.total_price_brl(required_height_m),
+            )
+        chosen = min(
+            compatible, key=lambda t: t.total_price_brl(required_height_m),
+        )
+        logger.warning(f"Sem estoque {inventory.locadora}: usando torre {chosen.id}")
+        return chosen
+
     return min(compatible, key=lambda t: t.total_price_brl(required_height_m))
+
 
 
 def select_distribution_beam(
     beams: List[DistributionBeamEntry],
     span_m: float,
     load_kn_m: float,
+    mode: Literal["price", "inventory"] = "price",
+    inventory: Optional[InventoryAvailability] = None,
 ) -> Optional[DistributionBeamEntry]:
     """Select distribution beam that can span between towers/shores.
 
@@ -213,7 +243,16 @@ def select_distribution_beam(
     if not compatible:
         return None
 
+    if mode == "inventory" and inventory is not None:
+        in_stock_items = [b for b in compatible if in_stock(inventory, b.id)]
+        if in_stock_items:
+            return min(in_stock_items, key=lambda b: b.price_per_m_brl)
+        chosen = min(compatible, key=lambda b: b.price_per_m_brl)
+        logger.warning(f"Sem estoque {inventory.locadora}: usando viga {chosen.id}")
+        return chosen
+
     return min(compatible, key=lambda b: b.price_per_m_brl)
+
 
 
 def calculate_tower_grid(
