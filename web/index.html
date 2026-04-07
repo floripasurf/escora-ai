@@ -290,21 +290,178 @@
     </header>
 
     <main>
-        <!-- Upload -->
-        <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
-            <div class="upload-icon">&#128194;</div>
-            <h2>Envie seu arquivo DXF estrutural</h2>
-            <p>Arraste ou clique para selecionar — formato .dxf ate 50MB</p>
-            <input type="file" id="fileInput" accept=".dxf,.dwg">
+        <!-- Login -->
+        <div id="loginCard" style="display:none; max-width:420px; margin:4rem auto; background:var(--bg-card); padding:2rem; border-radius:var(--radius);">
+            <h2 style="margin-bottom:1rem;">Entrar</h2>
+            <div style="display:flex; flex-direction:column; gap:0.8rem;">
+                <input id="loginUser" placeholder="Usuário" style="padding:10px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text);">
+                <input id="loginPass" type="password" placeholder="Senha" style="padding:10px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text);">
+                <button class="btn btn-primary" onclick="doLogin()">Entrar</button>
+                <div id="loginError" style="color:var(--red); font-size:0.85rem; min-height:1em;"></div>
+            </div>
         </div>
 
-        <!-- Jobs list -->
-        <div id="jobsList"></div>
+        <!-- Branch picker -->
+        <div id="branchCard" style="display:none; max-width:520px; margin:4rem auto; background:var(--bg-card); padding:2rem; border-radius:var(--radius);">
+            <h2 style="margin-bottom:1rem;">Selecione a unidade</h2>
+            <div id="branchList" style="display:flex; flex-direction:column; gap:0.6rem;"></div>
+        </div>
+
+        <!-- Upload + jobs -->
+        <div id="appCard" style="display:none;">
+            <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+                <div class="upload-icon">&#128194;</div>
+                <h2>Envie seu arquivo DXF estrutural</h2>
+                <p>Arraste ou clique para selecionar — formato .dxf ate 50MB</p>
+                <input type="file" id="fileInput" accept=".dxf,.dwg">
+            </div>
+            <div id="jobsList"></div>
+        </div>
     </main>
 
     <script>
         const API = '/api/v1';
         const jobs = {};
+        let TOKEN = localStorage.getItem('escora_token') || '';
+        let BRANCH_ID = localStorage.getItem('escora_branch_id') || '';
+        let SESSION = null; // { username, locadora_name, branches }
+
+        function authHeaders(extra = {}) {
+            const h = { ...extra };
+            if (TOKEN) h['Authorization'] = `Bearer ${TOKEN}`;
+            if (BRANCH_ID) h['X-Branch-Id'] = BRANCH_ID;
+            return h;
+        }
+
+        function show(id) {
+            ['loginCard', 'branchCard', 'appCard'].forEach(k => {
+                document.getElementById(k).style.display = (k === id) ? 'block' : 'none';
+            });
+        }
+
+        async function doLogin() {
+            const username = document.getElementById('loginUser').value.trim();
+            const password = document.getElementById('loginPass').value;
+            const errEl = document.getElementById('loginError');
+            errEl.textContent = '';
+            if (!username || !password) { errEl.textContent = 'Preencha usuário e senha'; return; }
+            try {
+                const res = await fetch(`${API}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password }),
+                });
+                if (!res.ok) {
+                    errEl.textContent = (await res.json()).detail || 'Falha no login';
+                    return;
+                }
+                const data = await res.json();
+                TOKEN = data.token;
+                localStorage.setItem('escora_token', TOKEN);
+                SESSION = data;
+                if (data.branches.length === 1) {
+                    selectBranch(data.branches[0].id);
+                } else {
+                    renderBranchPicker(data.branches);
+                    show('branchCard');
+                }
+            } catch (e) {
+                errEl.textContent = 'Erro de conexão: ' + e.message;
+            }
+        }
+
+        function renderBranchPicker(branches) {
+            const list = document.getElementById('branchList');
+            list.innerHTML = branches.map(b =>
+                `<button class="btn btn-primary" onclick="selectBranch('${b.id}')">${b.display_name}</button>`
+            ).join('');
+        }
+
+        function selectBranch(branchId) {
+            BRANCH_ID = branchId;
+            localStorage.setItem('escora_branch_id', BRANCH_ID);
+            show('appCard');
+            renderHeaderBadge();
+            refreshJobsList();
+        }
+
+        async function logout() {
+            try { await fetch(`${API}/auth/logout`, { method: 'POST', headers: authHeaders() }); } catch (e) {}
+            TOKEN = '';
+            BRANCH_ID = '';
+            SESSION = null;
+            localStorage.removeItem('escora_token');
+            localStorage.removeItem('escora_branch_id');
+            Object.keys(jobs).forEach(k => delete jobs[k]);
+            show('loginCard');
+            const el = document.getElementById('branchBadge');
+            if (el) el.remove();
+        }
+
+        function renderHeaderBadge() {
+            let el = document.getElementById('branchBadge');
+            if (!el) {
+                el = document.createElement('div');
+                el.id = 'branchBadge';
+                el.style.cssText = 'position:fixed;top:12px;right:12px;padding:6px 12px;background:#0a0e1a;border:1px solid var(--green);border-radius:6px;font-size:12px;color:var(--green);cursor:pointer;z-index:999';
+                el.onclick = logout;
+                document.body.appendChild(el);
+            }
+            const branch = SESSION && SESSION.branches.find(b => b.id === BRANCH_ID);
+            const label = branch ? `${SESSION.locadora_name} — ${branch.branch_name}` : 'logado';
+            el.textContent = `📍 ${label}  ⏻`;
+            el.title = 'Clique para sair';
+        }
+
+        async function bootstrap() {
+            if (!TOKEN) { show('loginCard'); return; }
+            // Validate token via /auth/me
+            try {
+                const res = await fetch(`${API}/auth/me`, { headers: authHeaders() });
+                if (!res.ok) { await logout(); show('loginCard'); return; }
+                SESSION = await res.json();
+                if (BRANCH_ID && SESSION.branches.some(b => b.id === BRANCH_ID)) {
+                    show('appCard');
+                    renderHeaderBadge();
+                    refreshJobsList();
+                } else {
+                    renderBranchPicker(SESSION.branches);
+                    show('branchCard');
+                }
+            } catch (e) {
+                show('loginCard');
+            }
+        }
+
+        async function downloadFile(path, suggestedName) {
+            try {
+                const res = await fetch(`${API}${path}`, { headers: authHeaders() });
+                if (!res.ok) { alert('Erro ao baixar arquivo'); return; }
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = suggestedName || path.split('/').pop() || 'download';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+            } catch (e) {
+                alert('Erro no download: ' + e.message);
+            }
+        }
+
+        async function refreshJobsList() {
+            try {
+                const res = await fetch(`${API}/jobs`, { headers: authHeaders() });
+                if (!res.ok) return;
+                const list = await res.json();
+                list.forEach(j => { if (!jobs[j.id]) jobs[j.id] = j; });
+                renderJobs();
+            } catch (e) {}
+        }
+
+        bootstrap();
 
         // Upload handling
         const uploadZone = document.getElementById('uploadZone');
@@ -330,11 +487,16 @@
         });
 
         async function uploadFile(file) {
+            if (!TOKEN || !BRANCH_ID) { show('loginCard'); return; }
             const formData = new FormData();
             formData.append('file', file);
 
             try {
-                const res = await fetch(`${API}/jobs`, { method: 'POST', body: formData });
+                const res = await fetch(`${API}/jobs`, {
+                    method: 'POST',
+                    body: formData,
+                    headers: authHeaders(),
+                });
                 if (!res.ok) {
                     const err = await res.json();
                     alert(err.detail || 'Erro no upload');
@@ -352,7 +514,7 @@
         async function pollJob(jobId) {
             const poll = async () => {
                 try {
-                    const res = await fetch(`${API}/jobs/${jobId}/status`);
+                    const res = await fetch(`${API}/jobs/${jobId}/status`, { headers: authHeaders() });
                     const data = await res.json();
                     jobs[jobId] = data;
                     renderJobs();
@@ -381,6 +543,7 @@
                     const res = await fetch(`${API}/jobs/${jobId}/revision`, {
                         method: 'POST',
                         body: formData,
+                        headers: authHeaders(),
                     });
                     const data = await res.json();
 
@@ -401,7 +564,7 @@
         async function deleteJob(jobId) {
             if (!confirm('Remover este projeto?')) return;
             try {
-                const res = await fetch(`${API}/jobs/${jobId}`, { method: 'DELETE' });
+                const res = await fetch(`${API}/jobs/${jobId}`, { method: 'DELETE', headers: authHeaders() });
                 if (res.ok) {
                     delete jobs[jobId];
                     renderJobs();
@@ -504,16 +667,16 @@
                     // Actions
                     content += `
                         <div class="actions">
-                            <a href="${API}/jobs/${job.id}/download" class="btn btn-primary">
+                            <a href="#" onclick="downloadFile('/jobs/${job.id}/download');return false" class="btn btn-primary">
                                 &#8681; DXF Escoras
                             </a>
-                            <a href="${API}/jobs/${job.id}/download/csv" class="btn btn-accent">
+                            <a href="#" onclick="downloadFile('/jobs/${job.id}/download/csv');return false" class="btn btn-accent">
                                 &#128196; BOM (CSV)
                             </a>
-                            ${job.has_relatorio ? `<a href="${API}/jobs/${job.id}/download/pdf/relatorio" class="btn btn-pdf">&#128196; Relatorio PDF</a>` : ''}
-                            ${job.has_memoria_calculo ? `<a href="${API}/jobs/${job.id}/download/pdf/memoria_calculo" class="btn btn-pdf">&#128196; Memoria Calculo</a>` : ''}
-                            ${job.has_orcamento ? `<a href="${API}/jobs/${job.id}/download/pdf/orcamento" class="btn btn-pdf">&#128196; Orcamento PDF</a>` : ''}
-                            ${job.has_ifc ? `<a href="${API}/jobs/${job.id}/download/ifc" class="btn btn-accent">&#128736; IFC (BIM)</a>` : ''}
+                            ${job.has_relatorio ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/pdf/relatorio');return false" class="btn btn-pdf">&#128196; Relatorio PDF</a>` : ''}
+                            ${job.has_memoria_calculo ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/pdf/memoria_calculo');return false" class="btn btn-pdf">&#128196; Memoria Calculo</a>` : ''}
+                            ${job.has_orcamento ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/pdf/orcamento');return false" class="btn btn-pdf">&#128196; Orcamento PDF</a>` : ''}
+                            ${job.has_ifc ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/ifc');return false" class="btn btn-accent">&#128736; IFC (BIM)</a>` : ''}
                             <button class="btn btn-green" onclick="uploadRevision('${job.id}')">
                                 &#8679; Enviar Revisao
                             </button>
@@ -526,6 +689,22 @@
                     if (job.warnings && job.warnings.length > 0) {
                         const warns = job.warnings.slice(0, 8).map(w => `<div>&#9888; ${w}</div>`).join('');
                         content += `<div class="warnings">${warns}</div>`;
+                    }
+
+                    if (job.has_validated) {
+                        content += `
+                            <div class="revision-result" style="border-color:var(--green)">
+                                <h4>Versao validada (regerada a partir da revisao)</h4>
+                                <div class="actions" style="margin-top:8px">
+                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/dxf');return false" class="btn btn-primary">&#8681; DXF</a>
+                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/csv');return false" class="btn btn-accent">&#128196; BOM</a>
+                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/pdf');return false" class="btn btn-pdf">&#128196; Relatorio</a>
+                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/memoria');return false" class="btn btn-pdf">&#128196; Memoria</a>
+                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/orcamento');return false" class="btn btn-pdf">&#128196; Orcamento</a>
+                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/ifc');return false" class="btn btn-accent">&#128736; IFC</a>
+                                </div>
+                            </div>
+                        `;
                     }
 
                     // Revision results

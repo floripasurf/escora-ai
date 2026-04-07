@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "updated_at": "2026-04-07",
+  "locadoras": [
+    {
+      "id": "supplier",
+      "name": "Supplier",
+      "branches": [
+        {
+          "id": "supplier-sjc",
+          "branch_name": "São José dos Campos",
+          "inventory_name": "supplier_sjc"
+        }
+      ],
+      "users": [
+        {
+          "username": "admin",
+          "name": "Admin Supplier",
+          "password_hash": "pbkdf2:sha256:100000$devsalt2026$9a80454cd8e2e15030bb3b75144c74d7b4f30c6c10c78d413bfeb6878e488ba1"
+        }
+      ]
+    }
+  ]
+}

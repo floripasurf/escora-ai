@@ -18,12 +18,28 @@ from api.config import settings
 logger = logging.getLogger(__name__)
 
 
-def process_dxf(input_path: str, job_id: str) -> dict:
+def process_dxf(
+    input_path: str,
+    job_id: str,
+    mode: str = "price",
+    inventory_name: Optional[str] = None,
+    output_suffix: str = "",
+    branch_id: Optional[str] = None,
+) -> dict:
     """Run the full pipeline on a DXF file and generate output.
 
-    Returns a dict with results summary and output file path.
+    output_suffix is appended to all output filenames so a regenerated
+    bundle (e.g. '_validated') does not overwrite the originals.
+
+    branch_id scopes the learning store so each locadora branch keeps its
+    own accumulated knowledge.
     """
-    result = run_pipeline(input_path)
+    result = run_pipeline(
+        input_path,
+        mode=mode,
+        inventory_name=inventory_name,
+        branch_id=branch_id,
+    )
     calc = result.calculation
 
     if calc is None:
@@ -32,7 +48,8 @@ def process_dxf(input_path: str, job_id: str) -> dict:
     # Generate output DXF
     output_dir = Path(settings.output_dir) / job_id
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_dxf = str(output_dir / f"{Path(input_path).stem}_escoras.dxf")
+    stem_base = Path(input_path).stem
+    output_dxf = str(output_dir / f"{stem_base}_escoras{output_suffix}.dxf")
 
     _generate_output_dxf(input_path, calc, output_dxf)
 
@@ -67,13 +84,13 @@ def process_dxf(input_path: str, job_id: str) -> dict:
         pillar_count += sum(1 for e in level.elements if e.element_type == ElementType.PILLAR)
 
     # Generate BOM CSV
-    csv_path = str(output_dir / f"{Path(input_path).stem}_BOM.csv")
+    csv_path = str(output_dir / f"{stem_base}_BOM{output_suffix}.csv")
     _generate_bom_csv(calc, csv_path)
 
     # Generate IFC (BIM export)
     ifc_path: Optional[str] = None
     try:
-        ifc_candidate = str(output_dir / f"{Path(input_path).stem}.ifc")
+        ifc_candidate = str(output_dir / f"{stem_base}{output_suffix}.ifc")
         generate_ifc(result, ifc_candidate, project_name=Path(input_path).stem)
         ifc_path = ifc_candidate
         logger.info(f"Generated IFC: {ifc_path}")
@@ -81,7 +98,7 @@ def process_dxf(input_path: str, job_id: str) -> dict:
         logger.warning(f"IFC generation failed (non-fatal): {e}")
 
     # Generate PDF reports (memória de cálculo + orçamento)
-    stem = Path(input_path).stem
+    stem = stem_base
     pdf_paths = {}
     try:
         metadata = ReportMetadata(
@@ -92,18 +109,15 @@ def process_dxf(input_path: str, job_id: str) -> dict:
         )
         report_data = build_report_data(calc, metadata)
 
-        # Relatório resumo
-        pdf_report = str(output_dir / f"{stem}_relatorio.pdf")
+        pdf_report = str(output_dir / f"{stem}_relatorio{output_suffix}.pdf")
         generate_pdf(report_data, pdf_report)
         pdf_paths["relatorio"] = pdf_report
 
-        # Memória de cálculo
-        pdf_memoria = str(output_dir / f"{stem}_memoria_calculo.pdf")
+        pdf_memoria = str(output_dir / f"{stem}_memoria_calculo{output_suffix}.pdf")
         generate_memoria_calculo(report_data, pdf_memoria)
         pdf_paths["memoria_calculo"] = pdf_memoria
 
-        # Proposta comercial / Orçamento
-        pdf_orcamento = str(output_dir / f"{stem}_orcamento.pdf")
+        pdf_orcamento = str(output_dir / f"{stem}_orcamento{output_suffix}.pdf")
         generate_orcamento(report_data, pdf_orcamento)
         pdf_paths["orcamento"] = pdf_orcamento
 
@@ -124,6 +138,25 @@ def process_dxf(input_path: str, job_id: str) -> dict:
         "ifc_path": ifc_path,
         **pdf_paths,
     }
+
+
+def regenerate_from_revision(
+    original_input_path: str,
+    revised_input_path: str,
+    job_id: str,
+    branch_id: Optional[str] = None,
+) -> dict:
+    """Re-run the pipeline on the revised DXF and write *_validated.* outputs.
+
+    Reuses the entire process_dxf path with output_suffix='_validated' so the
+    original outputs are preserved for audit/comparison.
+    """
+    return process_dxf(
+        input_path=revised_input_path,
+        job_id=job_id,
+        output_suffix="_validated",
+        branch_id=branch_id,
+    )
 
 
 def _generate_bom_csv(calc, output_path: str):

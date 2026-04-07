@@ -51,3 +51,7 @@ class JobStatusResponse(BaseModel):
     has_orcamento: bool = False
     has_revision: bool = False
     revision_learnings: Optional[List[str]] = None
+    has_validated: bool = False
+    optimization_mode: Optional[str] = None
+    inventory_name: Optional[str] = None
+
