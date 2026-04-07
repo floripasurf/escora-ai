@@ -24,6 +24,8 @@ import json
 import logging
 import os
 import secrets
+import sqlite3
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,8 +39,38 @@ DEFAULT_LOCADORAS_PATH = (
 
 SESSION_TTL_SECONDS = 60 * 60 * 12  # 12 hours
 
-# In-memory session store: token → (username, locadora_id, expires_at)
-_SESSIONS: Dict[str, Dict] = {}
+# Session store: SQLite-backed so restarts don't log everybody out.
+# Table created lazily on first use; path resolved from ESCORA_DATA_DIR.
+_session_lock = threading.Lock()
+
+
+def _sessions_db_path() -> Path:
+    root = Path(os.environ.get("ESCORA_DATA_DIR", "./data"))
+    root.mkdir(parents=True, exist_ok=True)
+    return root / "sessions.db"
+
+
+def _session_conn() -> sqlite3.Connection:
+    path = _sessions_db_path()
+    conn = sqlite3.connect(str(path), isolation_level=None, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    return conn
+
+
+def init_sessions_db() -> None:
+    with _session_lock, _session_conn() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sessions (
+                token TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
+                locadora_id TEXT NOT NULL,
+                expires_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_exp ON sessions(expires_at)")
 
 
 # ---------- Data classes ----------
@@ -154,32 +186,53 @@ def authenticate_user(username: str, password: str) -> Optional[User]:
 
 
 def create_session(user: User) -> str:
+    init_sessions_db()
     token = secrets.token_urlsafe(32)
-    _SESSIONS[token] = {
-        "username": user.username,
-        "locadora_id": user.locadora_id,
-        "expires_at": time.time() + SESSION_TTL_SECONDS,
-    }
+    expires_at = time.time() + SESSION_TTL_SECONDS
+    with _session_lock, _session_conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO sessions (token, username, locadora_id, expires_at) VALUES (?, ?, ?, ?)",
+            (token, user.username, user.locadora_id, expires_at),
+        )
     return token
 
 
 def resolve_session(token: str) -> Optional[Dict]:
-    sess = _SESSIONS.get(token)
-    if not sess:
+    if not token:
         return None
-    if sess["expires_at"] < time.time():
-        _SESSIONS.pop(token, None)
+    init_sessions_db()
+    with _session_lock, _session_conn() as conn:
+        row = conn.execute(
+            "SELECT username, locadora_id, expires_at FROM sessions WHERE token = ?",
+            (token,),
+        ).fetchone()
+    if row is None:
         return None
-    return sess
+    username, locadora_id, expires_at = row
+    if expires_at < time.time():
+        revoke_session(token)
+        return None
+    return {"username": username, "locadora_id": locadora_id, "expires_at": expires_at}
 
 
 def revoke_session(token: str) -> None:
-    _SESSIONS.pop(token, None)
+    if not token:
+        return
+    try:
+        with _session_lock, _session_conn() as conn:
+            conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+    except Exception as e:
+        logger.warning(f"Failed to revoke session: {e}")
 
 
 def clear_sessions() -> None:
-    """Test helper: forget all in-memory sessions."""
-    _SESSIONS.clear()
+    """Test helper: wipe all sessions."""
+    try:
+        init_sessions_db()
+        with _session_lock, _session_conn() as conn:
+            conn.execute("DELETE FROM sessions")
+    except Exception:
+        pass
 
 
 def change_password(username: str, old_password: str, new_password: str) -> bool:

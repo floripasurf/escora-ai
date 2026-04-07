@@ -61,23 +61,22 @@ SEED_LOCADORAS = {
 
 
 @pytest.fixture(autouse=True)
-def _isolated_locadoras(tmp_path_factory, monkeypatch):
-    loc_file = tmp_path_factory.mktemp("loc") / "locadoras.json"
+def _isolated_data(tmp_path_factory, monkeypatch):
+    """Isolate every test in its own data dir so jobs.db, sessions.db,
+    learning/ and uploads/ can't leak between tests."""
+    data_dir = tmp_path_factory.mktemp("data")
+    loc_file = data_dir / "locadoras.json"
     loc_file.write_text(json.dumps(SEED_LOCADORAS))
+
+    monkeypatch.setenv("ESCORA_DATA_DIR", str(data_dir))
     monkeypatch.setenv("ESCORA_LOCADORAS_FILE", str(loc_file))
 
     from src.auth.branches import clear_sessions
+    from api.services.job_service import _reset_for_tests
     clear_sessions()
+    _reset_for_tests()
     yield
     clear_sessions()
-
-
-@pytest.fixture(autouse=True)
-def _reset_jobs():
-    from api.services.job_service import _jobs
-    _jobs.clear()
-    yield
-    _jobs.clear()
 
 
 def _login(tc: TestClient, username: str, password: str, branch_id: str) -> TestClient:

@@ -1,13 +1,139 @@
-"""Job lifecycle management (tenant-scoped by branch_id)."""
+"""Job lifecycle management — SQLite-backed, tenant-scoped by branch_id.
 
+Schema (data/jobs.db):
+    jobs(id TEXT PK, branch_id TEXT, status TEXT, filename TEXT,
+         office_name TEXT, input_path TEXT,
+         output_dxf_path, csv_path, ifc_path, revision_path,
+         validated_* paths (6),
+         results_data JSON, validated_results JSON,
+         revision_data JSON,
+         error_message, optimization_mode, inventory_name,
+         created_at TEXT, updated_at TEXT)
+
+Public API (unchanged vs. the in-memory version) so routes don't care:
+    create_job, get_job, update_job, delete_job, list_jobs
+Plus:
+    init_db, sweep_orphan_processing, all_jobs (for startup helpers)
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+import threading
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Any, Iterable, List, Optional
+
+from api.config import settings
+
+_lock = threading.Lock()
+
+# Fields stored as JSON in SQLite for simplicity.
+_JSON_FIELDS = {"results_data", "validated_results", "revision_data"}
+
+# Column order — also defines the full set of valid job fields.
+_COLUMNS = (
+    "id",
+    "branch_id",
+    "status",
+    "filename",
+    "office_name",
+    "input_path",
+    "output_dxf_path",
+    "csv_path",
+    "ifc_path",
+    "revision_path",
+    "validated_dxf_path",
+    "validated_csv_path",
+    "validated_ifc_path",
+    "validated_pdf_path",
+    "validated_memoria_path",
+    "validated_orcamento_path",
+    "results_data",
+    "validated_results",
+    "revision_data",
+    "error_message",
+    "optimization_mode",
+    "inventory_name",
+    "created_at",
+    "updated_at",
+)
+
+_CREATE_SQL = """
+CREATE TABLE IF NOT EXISTS jobs (
+    id TEXT PRIMARY KEY,
+    branch_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    office_name TEXT,
+    input_path TEXT,
+    output_dxf_path TEXT,
+    csv_path TEXT,
+    ifc_path TEXT,
+    revision_path TEXT,
+    validated_dxf_path TEXT,
+    validated_csv_path TEXT,
+    validated_ifc_path TEXT,
+    validated_pdf_path TEXT,
+    validated_memoria_path TEXT,
+    validated_orcamento_path TEXT,
+    results_data TEXT,
+    validated_results TEXT,
+    revision_data TEXT,
+    error_message TEXT,
+    optimization_mode TEXT DEFAULT 'price',
+    inventory_name TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_branch ON jobs(branch_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+"""
 
 
-# In-memory store for MVP (replace with DB in production).
-# Key = job_id (globally unique), value = job dict including branch_id.
-_jobs: dict = {}
+def _connect() -> sqlite3.Connection:
+    path = settings.jobs_db_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path), isolation_level=None, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    return conn
+
+
+def init_db() -> None:
+    with _lock, _connect() as conn:
+        conn.executescript(_CREATE_SQL)
+
+
+def _row_to_job(row: sqlite3.Row) -> dict:
+    job: dict = {}
+    for key in row.keys():
+        val = row[key]
+        if key in _JSON_FIELDS and val is not None:
+            try:
+                job[key] = json.loads(val)
+            except Exception:
+                job[key] = None
+        elif key in ("created_at", "updated_at") and val is not None:
+            try:
+                job[key] = datetime.fromisoformat(val)
+            except Exception:
+                job[key] = datetime.utcnow()
+        else:
+            job[key] = val
+    return job
+
+
+def _serialize(field: str, value: Any) -> Any:
+    if value is None:
+        return None
+    if field in _JSON_FIELDS:
+        return json.dumps(value, default=str, ensure_ascii=False)
+    if field in ("created_at", "updated_at") and isinstance(value, datetime):
+        return value.isoformat()
+    return value
 
 
 def create_job(
@@ -16,63 +142,101 @@ def create_job(
     branch_id: str,
     office_name: Optional[str] = None,
 ) -> dict:
-    job_id = str(uuid.uuid4())[:8]
-    job = {
-        "id": job_id,
-        "branch_id": branch_id,
-        "status": "pending",
-        "filename": filename,
-        "office_name": office_name,
-        "input_path": input_path,
-        "output_dxf_path": None,
-        "revision_path": None,
-        "results_data": None,
-        "error_message": None,
-        "created_at": datetime.utcnow(),
-        "updated_at": datetime.utcnow(),
-        "optimization_mode": "price",
-        "inventory_name": None,
-        "validated_dxf_path": None,
-        "validated_csv_path": None,
-        "validated_ifc_path": None,
-        "validated_pdf_path": None,
-        "validated_memoria_path": None,
-        "validated_orcamento_path": None,
-        "validated_results": None,
-    }
-    _jobs[job_id] = job
-    return job
+    job_id = uuid.uuid4().hex  # full 32-char UUID, not adivinhável
+    now = datetime.utcnow()
+    init_db()
+    with _lock, _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO jobs (id, branch_id, status, filename, office_name,
+                              input_path, created_at, updated_at, optimization_mode)
+            VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, 'price')
+            """,
+            (job_id, branch_id, filename, office_name, input_path,
+             now.isoformat(), now.isoformat()),
+        )
+    return get_job(job_id) or {}
 
 
 def get_job(job_id: str, branch_id: Optional[str] = None) -> Optional[dict]:
-    """Fetch job by id. If branch_id is provided, returns None when the job
-    belongs to a different branch (tenant isolation)."""
-    job = _jobs.get(job_id)
-    if job is None:
+    init_db()
+    with _lock, _connect() as conn:
+        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    if row is None:
         return None
+    job = _row_to_job(row)
     if branch_id is not None and job.get("branch_id") != branch_id:
         return None
     return job
 
 
 def update_job(job_id: str, **kwargs) -> Optional[dict]:
-    job = _jobs.get(job_id)
-    if job:
-        job.update(kwargs)
-        job["updated_at"] = datetime.utcnow()
-    return job
+    if not kwargs:
+        return get_job(job_id)
+    updates = {k: v for k, v in kwargs.items() if k in _COLUMNS and k != "id"}
+    if not updates:
+        return get_job(job_id)
+    updates["updated_at"] = datetime.utcnow()
+    assignments = ", ".join(f"{k} = ?" for k in updates.keys())
+    values = [_serialize(k, v) for k, v in updates.items()]
+    values.append(job_id)
+    init_db()
+    with _lock, _connect() as conn:
+        conn.execute(f"UPDATE jobs SET {assignments} WHERE id = ?", values)
+    return get_job(job_id)
 
 
 def delete_job(job_id: str) -> bool:
-    if job_id in _jobs:
-        del _jobs[job_id]
-        return True
-    return False
+    init_db()
+    with _lock, _connect() as conn:
+        cur = conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+        return cur.rowcount > 0
 
 
-def list_jobs(branch_id: Optional[str] = None) -> list:
-    """List jobs, optionally filtered to one branch."""
-    jobs = _jobs.values()
-    if branch_id is not None:
-        jobs = [j for j in jobs if j.get("branch_id") == branch_id]
-    return sorted(jobs, key=lambda j: j["created_at"], reverse=True)
+def list_jobs(branch_id: Optional[str] = None) -> List[dict]:
+    init_db()
+    with _lock, _connect() as conn:
+        if branch_id is not None:
+            rows = conn.execute(
+                "SELECT * FROM jobs WHERE branch_id = ? ORDER BY created_at DESC",
+                (branch_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM jobs ORDER BY created_at DESC"
+            ).fetchall()
+    return [_row_to_job(r) for r in rows]
+
+
+def all_jobs() -> List[dict]:
+    return list_jobs()
+
+
+def sweep_orphan_processing() -> int:
+    """Mark any jobs stuck in `processing` as `error` — run at startup.
+
+    A previous process was interrupted mid-run; the pipeline will never resume,
+    so the job must be explicitly failed so the engineer sees a clear message.
+    Returns the number of jobs swept.
+    """
+    init_db()
+    now = datetime.utcnow().isoformat()
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            """
+            UPDATE jobs
+               SET status = 'error',
+                   error_message = 'Processamento interrompido por reinicio do servidor. Reenvie o arquivo.',
+                   updated_at = ?
+             WHERE status IN ('pending', 'processing')
+            """,
+            (now,),
+        )
+        return cur.rowcount
+
+
+def _reset_for_tests() -> None:
+    """Test helper: drop and recreate the jobs table."""
+    with _lock, _connect() as conn:
+        conn.execute("DROP TABLE IF EXISTS jobs")
+        conn.executescript(_CREATE_SQL)
