@@ -22,10 +22,16 @@ import json
 import sqlite3
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Iterable, List, Optional
 
 from api.config import settings
+
+# Hard wall-clock cap for any single pipeline run. If a job sits in
+# `processing` longer than this, it's almost certainly hung (OOM-killed
+# silently, infinite loop, machine restart mid-flight) and we mark it as
+# `error` so the UI never gets stuck on a perma-spinner.
+PROCESSING_TIMEOUT_SECONDS = 10 * 60
 
 _lock = threading.Lock()
 
@@ -193,8 +199,34 @@ def delete_job(job_id: str) -> bool:
         return cur.rowcount > 0
 
 
+def sweep_stale_processing() -> int:
+    """Flip jobs stuck in `processing` past PROCESSING_TIMEOUT_SECONDS to error.
+
+    Called on every list_jobs() so the UI auto-recovers from hung pipelines
+    (OOM, infinite loop, mid-flight crash) without needing a restart.
+    Returns the number of jobs swept.
+    """
+    init_db()
+    cutoff = (datetime.utcnow() - timedelta(seconds=PROCESSING_TIMEOUT_SECONDS)).isoformat()
+    now = datetime.utcnow().isoformat()
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            """
+            UPDATE jobs
+               SET status = 'error',
+                   error_message = 'Processamento excedeu o tempo limite (provavel timeout/OOM). Tente um arquivo menor ou divida o pavimento.',
+                   updated_at = ?
+             WHERE status = 'processing'
+               AND updated_at < ?
+            """,
+            (now, cutoff),
+        )
+        return cur.rowcount
+
+
 def list_jobs(branch_id: Optional[str] = None) -> List[dict]:
     init_db()
+    sweep_stale_processing()
     with _lock, _connect() as conn:
         if branch_id is not None:
             rows = conn.execute(
