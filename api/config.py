@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     upload_dir: str = "./uploads"
     output_dir: str = "./output"
     default_tenant_id: str = "pilot"  # Single-tenant MVP
+    max_file_size_mb: int = 200  # Max upload size (DXFs can be huge)
 
     class Config:
         env_file = ".env"

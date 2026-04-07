@@ -307,12 +307,25 @@
             <div id="branchList" style="display:flex; flex-direction:column; gap:0.6rem;"></div>
         </div>
 
+        <!-- Change password -->
+        <div id="pwdCard" style="display:none; max-width:420px; margin:4rem auto; background:var(--bg-card); padding:2rem; border-radius:var(--radius);">
+            <h2 style="margin-bottom:1rem;">Trocar senha</h2>
+            <div style="display:flex; flex-direction:column; gap:0.8rem;">
+                <input id="pwdOld" type="password" placeholder="Senha atual" style="padding:10px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text);">
+                <input id="pwdNew" type="password" placeholder="Nova senha (min. 6 caracteres)" style="padding:10px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text);">
+                <input id="pwdNew2" type="password" placeholder="Confirme a nova senha" style="padding:10px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text);">
+                <button class="btn btn-primary" onclick="doChangePassword()">Salvar</button>
+                <button class="btn" onclick="show('appCard')" style="background:transparent; border:1px solid var(--border); color:var(--text);">Cancelar</button>
+                <div id="pwdMsg" style="font-size:0.85rem; min-height:1em;"></div>
+            </div>
+        </div>
+
         <!-- Upload + jobs -->
         <div id="appCard" style="display:none;">
             <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
                 <div class="upload-icon">&#128194;</div>
                 <h2>Envie seu arquivo DXF estrutural</h2>
-                <p>Arraste ou clique para selecionar — formato .dxf ate 50MB</p>
+                <p>Arraste ou clique para selecionar — .dxf ate 200MB</p>
                 <input type="file" id="fileInput" accept=".dxf,.dwg">
             </div>
             <div id="jobsList"></div>
@@ -334,9 +347,45 @@
         }
 
         function show(id) {
-            ['loginCard', 'branchCard', 'appCard'].forEach(k => {
+            ['loginCard', 'branchCard', 'appCard', 'pwdCard'].forEach(k => {
                 document.getElementById(k).style.display = (k === id) ? 'block' : 'none';
             });
+        }
+
+        function openPwdModal() {
+            document.getElementById('pwdOld').value = '';
+            document.getElementById('pwdNew').value = '';
+            document.getElementById('pwdNew2').value = '';
+            document.getElementById('pwdMsg').textContent = '';
+            document.getElementById('pwdMsg').style.color = 'var(--red)';
+            show('pwdCard');
+        }
+
+        async function doChangePassword() {
+            const oldP = document.getElementById('pwdOld').value;
+            const newP = document.getElementById('pwdNew').value;
+            const newP2 = document.getElementById('pwdNew2').value;
+            const msg = document.getElementById('pwdMsg');
+            msg.style.color = 'var(--red)';
+            if (!oldP || !newP) { msg.textContent = 'Preencha todos os campos'; return; }
+            if (newP.length < 6) { msg.textContent = 'Nova senha precisa ter ao menos 6 caracteres'; return; }
+            if (newP !== newP2) { msg.textContent = 'Confirmação não confere'; return; }
+            try {
+                const res = await fetch(`${API}/auth/change-password`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                    body: JSON.stringify({ old_password: oldP, new_password: newP }),
+                });
+                if (!res.ok) {
+                    msg.textContent = (await res.json()).detail || 'Falha ao trocar senha';
+                    return;
+                }
+                msg.style.color = 'var(--green)';
+                msg.textContent = 'Senha atualizada. Faça login novamente.';
+                setTimeout(() => { logout(); }, 1200);
+            } catch (e) {
+                msg.textContent = 'Erro de conexão: ' + e.message;
+            }
         }
 
         async function doLogin() {
@@ -403,14 +452,19 @@
             if (!el) {
                 el = document.createElement('div');
                 el.id = 'branchBadge';
-                el.style.cssText = 'position:fixed;top:12px;right:12px;padding:6px 12px;background:#0a0e1a;border:1px solid var(--green);border-radius:6px;font-size:12px;color:var(--green);cursor:pointer;z-index:999';
-                el.onclick = logout;
+                el.style.cssText = 'position:fixed;top:12px;right:12px;display:flex;gap:6px;z-index:999';
+                el.innerHTML = `
+                    <div id="branchBadgeLabel" style="padding:6px 12px;background:#0a0e1a;border:1px solid var(--green);border-radius:6px;font-size:12px;color:var(--green);"></div>
+                    <button id="branchBadgePwd" title="Trocar senha" style="padding:6px 10px;background:#0a0e1a;border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text);cursor:pointer;">🔑</button>
+                    <button id="branchBadgeOut" title="Sair" style="padding:6px 10px;background:#0a0e1a;border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text);cursor:pointer;">⏻</button>
+                `;
                 document.body.appendChild(el);
+                document.getElementById('branchBadgePwd').onclick = openPwdModal;
+                document.getElementById('branchBadgeOut').onclick = logout;
             }
             const branch = SESSION && SESSION.branches.find(b => b.id === BRANCH_ID);
             const label = branch ? `${SESSION.locadora_name} — ${branch.branch_name}` : 'logado';
-            el.textContent = `📍 ${label}  ⏻`;
-            el.title = 'Clique para sair';
+            document.getElementById('branchBadgeLabel').textContent = `📍 ${label}`;
         }
 
         async function bootstrap() {
