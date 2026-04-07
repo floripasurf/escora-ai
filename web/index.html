@@ -333,7 +333,14 @@
     </main>
 
     <script>
-        const API = '/api/v1';
+        // API goes straight to the Fly backend. We intentionally bypass the
+        // Vercel rewrite here because Vercel edge rewrites cap request bodies
+        // at ~4.5 MB, which would break our 200 MB DXF upload feature.
+        // CORS is enabled server-side (allow_origins=*).
+        const BACKEND = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+            ? ''  // dev: same origin
+            : 'https://escora-ai.fly.dev';
+        const API = `${BACKEND}/api/v1`;
         const jobs = {};
         let TOKEN = localStorage.getItem('escora_token') || '';
         let BRANCH_ID = localStorage.getItem('escora_branch_id') || '';
@@ -552,8 +559,8 @@
                     headers: authHeaders(),
                 });
                 if (!res.ok) {
-                    const err = await res.json();
-                    alert(err.detail || 'Erro no upload');
+                    const msg = await safeErrorMessage(res);
+                    alert(msg || 'Erro no upload');
                     return;
                 }
                 const data = await res.json();
@@ -562,6 +569,20 @@
                 pollJob(data.id);
             } catch (e) {
                 alert('Erro de conexao: ' + e.message);
+            }
+        }
+
+        async function safeErrorMessage(res) {
+            try {
+                const ct = res.headers.get('content-type') || '';
+                if (ct.includes('application/json')) {
+                    const j = await res.json();
+                    return j.detail || j.message || `Erro ${res.status}`;
+                }
+                const txt = (await res.text()).slice(0, 200);
+                return `Erro ${res.status}: ${txt}`;
+            } catch (_) {
+                return `Erro ${res.status}`;
             }
         }
 
