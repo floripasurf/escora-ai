@@ -366,6 +366,7 @@ def run_calculation(
             span_m=beam_length,
             slab_type=slab_type,
             element_type="beam",
+            shore_catalog=catalog,
         )
 
         # --- ML advisory prediction ---
@@ -449,6 +450,7 @@ def run_calculation(
 
         selected_tower = None
         selected_dist_beam = None
+        tower_shore_entry = None  # Tower as ShoreCatalogEntry when applicable
 
         if support_type == SupportType.TOWER and tower_catalog:
             selected_tower = select_tower(tower_catalog, shore_height, load_per_shore_estimate)
@@ -462,14 +464,8 @@ def run_calculation(
                     selected_dist_beam = select_distribution_beam(
                         dist_beam_catalog, span_m=1.0, load_kn_m=total_linear_load,
                     )
-
-        selected_shore = select_shore(catalog, shore_height, load_per_shore_estimate) if catalog else None
-
-        if not selected_shore:
-            if selected_tower:
-                # Create a synthetic ShoreCatalogEntry from tower for compatibility
                 from src.models.shore import ShoreCatalogEntry
-                selected_shore = ShoreCatalogEntry(
+                tower_shore_entry = ShoreCatalogEntry(
                     id=selected_tower.id,
                     manufacturer=selected_tower.manufacturer,
                     model=f"Torre {selected_tower.model}",
@@ -483,12 +479,19 @@ def run_calculation(
                     base_plate_mm=selected_tower.base_dimension_m * 1000,
                     price_reference_brl=selected_tower.total_price_brl(shore_height),
                 )
-            else:
-                warnings.append(
-                    f"Viga {beam.name or 'sem nome'} — nenhuma escora/torre compatível "
-                    f"(altura {shore_height:.2f}m, carga {load_per_shore_estimate:.1f} kN)"
-                )
-                continue
+
+        # Prefer tower entry when tower was decided (match Orguel's TORRE_VIGA standard)
+        if tower_shore_entry is not None:
+            selected_shore = tower_shore_entry
+        else:
+            selected_shore = select_shore(catalog, shore_height, load_per_shore_estimate) if catalog else None
+
+        if not selected_shore:
+            warnings.append(
+                f"Viga {beam.name or 'sem nome'} — nenhuma escora/torre compatível "
+                f"(altura {shore_height:.2f}m, carga {load_per_shore_estimate:.1f} kN)"
+            )
+            continue
 
         start_pt = beam.geometry[0] if len(beam.geometry) >= 2 else (0, 0)
         end_pt = beam.geometry[1] if len(beam.geometry) >= 2 else (beam_length, 0)
@@ -497,13 +500,18 @@ def run_calculation(
         dy = abs(end_pt[1] - start_pt[1])
         direction = "x" if dx >= dy else "y"
 
+        # Tower-based beam support uses wider spacing (VM distribution span 2.5-3m)
+        beam_max_spacing = ESPACAMENTO_MAX_VIGA
+        if tower_shore_entry is not None:
+            beam_max_spacing = max(ESPACAMENTO_MAX_VIGA * 2.0, 2.5)
+
         shores, n_shores, spacing = distribute_beam_shores(
             beam_length_m=beam_length,
             beam_width_m=beam_width,
             beam_height_m=beam_height,
             shore=selected_shore,
             total_linear_load_kn_m=total_linear_load,
-            max_spacing=ESPACAMENTO_MAX_VIGA,
+            max_spacing=beam_max_spacing,
             start_x=start_pt[0],
             start_y=start_pt[1],
             direction=direction,
@@ -708,9 +716,12 @@ def run_calculation(
             slab_thickness_m=thickness,
             slab_type=slab_type,
             element_type="slab",
+            slab_area_m2=slab.area_m2,
+            shore_catalog=catalog,
         )
 
         slab_tower = None
+        use_tower_entry = None  # ShoreCatalogEntry representing the tower
         if slab_support_type == SupportType.TOWER and tower_catalog:
             slab_tower = select_tower(tower_catalog, slab_shore_height, load_per_shore_estimate)
             if slab_tower:
@@ -718,8 +729,28 @@ def run_calculation(
                     f"Laje (área {slab.area_m2:.1f}m²) — torre {slab_tower.model}: "
                     f"{'; '.join(slab_decision_reasons)}"
                 )
+                from src.models.shore import ShoreCatalogEntry as _SCE
+                use_tower_entry = _SCE(
+                    id=slab_tower.id,
+                    manufacturer=slab_tower.manufacturer,
+                    model=f"Torre {slab_tower.model}",
+                    type="tower",
+                    height_min_m=0.0,
+                    height_max_m=slab_tower.max_height_m,
+                    load_capacity_kn=slab_tower.load_capacity_kn,
+                    weight_kg=slab_tower.total_weight_kg(slab_shore_height),
+                    tube_external_mm=0,
+                    tube_internal_mm=0,
+                    base_plate_mm=slab_tower.base_dimension_m * 1000,
+                    price_reference_brl=slab_tower.total_price_brl(slab_shore_height),
+                )
 
-        selected_shore = select_shore(catalog, slab_shore_height, load_per_shore_estimate) if catalog else None
+        # When tower is selected, the "shore" catalog entry IS the tower
+        # (grid spacing increases from ~1m to ~2.5m → ~6x fewer supports)
+        if use_tower_entry is not None:
+            selected_shore = use_tower_entry
+        else:
+            selected_shore = select_shore(catalog, slab_shore_height, load_per_shore_estimate) if catalog else None
 
         if not selected_shore:
             if slab_tower:
@@ -758,6 +789,11 @@ def run_calculation(
         max_spacing = _max_spacing_for_slab(thickness)
         if is_cantilever:
             max_spacing *= CANTILEVER_SPACING_FACTOR
+        # Tower grids use wider spacing (VM distribution beams span 2.5-3m).
+        # This is the primary reason Orguel plans have ~80-180 towers for areas
+        # where our uniform-shore approach would place 500-1500 supports.
+        if use_tower_entry is not None:
+            max_spacing = max(max_spacing * 2.5, 2.5)
 
         # Check if this panel is a nervura slab — use rib-based shore placement
         is_nervura_panel = nervura_regions and _panel_is_nervura(polygon)

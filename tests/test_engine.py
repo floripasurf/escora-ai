@@ -84,9 +84,10 @@ class TestShoreSelector:
         assert shore.load_capacity_kn >= 18.0
 
     def test_select_heavy_shore(self, catalog):
-        shore = select_shore(catalog, required_height_m=4.0, required_capacity_kn=25.0)
+        # At 3.0m the heavy shore is not yet derated (curve starts at 3.0m/30kN)
+        shore = select_shore(catalog, required_height_m=3.0, required_capacity_kn=25.0)
         assert shore is not None
-        assert shore.load_capacity_kn >= 25.0
+        assert shore.effective_capacity(3.0) >= 25.0
 
     def test_select_most_economical(self, catalog):
         shore = select_shore(catalog, required_height_m=2.8, required_capacity_kn=5.0)
@@ -149,3 +150,67 @@ class TestValidator:
         is_valid, errors = validate_result([], 1.0, 1.0)
         assert not is_valid
         assert any("Nenhuma escora" in e for e in errors)
+
+
+class TestDerating:
+    def test_effective_capacity_interpolates(self, catalog):
+        esc310 = next(s for s in catalog if s.id == "ESC310")
+        # Exact curve points
+        assert esc310.effective_capacity(2.00) == pytest.approx(15.0)
+        assert esc310.effective_capacity(2.50) == pytest.approx(12.0)
+        assert esc310.effective_capacity(3.10) == pytest.approx(8.0)
+        # Midpoint between 2.00 (15) and 2.50 (12): 2.25 → 13.5
+        assert esc310.effective_capacity(2.25) == pytest.approx(13.5, rel=1e-3)
+        # Clamping above range
+        assert esc310.effective_capacity(3.50) == pytest.approx(8.0)
+        # Clamping below range
+        assert esc310.effective_capacity(1.50) == pytest.approx(15.0)
+
+    def test_select_shore_respects_derating(self, catalog):
+        # At 4.4 m with 15 kN load, ESC450 derated ≈ 9 kN → must not be returned.
+        shore = select_shore(catalog, required_height_m=4.4, required_capacity_kn=15.0)
+        assert shore is None or shore.id != "ESC450"
+        # ESC-PESADA at 4.4m is ≈ 14.4 kN → still not enough at 15 kN.
+        # Any returned shore must actually satisfy the derated capacity.
+        if shore is not None:
+            assert shore.effective_capacity(4.4) >= 15.0
+
+    def test_decide_support_type_escalates_to_tower_by_load(self, catalog):
+        from src.engine.tower_selector import decide_support_type
+        from src.models.shore import SupportType
+
+        # 4.4 m, 12 kN/point → no shore can take 12 × 1.4 = 16.8 kN at 4.4m
+        support, reasons = decide_support_type(
+            required_height_m=4.4,
+            load_per_point_kn=12.0,
+            slab_thickness_m=0.12,
+            element_type="slab",
+            shore_catalog=catalog,
+        )
+        assert support == SupportType.TOWER
+        assert any("derateada" in r for r in reasons)
+
+        # 2.8 m, 8 kN → well within ESC310/ESC450 capacity → telescopic
+        support, reasons = decide_support_type(
+            required_height_m=2.8,
+            load_per_point_kn=8.0,
+            slab_thickness_m=0.12,
+            element_type="slab",
+            shore_catalog=catalog,
+        )
+        assert support == SupportType.TELESCOPIC
+
+    def test_decide_support_type_beam_short_light_is_telescopic(self, catalog):
+        from src.engine.tower_selector import decide_support_type
+        from src.models.shore import SupportType
+
+        # Short beam, light load: the old blanket "beam→tower" rule is gone.
+        support, _ = decide_support_type(
+            required_height_m=2.6,
+            load_per_point_kn=6.0,
+            slab_thickness_m=0.12,
+            span_m=4.0,
+            element_type="beam",
+            shore_catalog=catalog,
+        )
+        assert support == SupportType.TELESCOPIC

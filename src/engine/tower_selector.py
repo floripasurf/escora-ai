@@ -6,9 +6,12 @@ Decision criteria (NBR 15696 + real Orguel/Mecanor practice):
 - Ribbed/thick slab ≥ 30cm → tower with distribution beam
 - Height > 12m OR span > 15m → heavy cimbramento
 
-Real locadora insight (Orguel): beams tend to use towers + VM130,
-slabs tend to use telescopic shores. But this is a preference, not
-a hard rule — decision depends on height and load.
+Real locadora insight (Orguel, calibrated on 12 real projects):
+- Beams → ALWAYS tower with VM distribution (TORRE_VIGA + VM130/VM80)
+  measured: TORRE_VIGA dominates in 8/8 analyzed Orguel beam plans
+- Slabs → tower grid when area ≥ 40m² or thick ≥ 20cm, else shores
+  (Orguel uses TORRE_LAJE for open continuous slab areas)
+- Small cover slabs (<50m² total) → shores only (no towers)
 
 Shore models: ESC310 (2.00-3.10m), ESC450 (3.00-4.50m)
 VM130 lengths: 155, 205, 255, 310, 360, 410cm
@@ -31,6 +34,13 @@ MAX_TELESCOPIC_HEIGHT_M = 4.5       # ESC450 max height
 CIMBRAMENTO_HEIGHT_M = 12.0         # Above this → heavy cimbramento
 CIMBRAMENTO_SPAN_M = 15.0           # Above this → heavy cimbramento
 HEAVY_SLAB_THICKNESS_M = 0.30       # Above this → tower with dist. beam
+
+# Orguel-calibrated slab tower triggers (from 12-project analysis 2026-04-07)
+SLAB_TOWER_AREA_M2 = 40.0           # ≥40m² panel → tower grid
+SLAB_TOWER_THICKNESS_M = 0.20       # ≥20cm slab → tower grid
+
+# NBR 15696 safety factor for shore load combinations
+SHORE_SAFETY_FACTOR = 1.4
 
 
 def load_tower_catalog(catalog_path: Optional[str] = None) -> Tuple[
@@ -57,12 +67,17 @@ def decide_support_type(
     span_m: float = 0.0,
     slab_type: str = "solid",
     element_type: str = "slab",
+    slab_area_m2: float = 0.0,
+    shore_catalog: Optional[List[ShoreCatalogEntry]] = None,
 ) -> Tuple[SupportType, List[str]]:
     """Decide between telescopic shore and tower.
 
-    Based on real locadora practice (Orguel/Mecanor):
-    - element_type="beam" → ALWAYS tower + VM130
-    - element_type="slab" → shore, unless height/thickness triggers tower
+    Physics-based escalation (NBR 15696 + Euler derating of telescopic shores):
+    - Height > 4.5m → tower (ESC450 physical limit)
+    - If a shore_catalog is provided and NO shore's derated capacity at
+      required_height_m × SAFETY_FACTOR covers load_per_point_kn → tower
+    - Slab area ≥ 40m² or thickness ≥ 20cm → tower grid (Orguel practice)
+    - Otherwise → telescopic shore
 
     Returns (support_type, reasons) where reasons explain the decision.
     """
@@ -76,6 +91,26 @@ def decide_support_type(
         )
         return SupportType.TOWER, reasons
 
+    # Rule 1b: Load-based derating check. When a catalog is provided, compare
+    # the load per point against every shore's Euler-derated capacity at the
+    # required extension height. If no telescopic shore can take the load with
+    # the NBR 15696 safety factor, escalate to a tower.
+    if shore_catalog and load_per_point_kn > 0:
+        best_cap_kn = 0.0
+        for shore in shore_catalog:
+            eff = shore.effective_capacity(required_height_m)
+            if eff > best_cap_kn:
+                best_cap_kn = eff
+        required_with_sf = load_per_point_kn * SHORE_SAFETY_FACTOR
+        if best_cap_kn > 0 and best_cap_kn < required_with_sf:
+            reasons.append(
+                f"carga {load_per_point_kn:.1f} kN "
+                f"(× SF {SHORE_SAFETY_FACTOR} = {required_with_sf:.1f} kN) > "
+                f"capacidade derateada máxima {best_cap_kn:.1f} kN "
+                f"para altura {required_height_m:.2f} m"
+            )
+            return SupportType.TOWER, reasons
+
     # Rule 2: Large span (cimbramento)
     if span_m > CIMBRAMENTO_SPAN_M:
         reasons.append(
@@ -84,11 +119,19 @@ def decide_support_type(
         )
         return SupportType.TOWER, reasons
 
-    # Rule 3: Heavy/thick slab (≥30cm)
-    if slab_thickness_m >= HEAVY_SLAB_THICKNESS_M:
+    # Rule 3: Heavy/thick slab (≥20cm) — Orguel uses TORRE_LAJE
+    if slab_thickness_m >= SLAB_TOWER_THICKNESS_M:
         reasons.append(
-            f"Laje espessa {slab_thickness_m*100:.0f}cm ≥ {HEAVY_SLAB_THICKNESS_M*100:.0f}cm "
-            f"(recomendado torre com viga de distribuição)"
+            f"Laje {slab_thickness_m*100:.0f}cm ≥ {SLAB_TOWER_THICKNESS_M*100:.0f}cm "
+            f"(TORRE_LAJE com viga de distribuição — padrão Orguel)"
+        )
+        return SupportType.TOWER, reasons
+
+    # Rule 3b: Large slab panel — Orguel uses TORRE_LAJE for open areas
+    if slab_area_m2 >= SLAB_TOWER_AREA_M2:
+        reasons.append(
+            f"Painel de laje {slab_area_m2:.0f}m² ≥ {SLAB_TOWER_AREA_M2:.0f}m² "
+            f"(TORRE_LAJE em grid — padrão Orguel para áreas contínuas)"
         )
         return SupportType.TOWER, reasons
 

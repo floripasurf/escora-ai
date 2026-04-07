@@ -22,7 +22,9 @@ input/*.DXF
 input/*.dxf
 input/*.dwg
 input/Sergio1/
+input/Sergio1_stripped/
 input/Cesar/
+input/orguel/
 input/teste*/
 input/*.key
 output/

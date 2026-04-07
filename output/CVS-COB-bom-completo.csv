@@ -1,4 +1,0 @@
-id,modelo,fabricante,quantidade,capacidade_kn,altura_min_m,altura_max_m,peso_unitario_kg,peso_total_kg,preco_unitario_brl,preco_total_brl
-ESC-TEL-002,Escora Média 2.6-4.2m,Genérico,25,20.0,2.6,4.2,11.2,280.0,65.0,1625.0
-ESC-TEL-005,Escora Curta 1.8-2.8m,Genérico,91,18.0,1.8,2.8,7.2,655.2,38.0,3458.0
-ESC-TEL-001,Escora Leve 2.0-3.4m,Genérico,94,15.0,2.0,3.4,8.5,799.0,45.0,4230.0

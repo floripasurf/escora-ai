@@ -12,6 +12,7 @@ from src.pipeline.runner import run_pipeline
 from src.models.pipeline_models import ElementType
 from src.output.report_data import build_report_data, ReportMetadata
 from src.output.pdf_generator import generate_pdf, generate_memoria_calculo, generate_orcamento
+from src.output.ifc_generator import generate_ifc
 from api.config import settings
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,16 @@ def process_dxf(input_path: str, job_id: str) -> dict:
     csv_path = str(output_dir / f"{Path(input_path).stem}_BOM.csv")
     _generate_bom_csv(calc, csv_path)
 
+    # Generate IFC (BIM export)
+    ifc_path: Optional[str] = None
+    try:
+        ifc_candidate = str(output_dir / f"{Path(input_path).stem}.ifc")
+        generate_ifc(result, ifc_candidate, project_name=Path(input_path).stem)
+        ifc_path = ifc_candidate
+        logger.info(f"Generated IFC: {ifc_path}")
+    except Exception as e:
+        logger.warning(f"IFC generation failed (non-fatal): {e}")
+
     # Generate PDF reports (memória de cálculo + orçamento)
     stem = Path(input_path).stem
     pdf_paths = {}
@@ -110,6 +121,7 @@ def process_dxf(input_path: str, job_id: str) -> dict:
         "warnings": result.warnings[:20],  # Limit warnings
         "output_dxf_path": output_dxf,
         "csv_path": csv_path,
+        "ifc_path": ifc_path,
         **pdf_paths,
     }
 

@@ -128,6 +128,7 @@ def _classify_layers(
     level: LevelSegment,
     known_beam_layers: Optional[Dict[str, float]] = None,
     known_pillar_layers: Optional[Dict[str, float]] = None,
+    scale: float = 1.0,
 ) -> Dict[str, ElementType]:
     """Classify layers by running structural detection per-layer.
 
@@ -146,19 +147,27 @@ def _classify_layers(
     known_beam_layers = known_beam_layers or {}
     known_pillar_layers = known_pillar_layers or {}
 
-    # Group segments by layer
+    # Group segments by layer (apply scale so geometric thresholds work in meters)
     segs_by_layer: Dict[str, list] = defaultdict(list)
     for s in level.segments:
         if s.type == "H":
-            segs_by_layer[s.layer].append({"type": "H", "y": s.y, "x_min": s.x_min, "x_max": s.x_max})
+            segs_by_layer[s.layer].append({
+                "type": "H", "y": s.y * scale,
+                "x_min": s.x_min * scale, "x_max": s.x_max * scale,
+            })
         else:
-            segs_by_layer[s.layer].append({"type": "V", "x": s.x, "y_min": s.y_min, "y_max": s.y_max})
+            segs_by_layer[s.layer].append({
+                "type": "V", "x": s.x * scale,
+                "y_min": s.y_min * scale, "y_max": s.y_max * scale,
+            })
 
-    # Group rects by layer
+    # Group rects by layer (apply scale)
     rects_by_layer: Dict[str, list] = defaultdict(list)
     for r in level.rects:
         rects_by_layer[r.layer].append({
-            "cx": r.cx, "cy": r.cy, "width": r.width, "height": r.height, "area": r.area,
+            "cx": r.cx * scale, "cy": r.cy * scale,
+            "width": r.width * scale, "height": r.height * scale,
+            "area": r.area * scale * scale,
         })
 
     # A layer can be BOTH beam and pillar (e.g., layer "1" contains
@@ -262,6 +271,7 @@ def classify_elements(
         level,
         known_beam_layers=known_beam_layers,
         known_pillar_layers=known_pillar_layers,
+        scale=scale,
     )
     beam_layers = {l for l, t in layer_types.items() if t == ElementType.BEAM}
     pillar_layers = {l for l, t in layer_types.items() if t == ElementType.PILLAR}

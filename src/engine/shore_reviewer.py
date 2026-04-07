@@ -11,7 +11,7 @@ Applies corrections automatically and logs what was fixed.
 
 import math
 import logging
-from typing import List, Tuple, Set
+from typing import List, Optional, Set, Tuple
 
 from src.models.calculation_models import BeamShoringResult, SlabShoringResult, CalculationResult
 from src.models.pipeline_models import ClassifiedElement, ElementType
@@ -35,6 +35,13 @@ MIN_PILLAR_FACE_DIST = DISTANCIA_PILAR_MIN
 # Minimum distance from slab shore to beam axis (m)
 # Beam already has its own shores — slab shore on beam is redundant
 MIN_BEAM_AXIS_DIST = 0.30
+
+# Load-aware thinning: if two shores within the same element are closer than
+# this distance, try to remove one. The removal is only applied when the
+# remaining shores can still carry the element's load with the NBR 15696
+# safety factor against the derated capacity at the actual shore height.
+REDUNDANCY_DIST_M = 0.80
+from src.engine.tower_selector import SHORE_SAFETY_FACTOR
 
 
 def review_and_fix(
@@ -60,6 +67,9 @@ def review_and_fix(
 
     # === PASS 3: Global deduplication — remove overlapping shores ===
     corrections.extend(_fix_global_overlaps(calc.beam_results, calc.slab_results))
+
+    # === PASS 3b: Load-aware thinning of redundant close shores ===
+    corrections.extend(_thin_redundant_shores(calc.beam_results, calc.slab_results))
 
     # === PASS 4: Remove slab shores outside polygon ===
     corrections.extend(_fix_outside_polygon(calc.slab_results))
@@ -299,6 +309,126 @@ def _fix_global_overlaps(
         )
 
     return corrections
+
+
+def _thin_redundant_shores(
+    beam_results: List[BeamShoringResult],
+    slab_results: List[SlabShoringResult],
+) -> List[str]:
+    """Remove shores that are too close to a neighbor when physics allows it.
+
+    For each element (beam or slab), finds pairs of shores closer than
+    REDUNDANCY_DIST_M. For each such pair, tentatively removes the one whose
+    removal leaves the biggest safety margin (i.e. the one closest to its
+    sibling on both sides, or the one with lower contribution). The removal
+    is only kept if the remaining shores can still carry the element's total
+    load with the derated capacity × SAFETY_FACTOR.
+
+    Iterates until no more removals are possible.
+    """
+    corrections: List[str] = []
+
+    # --- Beams ---
+    for br in beam_results:
+        if len(br.shores) < 2 or br.selected_shore is None:
+            continue
+        beam_length = br.beam.length_m or 1.0
+        total_load = br.total_linear_load_kn_m * beam_length
+        eff_cap = br.selected_shore.effective_capacity(br.shore_height_m)
+        if eff_cap <= 0:
+            continue
+
+        removed = 0
+        while True:
+            if len(br.shores) <= 1:
+                break
+            # Minimum shores needed physically
+            required_n = math.ceil(total_load * SHORE_SAFETY_FACTOR / eff_cap)
+            if len(br.shores) <= required_n:
+                break
+            # Find the tightest pair
+            idx_to_remove = _find_closest_redundant(
+                [(s.x, s.y) for s in br.shores], REDUNDANCY_DIST_M
+            )
+            if idx_to_remove is None:
+                break
+            # Verify that after removal we still satisfy capacity
+            if len(br.shores) - 1 < required_n:
+                break
+            br.shores.pop(idx_to_remove)
+            removed += 1
+        if removed > 0:
+            br.shore_count = len(br.shores)
+            _recalc_beam_loads(br)
+            name = br.beam.name or "sem nome"
+            corrections.append(
+                f"Revisão: removidas {removed} escora(s) redundantes da viga "
+                f"{name} (carga recalculada cabe nas escoras restantes)"
+            )
+
+    # --- Slabs ---
+    for i, sr in enumerate(slab_results):
+        if len(sr.shores) < 2 or sr.selected_shore is None:
+            continue
+        # Slab shores sit at (pe_direito - thickness); the PositionedShore
+        # records load but not height, so use the selected shore model's
+        # static height bracket via height_max as a conservative upper bound.
+        # If the shore has a curve, this gives the most-derated capacity.
+        shore_height = sr.selected_shore.height_max_m
+        eff_cap = sr.selected_shore.effective_capacity(shore_height)
+        if eff_cap <= 0:
+            continue
+        total_load = sr.total_load_kn
+
+        removed = 0
+        while True:
+            if len(sr.shores) <= 1:
+                break
+            required_n = math.ceil(total_load * SHORE_SAFETY_FACTOR / eff_cap)
+            if len(sr.shores) <= required_n:
+                break
+            idx_to_remove = _find_closest_redundant(
+                [(s.x, s.y) for s in sr.shores], REDUNDANCY_DIST_M
+            )
+            if idx_to_remove is None:
+                break
+            if len(sr.shores) - 1 < required_n:
+                break
+            sr.shores.pop(idx_to_remove)
+            removed += 1
+        if removed > 0:
+            _recalc_slab_loads(sr)
+            corrections.append(
+                f"Revisão: removidas {removed} escora(s) redundantes da laje "
+                f"{i+1} (área {sr.area_m2:.1f}m², carga cabe nas restantes)"
+            )
+
+    return corrections
+
+
+def _find_closest_redundant(
+    points: List[Tuple[float, float]],
+    min_dist_m: float,
+) -> Optional[int]:
+    """Return the index of a shore that has a neighbor closer than min_dist_m.
+
+    Prefers the shore whose nearest neighbor is the closest overall (i.e. the
+    densest spot). Returns None if no pair qualifies.
+    """
+    best_idx: Optional[int] = None
+    best_dist = min_dist_m
+    n = len(points)
+    for i in range(n):
+        xi, yi = points[i]
+        for j in range(n):
+            if i == j:
+                continue
+            xj, yj = points[j]
+            d = math.hypot(xi - xj, yi - yj)
+            if d < best_dist:
+                best_dist = d
+                best_idx = i
+    return best_idx
 
 
 def _fix_outside_polygon(

@@ -35,18 +35,18 @@ def select_shore(
     compatible = [
         shore for shore in catalog
         if shore.height_min_m <= required_height_m <= shore.height_max_m
-        and shore.load_capacity_kn >= required_capacity_kn
+        and shore.effective_capacity(required_height_m) >= required_capacity_kn
     ]
 
     if not compatible:
         # Tenta sem filtro de altura (pode usar extensão)
         compatible = [
             shore for shore in catalog
-            if shore.load_capacity_kn >= required_capacity_kn
+            if shore.effective_capacity(required_height_m) >= required_capacity_kn
         ]
 
     if not compatible:
         return None
 
-    # Retorna a mais econômica (menor capacidade que atenda)
-    return min(compatible, key=lambda s: s.load_capacity_kn)
+    # Retorna a mais econômica (menor capacidade derateada que atenda)
+    return min(compatible, key=lambda s: s.effective_capacity(required_height_m))
