@@ -1038,6 +1038,22 @@
             }
         }
 
+        function stemOf(filename) {
+            if (!filename) return 'arquivo';
+            const base = filename.split(/[\\/]/).pop();
+            const dot = base.lastIndexOf('.');
+            return dot > 0 ? base.slice(0, dot) : base;
+        }
+
+        function filenameFromResponse(res, fallback) {
+            const cd = res.headers.get('Content-Disposition') || '';
+            const m = cd.match(/filename\*?=(?:UTF-8''|")?([^";]+)"?/i);
+            if (m && m[1]) {
+                try { return decodeURIComponent(m[1]); } catch { return m[1]; }
+            }
+            return fallback;
+        }
+
         async function downloadFile(path, suggestedName) {
             try {
                 const res = await fetch(`${API}${path}`, { headers: authHeaders() });
@@ -1046,7 +1062,7 @@
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = suggestedName || path.split('/').pop() || 'download';
+                a.download = filenameFromResponse(res, suggestedName || 'download');
                 document.body.appendChild(a);
                 a.click();
                 a.remove();
@@ -1286,14 +1302,15 @@
                         `;
                     }
 
+                    const stem = stemOf(job.filename);
                     content += `
                         <div class="actions">
-                            <a href="#" onclick="downloadFile('/jobs/${job.id}/download');return false" class="btn btn-primary">↓ DXF c/ Escoras</a>
-                            <a href="#" onclick="downloadFile('/jobs/${job.id}/download/csv');return false" class="btn btn-accent">↓ BOM CSV</a>
-                            ${job.has_relatorio ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/pdf/relatorio');return false" class="btn btn-pdf">↓ Relatório PDF</a>` : ''}
-                            ${job.has_memoria_calculo ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/pdf/memoria_calculo');return false" class="btn btn-pdf">↓ Memória de Cálculo</a>` : ''}
-                            ${job.has_orcamento ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/pdf/orcamento');return false" class="btn btn-pdf">↓ Orçamento</a>` : ''}
-                            ${job.has_ifc ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/ifc');return false" class="btn btn-accent">↓ IFC (BIM)</a>` : ''}
+                            <a href="#" onclick="downloadFile('/jobs/${job.id}/download','${stem}_escoras.dxf');return false" class="btn btn-primary">↓ DXF c/ Escoras</a>
+                            <a href="#" onclick="downloadFile('/jobs/${job.id}/download/csv','${stem}_BOM.csv');return false" class="btn btn-accent">↓ BOM CSV</a>
+                            ${job.has_relatorio ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/pdf/relatorio','${stem}_relatorio.pdf');return false" class="btn btn-pdf">↓ Relatório PDF</a>` : ''}
+                            ${job.has_memoria_calculo ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/pdf/memoria_calculo','${stem}_memoria_calculo.pdf');return false" class="btn btn-pdf">↓ Memória de Cálculo</a>` : ''}
+                            ${job.has_orcamento ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/pdf/orcamento','${stem}_orcamento.pdf');return false" class="btn btn-pdf">↓ Orçamento</a>` : ''}
+                            ${job.has_ifc ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/ifc','${stem}.ifc');return false" class="btn btn-accent">↓ IFC (BIM)</a>` : ''}
                             <button class="btn btn-green" onclick="uploadRevision('${job.id}')">↑ Enviar revisão</button>
                             <input type="file" class="revision-input" id="rev-${job.id}" accept=".dxf">
                             <button class="btn btn-danger" onclick="deleteJob('${job.id}')">✕</button>
@@ -1310,12 +1327,12 @@
                             <div class="revision-result" style="border-color:rgba(140,224,163,0.35)">
                                 <h4>Versão validada (regerada a partir da revisão)</h4>
                                 <div class="actions" style="margin-top:10px">
-                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/dxf');return false" class="btn btn-primary">↓ DXF</a>
-                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/csv');return false" class="btn btn-accent">↓ BOM</a>
-                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/pdf');return false" class="btn btn-pdf">↓ Relatório</a>
-                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/memoria');return false" class="btn btn-pdf">↓ Memória</a>
-                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/orcamento');return false" class="btn btn-pdf">↓ Orçamento</a>
-                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/ifc');return false" class="btn btn-accent">↓ IFC</a>
+                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/dxf','${stem}_escoras_validated.dxf');return false" class="btn btn-primary">↓ DXF</a>
+                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/csv','${stem}_BOM_validated.csv');return false" class="btn btn-accent">↓ BOM</a>
+                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/pdf','${stem}_relatorio_validated.pdf');return false" class="btn btn-pdf">↓ Relatório</a>
+                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/memoria','${stem}_memoria_calculo_validated.pdf');return false" class="btn btn-pdf">↓ Memória</a>
+                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/orcamento','${stem}_orcamento_validated.pdf');return false" class="btn btn-pdf">↓ Orçamento</a>
+                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/ifc','${stem}_validated.ifc');return false" class="btn btn-accent">↓ IFC</a>
                                 </div>
                             </div>
                         `;
