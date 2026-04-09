@@ -1745,9 +1745,20 @@
                     msg.textContent = data.detail || 'Erro ao criar conta';
                     return;
                 }
+                const data = await res.json();
+                // Auto-login: store token and go to branch picker
+                sessionStorage.setItem('token', data.token);
+                sessionStorage.setItem('username', data.username);
                 msg.classList.add('ok');
-                msg.textContent = 'Conta criada com sucesso! Redirecionando...';
-                setTimeout(() => { show('loginCard'); }, 1500);
+                msg.textContent = 'Conta criada com sucesso!';
+                if (data.branches && data.branches.length === 1) {
+                    selectBranch(data.branches[0].id);
+                } else if (data.branches && data.branches.length > 1) {
+                    renderBranchPicker(data.branches);
+                    show('branchCard');
+                } else {
+                    show('loginCard');
+                }
             } catch (e) {
                 msg.textContent = 'Erro de conexão: ' + e.message;
             }

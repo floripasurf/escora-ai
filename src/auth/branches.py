@@ -235,6 +235,67 @@ def clear_sessions() -> None:
         pass
 
 
+def create_user(
+    name: str,
+    email: str,
+    company: str,
+    phone: str,
+    password: str,
+) -> Optional[User]:
+    """Register a new user with their own locadora + default branch.
+
+    Returns the User on success, None if the email is already taken.
+    Writes to the same locadoras JSON file used by the rest of the system.
+    """
+    if not password or len(password) < 6:
+        return None
+    path = _locadoras_path()
+    if not path.exists():
+        data = {"version": 1, "locadoras": []}
+    else:
+        data = json.loads(path.read_text(encoding="utf-8"))
+
+    # Check uniqueness (email = username)
+    for entry in data.get("locadoras", []):
+        for u in entry.get("users", []):
+            if u["username"] == email:
+                return None
+
+    # Slugify company name for IDs
+    slug = email.split("@")[0].lower().replace(" ", "-")
+    loc_id = f"loc-{slug}"
+    branch_id = f"{loc_id}-default"
+
+    new_locadora = {
+        "id": loc_id,
+        "name": company or name,
+        "branches": [
+            {
+                "id": branch_id,
+                "branch_name": "Sede",
+                "inventory_name": "default",
+            }
+        ],
+        "users": [
+            {
+                "username": email,
+                "name": name,
+                "password_hash": hash_password(password),
+                "phone": phone,
+            }
+        ],
+    }
+    data["locadoras"].append(new_locadora)
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    return User(
+        username=email,
+        name=name,
+        password_hash="",
+        locadora_id=loc_id,
+    )
+
+
 def change_password(username: str, old_password: str, new_password: str) -> bool:
     """Verify old password and replace it in the locadoras JSON on disk.
 
