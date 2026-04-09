@@ -95,6 +95,7 @@
             letter-spacing: -0.025em;
             color: var(--fg);
             font-variation-settings: "opsz" 14;
+            cursor: pointer;
         }
         .brand .dot {
             width: 8px;
@@ -242,7 +243,7 @@
         }
         .upload-zone input { display: none; }
 
-        /* ---------- Auth card (login, branch, pwd) ---------- */
+        /* ---------- Auth card (login, branch, pwd, signup) ---------- */
         .auth-wrap {
             display: flex;
             align-items: center;
@@ -280,7 +281,7 @@
         }
 
         /* ---------- Inputs ---------- */
-        input[type="text"], input[type="password"], input:not([type]) {
+        input[type="text"], input[type="password"], input[type="email"], input[type="tel"], input:not([type]) {
             font-family: var(--sans);
             font-size: 0.92rem;
             padding: 13px 14px;
@@ -611,7 +612,7 @@
             margin-bottom: 8px;
         }
         .branch-btn::after {
-            content: "→";
+            content: "\2192";
             color: var(--fg-mute);
             font-family: var(--mono);
             transition: color 0.15s, transform 0.15s;
@@ -701,6 +702,408 @@
         }
         .job-card { animation: fadeUp 0.4s ease-out both; }
 
+        /* ========== NEW: Landing Page ========== */
+        .landing-hero {
+            text-align: center;
+            padding: 6rem 2rem 4rem;
+            max-width: 800px;
+            margin: 0 auto;
+            opacity: 0;
+            animation: fadeUp 0.6s ease-out forwards;
+        }
+        .landing-hero h1 {
+            font-family: var(--display);
+            font-weight: 500;
+            font-size: clamp(2.2rem, 5vw, 3.6rem);
+            line-height: 1.06;
+            letter-spacing: -0.035em;
+            color: var(--fg);
+            font-variation-settings: "opsz" 96;
+            margin-bottom: 1.5rem;
+        }
+        .landing-hero h1 .accent {
+            color: var(--accent);
+        }
+        .landing-hero p {
+            font-size: 1.05rem;
+            line-height: 1.6;
+            color: var(--fg-dim);
+            max-width: 60ch;
+            margin: 0 auto 2.5rem;
+        }
+        .landing-hero p strong {
+            color: var(--fg);
+            font-weight: 600;
+        }
+        .landing-cta-row {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .landing-cta-row .btn {
+            padding: 14px 28px;
+            font-size: 0.92rem;
+        }
+
+        /* Landing visual cards */
+        .landing-visuals {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            max-width: 960px;
+            margin: 0 auto 5rem;
+            padding: 0 2rem;
+            opacity: 0;
+            animation: fadeUp 0.6s ease-out 0.15s forwards;
+        }
+        .visual-card {
+            background: var(--bg-1);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            padding: 1.8rem 1.4rem 1.6rem;
+            text-align: center;
+            transition: border-color 0.2s;
+        }
+        .visual-card:hover {
+            border-color: var(--accent-line);
+        }
+        .visual-card svg {
+            display: block;
+            margin: 0 auto 1.2rem;
+        }
+        .visual-card h3 {
+            font-family: var(--display);
+            font-weight: 500;
+            font-size: 1.1rem;
+            letter-spacing: -0.02em;
+            color: var(--fg);
+            margin-bottom: 0.4rem;
+            font-variation-settings: "opsz" 24;
+        }
+        .visual-card p {
+            font-size: 0.85rem;
+            color: var(--fg-dim);
+            line-height: 1.5;
+        }
+
+        /* Landing features grid */
+        .landing-features {
+            max-width: 960px;
+            margin: 0 auto 5rem;
+            padding: 0 2rem;
+            opacity: 0;
+            animation: fadeUp 0.6s ease-out 0.25s forwards;
+        }
+        .landing-features h2 {
+            font-family: var(--display);
+            font-weight: 500;
+            font-size: 1.8rem;
+            letter-spacing: -0.03em;
+            color: var(--fg);
+            text-align: center;
+            margin-bottom: 2.5rem;
+            font-variation-settings: "opsz" 48;
+        }
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+        }
+        .feature-card {
+            background: var(--bg-1);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            padding: 1.5rem 1.3rem;
+            transition: border-color 0.2s;
+        }
+        .feature-card:hover {
+            border-color: var(--accent-line);
+        }
+        .feature-card h4 {
+            font-family: var(--display);
+            font-weight: 500;
+            font-size: 1rem;
+            letter-spacing: -0.015em;
+            color: var(--fg);
+            margin-bottom: 0.4rem;
+            font-variation-settings: "opsz" 20;
+        }
+        .feature-card p {
+            font-size: 0.84rem;
+            color: var(--fg-dim);
+            line-height: 1.5;
+        }
+
+        /* Landing how-it-works */
+        .landing-steps {
+            max-width: 960px;
+            margin: 0 auto 5rem;
+            padding: 0 2rem;
+            opacity: 0;
+            animation: fadeUp 0.6s ease-out 0.35s forwards;
+        }
+        .landing-steps h2 {
+            font-family: var(--display);
+            font-weight: 500;
+            font-size: 1.8rem;
+            letter-spacing: -0.03em;
+            color: var(--fg);
+            text-align: center;
+            margin-bottom: 2.5rem;
+            font-variation-settings: "opsz" 48;
+        }
+        .steps-row {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+        }
+        .step-card {
+            text-align: center;
+            padding: 2rem 1.2rem;
+            background: var(--bg-1);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            position: relative;
+        }
+        .step-number {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--accent);
+            color: var(--bg);
+            font-family: var(--display);
+            font-weight: 600;
+            font-size: 1.1rem;
+            margin-bottom: 1rem;
+        }
+        .step-card h4 {
+            font-family: var(--display);
+            font-weight: 500;
+            font-size: 1.05rem;
+            letter-spacing: -0.015em;
+            color: var(--fg);
+            margin-bottom: 0.4rem;
+            font-variation-settings: "opsz" 20;
+        }
+        .step-card p {
+            font-size: 0.85rem;
+            color: var(--fg-dim);
+            line-height: 1.5;
+        }
+
+        /* Landing footer CTA */
+        .landing-footer-cta {
+            text-align: center;
+            padding: 4rem 2rem 2rem;
+            max-width: 600px;
+            margin: 0 auto;
+            opacity: 0;
+            animation: fadeUp 0.6s ease-out 0.45s forwards;
+        }
+        .landing-footer-cta h2 {
+            font-family: var(--display);
+            font-weight: 500;
+            font-size: 1.8rem;
+            letter-spacing: -0.03em;
+            color: var(--fg);
+            margin-bottom: 1.5rem;
+            font-variation-settings: "opsz" 48;
+        }
+
+        /* Auth link styles */
+        .auth-link {
+            display: block;
+            text-align: center;
+            margin-top: 12px;
+            font-size: 0.85rem;
+            color: var(--fg-dim);
+            cursor: pointer;
+            transition: color 0.15s;
+        }
+        .auth-link:hover {
+            color: var(--accent);
+        }
+        .auth-link-back {
+            color: var(--fg-mute);
+            font-size: 0.82rem;
+            margin-top: 8px;
+        }
+
+        /* ========== NEW: Tab Navigation ========== */
+        .tab-bar {
+            display: flex;
+            gap: 0;
+            border-bottom: 1px solid var(--line);
+            margin-bottom: 2.5rem;
+            opacity: 0;
+            animation: fadeUp 0.6s ease-out forwards;
+        }
+        .tab-btn {
+            padding: 12px 24px;
+            font-family: var(--sans);
+            font-size: 0.88rem;
+            font-weight: 500;
+            color: var(--fg-mute);
+            background: none;
+            border: none;
+            border-bottom: 2px solid transparent;
+            cursor: pointer;
+            transition: all 0.15s;
+            letter-spacing: -0.005em;
+        }
+        .tab-btn:hover {
+            color: var(--fg-dim);
+        }
+        .tab-btn.active {
+            color: var(--fg);
+            border-bottom-color: var(--accent);
+        }
+
+        /* ========== NEW: Inventory Tab ========== */
+        .inventory-section {
+            opacity: 0;
+            animation: fadeUp 0.5s ease-out forwards;
+        }
+        .inventory-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        .inventory-header h2 {
+            font-family: var(--display);
+            font-weight: 500;
+            font-size: 1.5rem;
+            letter-spacing: -0.025em;
+            font-variation-settings: "opsz" 32;
+        }
+        .inventory-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .inventory-note {
+            font-size: 0.85rem;
+            color: var(--fg-dim);
+            margin-bottom: 1.5rem;
+            padding: 0.8rem 1rem;
+            background: var(--accent-soft);
+            border: 1px solid var(--accent-line);
+            border-radius: var(--radius-sm);
+        }
+        .inv-table-wrap {
+            overflow-x: auto;
+        }
+        .inv-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--sans);
+            font-size: 0.88rem;
+        }
+        .inv-table th {
+            text-align: left;
+            font-family: var(--mono);
+            font-size: 0.72rem;
+            font-weight: 500;
+            color: var(--fg-mute);
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--line);
+            white-space: nowrap;
+        }
+        .inv-table td {
+            padding: 12px 14px;
+            color: var(--fg);
+            border-bottom: 1px solid var(--line-soft);
+            font-variant-numeric: tabular-nums;
+        }
+        .inv-table tr:hover td {
+            background: var(--bg-2);
+        }
+        .inv-status {
+            display: inline-flex;
+            padding: 3px 10px;
+            border-radius: 999px;
+            font-family: var(--mono);
+            font-size: 0.68rem;
+            font-weight: 500;
+        }
+        .inv-status-ok {
+            border: 1px solid rgba(74, 222, 128, 0.35);
+            color: var(--ok);
+            background: rgba(74, 222, 128, 0.08);
+        }
+        .inv-status-low {
+            border: 1px solid rgba(251, 191, 36, 0.35);
+            color: var(--warn);
+            background: rgba(251, 191, 36, 0.08);
+        }
+
+        /* ========== NEW: Account Tab ========== */
+        .account-section {
+            max-width: 520px;
+            opacity: 0;
+            animation: fadeUp 0.5s ease-out forwards;
+        }
+        .account-section h2 {
+            font-family: var(--display);
+            font-weight: 500;
+            font-size: 1.5rem;
+            letter-spacing: -0.025em;
+            margin-bottom: 1.5rem;
+            font-variation-settings: "opsz" 32;
+        }
+        .account-info {
+            background: var(--bg-1);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        .account-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--line-soft);
+        }
+        .account-row:last-child {
+            border-bottom: none;
+        }
+        .account-row-label {
+            font-family: var(--mono);
+            font-size: 0.75rem;
+            color: var(--fg-mute);
+        }
+        .account-row-value {
+            font-size: 0.9rem;
+            color: var(--fg);
+        }
+        .account-section h3 {
+            font-family: var(--display);
+            font-weight: 500;
+            font-size: 1.15rem;
+            letter-spacing: -0.02em;
+            margin-bottom: 1rem;
+            font-variation-settings: "opsz" 24;
+        }
+        .account-pwd-form {
+            background: var(--bg-1);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        .account-pwd-form .card-stack {
+            gap: 10px;
+        }
+        .account-logout-wrap {
+            margin-top: 1.5rem;
+        }
+
         /* ---------- Responsive ---------- */
         @media (max-width: 640px) {
             header { padding: 14px 18px; }
@@ -711,32 +1114,257 @@
             .hdr-right .pill { display: none; }
             #sessionBadge { top: auto; bottom: 12px; right: 12px; left: 12px; justify-content: flex-end; }
             #sessionBadge .sb-label { max-width: none; flex: 1; }
+            .landing-visuals { grid-template-columns: 1fr; }
+            .features-grid { grid-template-columns: 1fr; }
+            .steps-row { grid-template-columns: 1fr; }
+            .landing-hero { padding: 3rem 1rem 2rem; }
+            .landing-hero h1 { font-size: 2rem; }
+            .tab-btn { padding: 10px 16px; font-size: 0.82rem; }
+        }
+        @media (min-width: 641px) and (max-width: 900px) {
+            .landing-visuals { grid-template-columns: 1fr 1fr; }
+            .features-grid { grid-template-columns: 1fr 1fr; }
+            .steps-row { grid-template-columns: 1fr 1fr 1fr; }
         }
     </style>
 </head>
 <body>
     <header>
-        <div class="brand">
+        <div class="brand" onclick="goHome()">
             <span>shoring</span><span class="dot"></span><span class="tld">.app</span>
         </div>
         <div class="hdr-right">
-            <span class="pill" id="hdrClock">—</span>
+            <span class="pill" id="hdrClock">&mdash;</span>
         </div>
     </header>
 
     <main>
+        <!-- Landing Page (public, before login) -->
+        <div id="landingPage" style="display:none;">
+            <div class="landing-hero">
+                <h1>Projetos de escoramento em segundos com <span class="accent">inteligência artificial</span></h1>
+                <p>Inpute seus projetos estruturais em <strong>DXF</strong> ou <strong>DWG</strong> e receba pré-projetos de escoramento em segundos &mdash; <strong>DXF</strong>, <strong>BIM/IFC</strong>, romaneio, orçamento, memória de cálculo e relatório técnico.</p>
+                <div class="landing-cta-row">
+                    <button class="btn btn-primary" onclick="show('loginCard')">Começar agora</button>
+                    <button class="btn" onclick="document.querySelector('.landing-visuals').scrollIntoView({behavior:'smooth'})">Saiba mais</button>
+                </div>
+            </div>
+
+            <div class="landing-visuals">
+                <!-- Card 1: DXF/DWG Input -->
+                <div class="visual-card">
+                    <svg width="200" height="180" viewBox="0 0 200 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <!-- Blueprint grid -->
+                        <rect x="20" y="15" width="160" height="150" rx="4" stroke="#26262E" stroke-width="1"/>
+                        <!-- Grid lines -->
+                        <line x1="20" y1="48" x2="180" y2="48" stroke="#1E1E25" stroke-width="0.5"/>
+                        <line x1="20" y1="81" x2="180" y2="81" stroke="#1E1E25" stroke-width="0.5"/>
+                        <line x1="20" y1="114" x2="180" y2="114" stroke="#1E1E25" stroke-width="0.5"/>
+                        <line x1="20" y1="147" x2="180" y2="147" stroke="#1E1E25" stroke-width="0.5"/>
+                        <line x1="60" y1="15" x2="60" y2="165" stroke="#1E1E25" stroke-width="0.5"/>
+                        <line x1="100" y1="15" x2="100" y2="165" stroke="#1E1E25" stroke-width="0.5"/>
+                        <line x1="140" y1="15" x2="140" y2="165" stroke="#1E1E25" stroke-width="0.5"/>
+                        <!-- Beam lines (horizontal structural members) -->
+                        <line x1="35" y1="55" x2="165" y2="55" stroke="#CFFF1A" stroke-width="2"/>
+                        <line x1="35" y1="95" x2="165" y2="95" stroke="#CFFF1A" stroke-width="2"/>
+                        <line x1="35" y1="135" x2="165" y2="135" stroke="#CFFF1A" stroke-width="2"/>
+                        <!-- Vertical beam lines -->
+                        <line x1="45" y1="40" x2="45" y2="150" stroke="#CFFF1A" stroke-width="1.5"/>
+                        <line x1="100" y1="40" x2="100" y2="150" stroke="#CFFF1A" stroke-width="1.5"/>
+                        <line x1="155" y1="40" x2="155" y2="150" stroke="#CFFF1A" stroke-width="1.5"/>
+                        <!-- Dimension marks -->
+                        <line x1="35" y1="30" x2="165" y2="30" stroke="#6B6B74" stroke-width="0.7"/>
+                        <line x1="35" y1="27" x2="35" y2="33" stroke="#6B6B74" stroke-width="0.7"/>
+                        <line x1="165" y1="27" x2="165" y2="33" stroke="#6B6B74" stroke-width="0.7"/>
+                        <text x="100" y="27" fill="#6B6B74" font-family="monospace" font-size="7" text-anchor="middle">12.500</text>
+                        <!-- Side dimension -->
+                        <line x1="175" y1="40" x2="175" y2="150" stroke="#6B6B74" stroke-width="0.7"/>
+                        <line x1="172" y1="40" x2="178" y2="40" stroke="#6B6B74" stroke-width="0.7"/>
+                        <line x1="172" y1="150" x2="178" y2="150" stroke="#6B6B74" stroke-width="0.7"/>
+                        <text x="185" y="98" fill="#6B6B74" font-family="monospace" font-size="7" text-anchor="middle" transform="rotate(90, 185, 98)">8.200</text>
+                    </svg>
+                    <h3>DXF/DWG Input</h3>
+                    <p>Upload de projetos estruturais. O motor identifica vigas, pilares e lajes automaticamente.</p>
+                </div>
+
+                <!-- Card 2: Motor de Cálculo -->
+                <div class="visual-card">
+                    <svg width="200" height="180" viewBox="0 0 200 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <!-- Ground line -->
+                        <line x1="20" y1="160" x2="180" y2="160" stroke="#6B6B74" stroke-width="1.5"/>
+                        <!-- Slab at top -->
+                        <rect x="25" y="25" width="150" height="12" fill="none" stroke="#CFFF1A" stroke-width="1.5"/>
+                        <!-- Tower 1 (left) -->
+                        <line x1="45" y1="37" x2="45" y2="160" stroke="#CFFF1A" stroke-width="1.5"/>
+                        <line x1="75" y1="37" x2="75" y2="160" stroke="#CFFF1A" stroke-width="1.5"/>
+                        <!-- Cross braces tower 1 -->
+                        <line x1="45" y1="55" x2="75" y2="80" stroke="#CFFF1A" stroke-width="0.8"/>
+                        <line x1="75" y1="55" x2="45" y2="80" stroke="#CFFF1A" stroke-width="0.8"/>
+                        <line x1="45" y1="95" x2="75" y2="120" stroke="#CFFF1A" stroke-width="0.8"/>
+                        <line x1="75" y1="95" x2="45" y2="120" stroke="#CFFF1A" stroke-width="0.8"/>
+                        <line x1="45" y1="130" x2="75" y2="155" stroke="#CFFF1A" stroke-width="0.8"/>
+                        <line x1="75" y1="130" x2="45" y2="155" stroke="#CFFF1A" stroke-width="0.8"/>
+                        <!-- Tower 2 (right) -->
+                        <line x1="125" y1="37" x2="125" y2="160" stroke="#CFFF1A" stroke-width="1.5"/>
+                        <line x1="155" y1="37" x2="155" y2="160" stroke="#CFFF1A" stroke-width="1.5"/>
+                        <!-- Cross braces tower 2 -->
+                        <line x1="125" y1="55" x2="155" y2="80" stroke="#CFFF1A" stroke-width="0.8"/>
+                        <line x1="155" y1="55" x2="125" y2="80" stroke="#CFFF1A" stroke-width="0.8"/>
+                        <line x1="125" y1="95" x2="155" y2="120" stroke="#CFFF1A" stroke-width="0.8"/>
+                        <line x1="155" y1="95" x2="125" y2="120" stroke="#CFFF1A" stroke-width="0.8"/>
+                        <line x1="125" y1="130" x2="155" y2="155" stroke="#CFFF1A" stroke-width="0.8"/>
+                        <line x1="155" y1="130" x2="125" y2="155" stroke="#CFFF1A" stroke-width="0.8"/>
+                        <!-- Distribution beams (horizontal) -->
+                        <line x1="40" y1="37" x2="80" y2="37" stroke="#CFFF1A" stroke-width="2"/>
+                        <line x1="120" y1="37" x2="160" y2="37" stroke="#CFFF1A" stroke-width="2"/>
+                        <!-- Shore marks (hexagons as small circles) -->
+                        <circle cx="60" cy="97" r="5" fill="none" stroke="#CFFF1A" stroke-width="1"/>
+                        <circle cx="140" cy="97" r="5" fill="none" stroke="#CFFF1A" stroke-width="1"/>
+                        <!-- Individual shores between towers -->
+                        <line x1="95" y1="37" x2="95" y2="160" stroke="#CFFF1A" stroke-width="1" stroke-dasharray="4 3"/>
+                        <line x1="105" y1="37" x2="105" y2="160" stroke="#CFFF1A" stroke-width="1" stroke-dasharray="4 3"/>
+                        <!-- Base plates -->
+                        <rect x="41" y="156" width="8" height="4" fill="#CFFF1A" opacity="0.4"/>
+                        <rect x="71" y="156" width="8" height="4" fill="#CFFF1A" opacity="0.4"/>
+                        <rect x="121" y="156" width="8" height="4" fill="#CFFF1A" opacity="0.4"/>
+                        <rect x="151" y="156" width="8" height="4" fill="#CFFF1A" opacity="0.4"/>
+                    </svg>
+                    <h3>Motor de Cálculo</h3>
+                    <p>Cálculo estrutural automático com torres, escoras e vigas de distribuição conforme NBR 15696.</p>
+                </div>
+
+                <!-- Card 3: BIM/IFC Output -->
+                <div class="visual-card">
+                    <svg width="200" height="180" viewBox="0 0 200 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <!-- Isometric slab (top) -->
+                        <polygon points="100,20 170,50 100,80 30,50" fill="none" stroke="#CFFF1A" stroke-width="1.5"/>
+                        <polygon points="100,80 170,50 170,58 100,88" fill="none" stroke="#CFFF1A" stroke-width="0.8" opacity="0.6"/>
+                        <polygon points="100,80 30,50 30,58 100,88" fill="none" stroke="#CFFF1A" stroke-width="0.8" opacity="0.6"/>
+                        <!-- Vertical shores (isometric) -->
+                        <line x1="50" y1="58" x2="50" y2="145" stroke="#CFFF1A" stroke-width="1.2"/>
+                        <line x1="80" y1="72" x2="80" y2="155" stroke="#CFFF1A" stroke-width="1.2"/>
+                        <line x1="100" y1="80" x2="100" y2="165" stroke="#CFFF1A" stroke-width="1.2"/>
+                        <line x1="120" y1="72" x2="120" y2="155" stroke="#CFFF1A" stroke-width="1.2"/>
+                        <line x1="150" y1="58" x2="150" y2="145" stroke="#CFFF1A" stroke-width="1.2"/>
+                        <!-- Cross braces iso -->
+                        <line x1="50" y1="90" x2="80" y2="110" stroke="#CFFF1A" stroke-width="0.6" opacity="0.5"/>
+                        <line x1="80" y1="90" x2="50" y2="110" stroke="#CFFF1A" stroke-width="0.6" opacity="0.5"/>
+                        <line x1="120" y1="90" x2="150" y2="110" stroke="#CFFF1A" stroke-width="0.6" opacity="0.5"/>
+                        <line x1="150" y1="90" x2="120" y2="110" stroke="#CFFF1A" stroke-width="0.6" opacity="0.5"/>
+                        <!-- Ground plane (isometric) -->
+                        <polygon points="100,165 170,135 170,137 100,167 30,137 30,135" fill="none" stroke="#6B6B74" stroke-width="0.8"/>
+                        <!-- BIM label -->
+                        <rect x="140" y="10" width="48" height="18" rx="3" fill="#CFFF1A" opacity="0.15" stroke="#CFFF1A" stroke-width="0.8"/>
+                        <text x="164" y="23" fill="#CFFF1A" font-family="monospace" font-size="9" text-anchor="middle" font-weight="600">IFC</text>
+                        <!-- 3D axis indicator -->
+                        <line x1="18" y1="170" x2="18" y2="150" stroke="#6B6B74" stroke-width="0.8"/>
+                        <line x1="18" y1="170" x2="32" y2="176" stroke="#6B6B74" stroke-width="0.8"/>
+                        <line x1="18" y1="170" x2="8" y2="176" stroke="#6B6B74" stroke-width="0.8"/>
+                        <text x="18" y="147" fill="#6B6B74" font-family="monospace" font-size="6" text-anchor="middle">Z</text>
+                        <text x="35" y="178" fill="#6B6B74" font-family="monospace" font-size="6" text-anchor="middle">X</text>
+                        <text x="5" y="178" fill="#6B6B74" font-family="monospace" font-size="6" text-anchor="middle">Y</text>
+                    </svg>
+                    <h3>BIM/IFC Output</h3>
+                    <p>Exporte modelos 3D em formato IFC para integração com Revit, Tekla e outros softwares BIM.</p>
+                </div>
+            </div>
+
+            <div class="landing-features">
+                <h2>Tudo que você precisa</h2>
+                <div class="features-grid">
+                    <div class="feature-card">
+                        <h4>Projetos DXF e DWG</h4>
+                        <p>Faça upload de projetos estruturais em formato DXF ou DWG. O motor identifica vigas, pilares e lajes automaticamente.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>BIM / IFC</h4>
+                        <p>Exporte modelos BIM em formato IFC para integração com Revit, Tekla e outros softwares de engenharia.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>Romaneio e BOM</h4>
+                        <p>Lista completa de equipamentos: escoras, torres, vigas de distribuição, cruzetas &mdash; com quantidades e preços.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>Memória de Cálculo</h4>
+                        <p>Documentação técnica com referências às normas NBR 15696, NBR 6120 e NBR 6118.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>Calibrado ao Estoque</h4>
+                        <p>O sistema considera o inventário real da sua locadora para otimizar a seleção de equipamentos.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>Relatório Técnico</h4>
+                        <p>Relatório completo com verificações estruturais, espaçamentos e recomendações de contra-flecha.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="landing-steps">
+                <h2>Como funciona</h2>
+                <div class="steps-row">
+                    <div class="step-card">
+                        <div class="step-number">1</div>
+                        <h4>Upload</h4>
+                        <p>Envie seu projeto estrutural em DXF ou DWG</p>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-number">2</div>
+                        <h4>Processamento</h4>
+                        <p>IA identifica estrutura e calcula escoramento em segundos</p>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-number">3</div>
+                        <h4>Resultado</h4>
+                        <p>Receba DXF, BIM/IFC, romaneio, memória de cálculo e relatório</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="landing-footer-cta">
+                <h2>Pronto para começar?</h2>
+                <div class="landing-cta-row">
+                    <button class="btn btn-primary" onclick="show('signupCard')">Criar conta</button>
+                    <button class="btn" onclick="show('loginCard')">Entrar</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Signup -->
+        <div id="signupCard" style="display:none;">
+            <div class="auth-wrap">
+                <div class="card">
+                    <h2>Criar conta</h2>
+                    <p class="lede">Preencha seus dados para comecar.</p>
+                    <div class="card-stack">
+                        <input id="signupName" type="text" placeholder="Nome completo">
+                        <input id="signupEmail" type="email" placeholder="Email">
+                        <input id="signupCompany" type="text" placeholder="Empresa / Locadora">
+                        <input id="signupPhone" type="tel" placeholder="Telefone">
+                        <input id="signupPass" type="password" placeholder="Senha">
+                        <input id="signupPass2" type="password" placeholder="Confirmar senha">
+                        <button class="btn btn-primary" onclick="doSignup()">Criar conta</button>
+                        <div id="signupMsg" class="msg-line"></div>
+                    </div>
+                    <div class="auth-link" onclick="show('loginCard')">Já tem conta? Entre aqui</div>
+                    <div class="auth-link auth-link-back" onclick="show('landingPage')">&larr; Voltar</div>
+                </div>
+            </div>
+        </div>
+
         <!-- Login -->
         <div id="loginCard" style="display:none;">
             <div class="auth-wrap">
                 <div class="card">
                     <h2>Entrar</h2>
-                    <p class="lede">Acesse sua conta para começar.</p>
+                    <p class="lede">Acesse sua conta para comecar.</p>
                     <div class="card-stack">
-                        <input id="loginUser" placeholder="usuário">
+                        <input id="loginUser" placeholder="usuario">
                         <input id="loginPass" type="password" placeholder="senha">
                         <button class="btn btn-primary" onclick="doLogin()">Entrar</button>
                         <div id="loginError" class="msg-line"></div>
                     </div>
+                    <div class="auth-link" onclick="show('signupCard')">Não tem conta? Crie aqui</div>
+                    <div class="auth-link auth-link-back" onclick="show('landingPage')">&larr; Voltar</div>
                 </div>
             </div>
         </div>
@@ -752,12 +1380,12 @@
             </div>
         </div>
 
-        <!-- Change password -->
+        <!-- Change password (standalone modal) -->
         <div id="pwdCard" style="display:none;">
             <div class="auth-wrap">
                 <div class="card">
                     <h2>Trocar senha</h2>
-                    <p class="lede">Escolha uma senha de no mínimo 6 caracteres.</p>
+                    <p class="lede">Escolha uma senha de no minimo 6 caracteres.</p>
                     <div class="card-stack">
                         <input id="pwdOld" type="password" placeholder="senha atual">
                         <input id="pwdNew" type="password" placeholder="nova senha">
@@ -770,35 +1398,161 @@
             </div>
         </div>
 
-        <!-- Upload + jobs -->
+        <!-- Upload + jobs + inventory + account (tabbed app) -->
         <div id="appCard" style="display:none;">
-            <section class="hero">
-                <div class="hero-tag">Powered by AI · NBR 15696</div>
-                <h1>Faça orçamentos e adiante seu projeto de escoramentos com <span class="accent">inteligência artificial</span>.</h1>
-                <p class="hero-sub">
-                    Projetos em <strong>DXF</strong> e <strong>BIM</strong>, romaneio, orçamento,
-                    memória de cálculo e relatório técnico — calibrados para o
-                    <strong>estoque da sua empresa</strong>.
-                </p>
-            </section>
-
-            <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
-                <div class="icon">↑</div>
-                <h2>Arraste ou selecione o DXF</h2>
-                <p>.dxf · .dwg · até 200 MB</p>
-                <input type="file" id="fileInput" accept=".dxf,.dwg">
+            <!-- Tab Navigation -->
+            <div class="tab-bar" id="tabBar">
+                <button class="tab-btn active" data-tab="projectsTab" onclick="switchTab('projectsTab')">Projetos</button>
+                <button class="tab-btn" data-tab="inventoryTab" onclick="switchTab('inventoryTab')">Inventário</button>
+                <button class="tab-btn" data-tab="accountTab" onclick="switchTab('accountTab')">Conta</button>
             </div>
 
-            <div class="section-head">
-                <span class="section-title">Projetos</span>
-                <span class="section-count" id="jobCount">00</span>
+            <!-- Projects Tab -->
+            <div id="projectsTab">
+                <section class="hero">
+                    <div class="hero-tag">Powered by AI &middot; NBR 15696</div>
+                    <h1>Faça orçamentos e adiante seu projeto de escoramentos com <span class="accent">inteligência artificial</span>.</h1>
+                    <p class="hero-sub">
+                        Inpute seus projetos estruturais em <strong>DXF</strong> ou <strong>DWG</strong> e receba pre-projetos de escoramento em segundos &mdash;
+                        <strong>DXF</strong>, <strong>BIM/IFC</strong>, romaneio, orçamento, memória de cálculo e relatório técnico &mdash; calibrados para o
+                        <strong>estoque da sua empresa</strong>.
+                    </p>
+                </section>
+
+                <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+                    <div class="icon">&uarr;</div>
+                    <h2>Arraste ou selecione seu projeto estrutural</h2>
+                    <p>.dxf &middot; .dwg &middot; ate 200 MB</p>
+                    <input type="file" id="fileInput" accept=".dxf,.dwg">
+                </div>
+
+                <div class="section-head">
+                    <span class="section-title">Projetos</span>
+                    <span class="section-count" id="jobCount">00</span>
+                </div>
+                <div id="jobsList"></div>
             </div>
-            <div id="jobsList"></div>
+
+            <!-- Inventory Tab -->
+            <div id="inventoryTab" style="display:none;">
+                <div class="inventory-section">
+                    <div class="inventory-header">
+                        <h2>Inventário de Equipamentos</h2>
+                        <div class="inventory-actions">
+                            <button class="btn" onclick="alert('Funcionalidade em desenvolvimento')">Importar Inventário</button>
+                            <button class="btn btn-primary" onclick="alert('Funcionalidade em desenvolvimento')">Adicionar Item</button>
+                        </div>
+                    </div>
+                    <div class="inventory-note">
+                        Inventário sincronizado com o motor de calculo para otimização automática.
+                    </div>
+                    <div class="inv-table-wrap">
+                        <table class="inv-table">
+                            <thead>
+                                <tr>
+                                    <th>Modelo</th>
+                                    <th>Tipo</th>
+                                    <th>Quantidade</th>
+                                    <th>Capacidade (kN)</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>ESC310</td>
+                                    <td>Escora metalica</td>
+                                    <td>18.663</td>
+                                    <td>15,0</td>
+                                    <td><span class="inv-status inv-status-ok">Disponivel</span></td>
+                                </tr>
+                                <tr>
+                                    <td>ESC450</td>
+                                    <td>Escora metalica</td>
+                                    <td>6.284</td>
+                                    <td>15,0</td>
+                                    <td><span class="inv-status inv-status-ok">Disponivel</span></td>
+                                </tr>
+                                <tr>
+                                    <td>Torre TA-100</td>
+                                    <td>Torre de escoramento</td>
+                                    <td>420</td>
+                                    <td>100,0</td>
+                                    <td><span class="inv-status inv-status-ok">Disponivel</span></td>
+                                </tr>
+                                <tr>
+                                    <td>Torre TA-150</td>
+                                    <td>Torre de escoramento</td>
+                                    <td>185</td>
+                                    <td>150,0</td>
+                                    <td><span class="inv-status inv-status-low">Estoque baixo</span></td>
+                                </tr>
+                                <tr>
+                                    <td>VM130</td>
+                                    <td>Viga de distribuição</td>
+                                    <td>3.200</td>
+                                    <td>&mdash;</td>
+                                    <td><span class="inv-status inv-status-ok">Disponivel</span></td>
+                                </tr>
+                                <tr>
+                                    <td>VM80</td>
+                                    <td>Viga de distribuição</td>
+                                    <td>2.100</td>
+                                    <td>&mdash;</td>
+                                    <td><span class="inv-status inv-status-ok">Disponivel</span></td>
+                                </tr>
+                                <tr>
+                                    <td>VM50</td>
+                                    <td>Viga de distribuição</td>
+                                    <td>1.450</td>
+                                    <td>&mdash;</td>
+                                    <td><span class="inv-status inv-status-low">Estoque baixo</span></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Account Tab -->
+            <div id="accountTab" style="display:none;">
+                <div class="account-section">
+                    <h2>Minha Conta</h2>
+                    <div class="account-info" id="accountInfo">
+                        <div class="account-row">
+                            <span class="account-row-label">Nome</span>
+                            <span class="account-row-value" id="acctName">&mdash;</span>
+                        </div>
+                        <div class="account-row">
+                            <span class="account-row-label">Email</span>
+                            <span class="account-row-value" id="acctEmail">&mdash;</span>
+                        </div>
+                        <div class="account-row">
+                            <span class="account-row-label">Empresa</span>
+                            <span class="account-row-value" id="acctCompany">&mdash;</span>
+                        </div>
+                    </div>
+
+                    <h3>Alterar senha</h3>
+                    <div class="account-pwd-form">
+                        <div class="card-stack">
+                            <input id="acctPwdOld" type="password" placeholder="Senha atual">
+                            <input id="acctPwdNew" type="password" placeholder="Nova senha">
+                            <input id="acctPwdNew2" type="password" placeholder="Confirmar nova senha">
+                            <button class="btn btn-primary" onclick="doAccountChangePassword()">Salvar senha</button>
+                            <div id="acctPwdMsg" class="msg-line"></div>
+                        </div>
+                    </div>
+
+                    <div class="account-logout-wrap">
+                        <button class="btn btn-danger" onclick="logout()" style="width:100%;justify-content:center;padding:13px 16px;">Sair da conta</button>
+                    </div>
+                </div>
+            </div>
         </div>
     </main>
 
     <footer>
-        shoring.app <span class="sep">·</span> engenharia estrutural com IA
+        shoring.app <span class="sep">&middot;</span> engenharia estrutural com IA
     </footer>
 
     <script>
@@ -834,9 +1588,40 @@
         }
 
         function show(id) {
-            ['loginCard', 'branchCard', 'appCard', 'pwdCard'].forEach(k => {
-                document.getElementById(k).style.display = (k === id) ? 'block' : 'none';
+            ['landingPage', 'signupCard', 'loginCard', 'branchCard', 'appCard', 'pwdCard'].forEach(k => {
+                const el = document.getElementById(k);
+                if (el) el.style.display = (k === id) ? 'block' : 'none';
             });
+        }
+
+        function goHome() {
+            if (TOKEN && BRANCH_ID) {
+                show('appCard');
+            } else {
+                show('landingPage');
+            }
+        }
+
+        /* Tab switching */
+        function switchTab(tabId) {
+            ['projectsTab', 'inventoryTab', 'accountTab'].forEach(t => {
+                const el = document.getElementById(t);
+                if (el) el.style.display = (t === tabId) ? 'block' : 'none';
+            });
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.tab === tabId);
+            });
+            if (tabId === 'accountTab') updateAccountInfo();
+        }
+
+        function updateAccountInfo() {
+            if (!SESSION) return;
+            const nameEl = document.getElementById('acctName');
+            const emailEl = document.getElementById('acctEmail');
+            const companyEl = document.getElementById('acctCompany');
+            if (nameEl) nameEl.textContent = SESSION.username || SESSION.name || '\u2014';
+            if (emailEl) emailEl.textContent = SESSION.email || '\u2014';
+            if (companyEl) companyEl.textContent = SESSION.locadora_name || SESSION.company || '\u2014';
         }
 
         function openPwdModal() {
@@ -869,7 +1654,34 @@
                     return;
                 }
                 msg.classList.add('ok');
-                msg.textContent = 'Senha atualizada. Faça login novamente.';
+                msg.textContent = 'Senha atualizada. Faca login novamente.';
+                setTimeout(() => { logout(); }, 1200);
+            } catch (e) {
+                msg.textContent = 'Erro de conexão: ' + e.message;
+            }
+        }
+
+        async function doAccountChangePassword() {
+            const oldP = document.getElementById('acctPwdOld').value;
+            const newP = document.getElementById('acctPwdNew').value;
+            const newP2 = document.getElementById('acctPwdNew2').value;
+            const msg = document.getElementById('acctPwdMsg');
+            msg.classList.remove('ok');
+            if (!oldP || !newP) { msg.textContent = 'Preencha todos os campos'; return; }
+            if (newP.length < 6) { msg.textContent = 'Nova senha precisa ter ao menos 6 caracteres'; return; }
+            if (newP !== newP2) { msg.textContent = 'Confirmação não confere'; return; }
+            try {
+                const res = await fetch(`${API}/auth/change-password`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                    body: JSON.stringify({ old_password: oldP, new_password: newP }),
+                });
+                if (!res.ok) {
+                    msg.textContent = (await res.json()).detail || 'Falha ao trocar senha';
+                    return;
+                }
+                msg.classList.add('ok');
+                msg.textContent = 'Senha atualizada. Faca login novamente.';
                 setTimeout(() => { logout(); }, 1200);
             } catch (e) {
                 msg.textContent = 'Erro de conexão: ' + e.message;
@@ -881,7 +1693,7 @@
             const password = document.getElementById('loginPass').value;
             const errEl = document.getElementById('loginError');
             errEl.textContent = '';
-            if (!username || !password) { errEl.textContent = 'Preencha usuário e senha'; return; }
+            if (!username || !password) { errEl.textContent = 'Preencha usuario e senha'; return; }
             try {
                 const res = await fetch(`${API}/auth/login`, {
                     method: 'POST',
@@ -904,6 +1716,40 @@
                 }
             } catch (e) {
                 errEl.textContent = 'Erro de conexão: ' + e.message;
+            }
+        }
+
+        async function doSignup() {
+            const name = document.getElementById('signupName').value.trim();
+            const email = document.getElementById('signupEmail').value.trim();
+            const company = document.getElementById('signupCompany').value.trim();
+            const phone = document.getElementById('signupPhone').value.trim();
+            const pass = document.getElementById('signupPass').value;
+            const pass2 = document.getElementById('signupPass2').value;
+            const msg = document.getElementById('signupMsg');
+            msg.classList.remove('ok');
+            msg.textContent = '';
+
+            if (!name || !email || !pass) { msg.textContent = 'Preencha nome, email e senha'; return; }
+            if (pass.length < 6) { msg.textContent = 'Senha precisa ter ao menos 6 caracteres'; return; }
+            if (pass !== pass2) { msg.textContent = 'Confirmação de senha não confere'; return; }
+
+            try {
+                const res = await fetch(`${API}/auth/signup`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, email, company, phone, password: pass }),
+                });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    msg.textContent = data.detail || 'Erro ao criar conta';
+                    return;
+                }
+                msg.classList.add('ok');
+                msg.textContent = 'Conta criada com sucesso! Redirecionando...';
+                setTimeout(() => { show('loginCard'); }, 1500);
+            } catch (e) {
+                msg.textContent = 'Erro de conexão: ' + e.message;
             }
         }
 
@@ -930,7 +1776,7 @@
             localStorage.removeItem('escora_token');
             localStorage.removeItem('escora_branch_id');
             Object.keys(jobs).forEach(k => delete jobs[k]);
-            show('loginCard');
+            show('landingPage');
             const el = document.getElementById('sessionBadge');
             if (el) el.remove();
         }
@@ -941,24 +1787,24 @@
                 el = document.createElement('div');
                 el.id = 'sessionBadge';
                 el.innerHTML = `
-                    <div class="sb-label" id="sbLabel">—</div>
-                    <button class="sb-btn" id="sbPwd" title="Trocar senha">⟲</button>
-                    <button class="sb-btn" id="sbOut" title="Sair">⏻</button>
+                    <div class="sb-label" id="sbLabel">\u2014</div>
+                    <button class="sb-btn" id="sbPwd" title="Trocar senha">\u27F2</button>
+                    <button class="sb-btn" id="sbOut" title="Sair">\u23FB</button>
                 `;
                 document.body.appendChild(el);
                 document.getElementById('sbPwd').onclick = openPwdModal;
                 document.getElementById('sbOut').onclick = logout;
             }
             const branch = SESSION && SESSION.branches.find(b => b.id === BRANCH_ID);
-            const label = branch ? `${SESSION.locadora_name} · ${branch.branch_name}` : 'logado';
+            const label = branch ? `${SESSION.locadora_name} \u00B7 ${branch.branch_name}` : 'logado';
             document.getElementById('sbLabel').textContent = label;
         }
 
         async function bootstrap() {
-            if (!TOKEN) { show('loginCard'); return; }
+            if (!TOKEN) { show('landingPage'); return; }
             try {
                 const res = await fetch(`${API}/auth/me`, { headers: authHeaders() });
-                if (!res.ok) { await logout(); show('loginCard'); return; }
+                if (!res.ok) { await logout(); show('landingPage'); return; }
                 SESSION = await res.json();
                 if (BRANCH_ID && SESSION.branches.some(b => b.id === BRANCH_ID)) {
                     show('appCard');
@@ -969,7 +1815,7 @@
                     show('branchCard');
                 }
             } catch (e) {
-                show('loginCard');
+                show('landingPage');
             }
         }
 
@@ -1160,7 +2006,7 @@
             if (countEl) countEl.textContent = String(jobList.length).padStart(2, '0');
 
             if (jobList.length === 0) {
-                container.innerHTML = '<div class="empty-state">Nenhum projeto ainda. Envie o primeiro DXF acima para começar.</div>';
+                container.innerHTML = '<div class="empty-state">Nenhum projeto ainda. Envie o primeiro DXF acima para comecar.</div>';
                 return;
             }
 
@@ -1169,14 +2015,14 @@
                 const statusLabel = {
                     pending: 'Na fila',
                     processing: 'Processando',
-                    done: 'Concluído',
+                    done: 'Concluido',
                     error: 'Erro',
                 }[job.status] || job.status;
 
                 let content = '';
 
                 if (job.status === 'processing') {
-                    content = '<div style="margin-top:0.9rem;font-family:var(--mono);font-size:0.78rem;color:var(--fg-dim)"><span class="spinner"></span> processando pipeline…</div>';
+                    content = '<div style="margin-top:0.9rem;font-family:var(--mono);font-size:0.78rem;color:var(--fg-dim)"><span class="spinner"></span> processando pipeline\u2026</div>';
                 }
 
                 if (job.status === 'error') {
@@ -1215,7 +2061,7 @@
                             `<tr>
                                 <td>${b.name || '?'}</td>
                                 <td>${b.length_m} m</td>
-                                <td>${b.width_m}×${b.height_m || '?'}</td>
+                                <td>${b.width_m}\u00D7${b.height_m || '?'}</td>
                                 <td>${b.shore_count}</td>
                                 <td>${b.spacing_m} m</td>
                             </tr>`
@@ -1227,7 +2073,7 @@
                             </span>
                             <div id="beams-${job.id}" style="display:none">
                                 <table class="beams-table">
-                                    <tr><th>Viga</th><th>Comprimento</th><th>Seção</th><th>Escoras</th><th>Espaç.</th></tr>
+                                    <tr><th>Viga</th><th>Comprimento</th><th>Seção</th><th>Escoras</th><th>Espac.</th></tr>
                                     ${beamRows}
                                 </table>
                                 ${job.beams.length > 15 ? `<div style="font-family:var(--mono);color:var(--fg-mute);font-size:0.7rem;margin-top:6px">+ ${job.beams.length - 15} vigas</div>` : ''}
@@ -1238,15 +2084,15 @@
                     const stem = stemOf(job.filename);
                     content += `
                         <div class="actions">
-                            <a href="#" onclick="downloadFile('/jobs/${job.id}/download','${stem}_escoras.dxf');return false" class="btn btn-primary">↓ DXF c/ Escoras</a>
-                            <a href="#" onclick="downloadFile('/jobs/${job.id}/download/csv','${stem}_BOM.csv');return false" class="btn btn-accent">↓ BOM CSV</a>
-                            ${job.has_relatorio ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/pdf/relatorio','${stem}_relatorio.pdf');return false" class="btn btn-pdf">↓ Relatório</a>` : ''}
-                            ${job.has_memoria_calculo ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/pdf/memoria_calculo','${stem}_memoria_calculo.pdf');return false" class="btn btn-pdf">↓ Memória</a>` : ''}
-                            ${job.has_orcamento ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/pdf/orcamento','${stem}_orcamento.pdf');return false" class="btn btn-pdf">↓ Orçamento</a>` : ''}
-                            ${job.has_ifc ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/ifc','${stem}.ifc');return false" class="btn btn-accent">↓ IFC</a>` : ''}
-                            <button class="btn btn-green" onclick="uploadRevision('${job.id}')">↑ Revisão</button>
+                            <a href="#" onclick="downloadFile('/jobs/${job.id}/download','${stem}_escoras.dxf');return false" class="btn btn-primary">\u2193 DXF c/ Escoras</a>
+                            <a href="#" onclick="downloadFile('/jobs/${job.id}/download/csv','${stem}_BOM.csv');return false" class="btn btn-accent">\u2193 BOM CSV</a>
+                            ${job.has_relatorio ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/pdf/relatorio','${stem}_relatorio.pdf');return false" class="btn btn-pdf">\u2193 Relatório</a>` : ''}
+                            ${job.has_memoria_calculo ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/pdf/memoria_calculo','${stem}_memoria_calculo.pdf');return false" class="btn btn-pdf">\u2193 Memória</a>` : ''}
+                            ${job.has_orcamento ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/pdf/orcamento','${stem}_orcamento.pdf');return false" class="btn btn-pdf">\u2193 Orçamento</a>` : ''}
+                            ${job.has_ifc ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/ifc','${stem}.ifc');return false" class="btn btn-accent">\u2193 IFC</a>` : ''}
+                            <button class="btn btn-green" onclick="uploadRevision('${job.id}')">\u2191 Revisão</button>
                             <input type="file" class="revision-input" id="rev-${job.id}" accept=".dxf">
-                            <button class="btn btn-danger" onclick="deleteJob('${job.id}')">✕</button>
+                            <button class="btn btn-danger" onclick="deleteJob('${job.id}')">\u2715</button>
                         </div>
                     `;
 
@@ -1260,12 +2106,12 @@
                             <div class="revision-result">
                                 <h4>Versão validada (regerada a partir da revisão)</h4>
                                 <div class="actions" style="margin-top:10px">
-                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/dxf','${stem}_escoras_validated.dxf');return false" class="btn btn-primary">↓ DXF</a>
-                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/csv','${stem}_BOM_validated.csv');return false" class="btn btn-accent">↓ BOM</a>
-                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/pdf','${stem}_relatorio_validated.pdf');return false" class="btn btn-pdf">↓ Relatório</a>
-                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/memoria','${stem}_memoria_calculo_validated.pdf');return false" class="btn btn-pdf">↓ Memória</a>
-                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/orcamento','${stem}_orcamento_validated.pdf');return false" class="btn btn-pdf">↓ Orçamento</a>
-                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/ifc','${stem}_validated.ifc');return false" class="btn btn-accent">↓ IFC</a>
+                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/dxf','${stem}_escoras_validated.dxf');return false" class="btn btn-primary">\u2193 DXF</a>
+                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/csv','${stem}_BOM_validated.csv');return false" class="btn btn-accent">\u2193 BOM</a>
+                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/pdf','${stem}_relatorio_validated.pdf');return false" class="btn btn-pdf">\u2193 Relatório</a>
+                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/memoria','${stem}_memoria_calculo_validated.pdf');return false" class="btn btn-pdf">\u2193 Memória</a>
+                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/orcamento','${stem}_orcamento_validated.pdf');return false" class="btn btn-pdf">\u2193 Orçamento</a>
+                                    <a href="#" onclick="downloadFile('/jobs/${job.id}/download/validated/ifc','${stem}_validated.ifc');return false" class="btn btn-accent">\u2193 IFC</a>
                                 </div>
                             </div>
                         `;
@@ -1273,14 +2119,14 @@
 
                     if (job.has_revision && job.revision_learnings) {
                         const learnings = job.revision_learnings.map(l =>
-                            `<div class="learning-item">✓ ${l}</div>`
+                            `<div class="learning-item">\u2713 ${l}</div>`
                         ).join('');
                         const rev = job._revision || {};
                         content += `
                             <div class="revision-result">
                                 <h4>Aprendizado da revisão do engenheiro</h4>
                                 ${learnings}
-                                ${rev.accuracy_beam != null ? `<div class="learning-item" style="margin-top:10px;color:var(--ok)">Precisão vigas: ${rev.accuracy_beam}% · Precisão lajes: ${rev.accuracy_slab}%</div>` : ''}
+                                ${rev.accuracy_beam != null ? `<div class="learning-item" style="margin-top:10px;color:var(--ok)">Precisão vigas: ${rev.accuracy_beam}% \u00B7 Precisão lajes: ${rev.accuracy_slab}%</div>` : ''}
                             </div>
                         `;
                     }
