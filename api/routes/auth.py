@@ -18,6 +18,7 @@ from src.auth.branches import (
     authenticate_user,
     change_password,
     create_session,
+    create_user,
     get_locadora_of_user,
     resolve_session,
     revoke_session,
@@ -29,6 +30,14 @@ router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 class LoginRequest(BaseModel):
     username: str
+    password: str
+
+
+class SignupRequest(BaseModel):
+    name: str
+    email: str
+    company: str = ""
+    phone: str = ""
     password: str
 
 
@@ -82,6 +91,42 @@ async def login(body: LoginRequest):
                 display_name=b.display_name,
             )
             for b in locadora.branches
+        ],
+    )
+
+
+@router.post("/signup")
+async def signup(body: SignupRequest):
+    if not body.name or not body.email or not body.password:
+        raise HTTPException(status_code=400, detail="Nome, email e senha são obrigatórios")
+    if len(body.password) < 6:
+        raise HTTPException(status_code=400, detail="A senha precisa ter ao menos 6 caracteres")
+    user = create_user(
+        name=body.name,
+        email=body.email,
+        company=body.company,
+        phone=body.phone,
+        password=body.password,
+    )
+    if user is None:
+        raise HTTPException(status_code=409, detail="Este email já está cadastrado")
+    # Auto-login after signup
+    token = create_session(user)
+    locadora = get_locadora_of_user(user.username)
+    return LoginResponse(
+        token=token,
+        username=user.username,
+        name=user.name,
+        locadora_id=locadora.id if locadora else user.locadora_id,
+        locadora_name=locadora.name if locadora else body.company,
+        branches=[
+            BranchDTO(
+                id=b.id,
+                branch_name=b.branch_name,
+                inventory_name=b.inventory_name,
+                display_name=b.display_name,
+            )
+            for b in (locadora.branches if locadora else [])
         ],
     )
 
