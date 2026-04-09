@@ -666,9 +666,15 @@ def detect_cantilever_slabs(
     slab_polygons: List[Polygon],
     pillars: List[ClassifiedElement],
 ) -> List[bool]:
-    """Determine which slab panels are cantilevers (outside pillar hull)."""
+    """Determine which slab panels are cantilevers.
+
+    Rule: a slab is flagged as cantilever only when LESS than 30% of its
+    area overlaps the convex hull of pillars. Perimeter slabs that sit
+    mostly inside the hull (the usual case for edge panels of a building)
+    are NOT cantilevers — only true balconies/marquises should trigger.
+    """
     if len(pillars) < 3:
-        return [True] * len(slab_polygons)
+        return [False] * len(slab_polygons)
 
     pillar_points = []
     for p in pillars:
@@ -677,14 +683,21 @@ def detect_cantilever_slabs(
         pillar_points.append(Point(p.geometry[0]))
 
     if len(pillar_points) < 3:
-        return [True] * len(slab_polygons)
+        return [False] * len(slab_polygons)
 
     hull = MultiPoint(pillar_points).convex_hull
+    # Buffer the hull slightly to tolerate perimeter slabs that extend a
+    # small amount beyond the outermost pillars.
+    buffered_hull = hull.buffer(0.5)
 
     results = []
     for slab in slab_polygons:
-        centroid = slab.centroid
-        is_cantilever = not hull.contains(centroid)
+        try:
+            overlap = slab.intersection(buffered_hull).area
+            ratio = overlap / slab.area if slab.area > 0 else 0.0
+        except Exception:
+            ratio = 1.0
+        is_cantilever = ratio < 0.30
         results.append(is_cantilever)
 
     return results

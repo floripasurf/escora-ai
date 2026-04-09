@@ -30,6 +30,7 @@ from src.engine.shore_selector import load_catalog, select_shore
 from src.engine.tower_selector import (
     load_tower_catalog, decide_support_type, select_tower,
     select_distribution_beam, SupportType,
+    MIXED_TOWER_GRID_SPACING,
 )
 from src.engine.validator import validate_result
 from src.engine.nervura_detector import detect_nervura_regions, distribute_nervura_shores
@@ -85,7 +86,7 @@ CANTILEVER_SPACING_FACTOR = 0.7
 def _max_spacing_for_slab(thickness_m: float) -> float:
     """Get maximum shore spacing based on slab thickness (practical recommendation).
 
-    Manual Lajes Martins table:
+    NBR 15696:2009 + prática de projeto:
     - 10-16cm: 1.30m
     - 17-24cm: 1.20m
     - 25-30cm: 1.10m
@@ -273,19 +274,40 @@ def run_calculation(
             continue
         pillars.append(p)
 
-    # Filter beams by confidence
+    # Filter beams by confidence + drop TQS axis lines and absurd sections
     valid_beams = []
+    rejected_axis = 0
+    rejected_section = 0
     for b in beams:
         if b.score_final < MIN_CONFIDENCE:
             warnings.append(
                 f"Viga {b.name or 'sem nome'} ignorada — confiança {b.score_final:.0%} < 50%"
             )
             continue
+        # Reject TQS axis lines named "Eixo X=..." / "Eixo Y=..."
+        name = (b.name or "").strip()
+        if name.startswith("Eixo X=") or name.startswith("Eixo Y="):
+            rejected_axis += 1
+            continue
+        # Reject absurd cross-sections (< 10 cm in either direction when known)
+        w = b.section_width_m
+        h = b.section_height_m
+        if (w is not None and 0 < w < 0.10) or (h is not None and 0 < h < 0.10):
+            rejected_section += 1
+            continue
         if b.score_final < LOW_CONFIDENCE:
             warnings.append(
                 f"Viga {b.name or 'sem nome'} com baixa confiança ({b.score_final:.0%}) — revisar"
             )
         valid_beams.append(b)
+    if rejected_axis:
+        warnings.append(
+            f"{rejected_axis} linhas de eixo TQS (Eixo X=/Y=) descartadas do cálculo"
+        )
+    if rejected_section:
+        warnings.append(
+            f"{rejected_section} vigas com seção absurda (<10 cm) descartadas"
+        )
 
     # Load shore catalog
     try:
@@ -296,7 +318,7 @@ def run_calculation(
 
     # Load tower and distribution beam catalog
     try:
-        tower_catalog, dist_beam_catalog = load_tower_catalog()
+        tower_catalog, dist_beam_catalog, _ = load_tower_catalog()
     except FileNotFoundError:
         warnings.append("Catálogo de torres não encontrado")
         tower_catalog, dist_beam_catalog = [], []
@@ -361,8 +383,8 @@ def run_calculation(
 
         load_per_shore_estimate = total_linear_load * 1.0
 
-        # Decide: telescopic shore or tower?
-        support_type, decision_reasons = decide_support_type(
+        # Decide: telescopic shore or tower or mixed?
+        support_type, tower_fraction, decision_reasons = decide_support_type(
             required_height_m=shore_height,
             load_per_point_kn=load_per_shore_estimate,
             slab_thickness_m=thickness,
@@ -458,7 +480,8 @@ def run_calculation(
         selected_dist_beam = None
         tower_shore_entry = None  # Tower as ShoreCatalogEntry when applicable
 
-        if support_type == SupportType.TOWER and tower_catalog:
+        # Select tower when TOWER or MIXED requires it
+        if support_type in (SupportType.TOWER, SupportType.MIXED) and tower_catalog:
             selected_tower = select_tower(tower_catalog, shore_height, load_per_shore_estimate, mode=mode, inventory=inventory)
             if selected_tower:
                 warnings.append(
@@ -487,8 +510,9 @@ def run_calculation(
                     price_reference_brl=selected_tower.total_price_brl(shore_height),
                 )
 
-        # Prefer tower entry when tower was decided (match Orguel's TORRE_VIGA standard)
-        if tower_shore_entry is not None:
+        # For pure TOWER → use tower entry; for MIXED or TELESCOPIC → use telescopic
+        # (MIXED places both types — telescopic first, then swaps a fraction to tower)
+        if support_type == SupportType.TOWER and tower_shore_entry is not None:
             selected_shore = tower_shore_entry
         else:
             selected_shore = select_shore(catalog, shore_height, load_per_shore_estimate, mode=mode, inventory=inventory) if catalog else None
@@ -507,10 +531,10 @@ def run_calculation(
         dy = abs(end_pt[1] - start_pt[1])
         direction = "x" if dx >= dy else "y"
 
-        # Tower-based beam support uses wider spacing (VM distribution span 2.5-3m)
+        # Spacing: TOWER uses wider, MIXED uses telescopic (dense) spacing
         beam_max_spacing = ESPACAMENTO_MAX_VIGA
-        if tower_shore_entry is not None:
-            beam_max_spacing = max(ESPACAMENTO_MAX_VIGA * 2.0, 2.5)
+        if support_type == SupportType.TOWER and tower_shore_entry is not None:
+            beam_max_spacing = max(ESPACAMENTO_MAX_VIGA * 1.5, 1.50)
         if density_correction > 0:
             beam_max_spacing = beam_max_spacing / density_correction
 
@@ -528,6 +552,36 @@ def run_calculation(
             is_cantilever_start=assoc["is_cantilever_start"],
             is_cantilever_end=assoc["is_cantilever_end"],
         )
+
+        # === MIXED BEAM SUPPORT ===
+        # When MIXED, swap a fraction of shores to tower entries.
+        # Towers go at ends (near supports) and evenly spaced along the beam.
+        if (support_type == SupportType.MIXED and tower_shore_entry is not None
+                and len(shores) >= 2):
+            import math as _m
+            n_tower = max(2, round(len(shores) * tower_fraction))
+            n_tower = min(n_tower, len(shores))
+            # Choose tower positions: first, last, then evenly spaced interior
+            tower_indices = {0, len(shores) - 1}
+            if n_tower > 2:
+                step = (len(shores) - 1) / (n_tower - 1)
+                for k in range(n_tower):
+                    tower_indices.add(round(k * step))
+            from src.models.shore import PositionedShore as _PS
+            for idx in tower_indices:
+                if idx < len(shores):
+                    s = shores[idx]
+                    shores[idx] = _PS(
+                        x=s.x, y=s.y,
+                        shore=tower_shore_entry,
+                        load_applied_kn=s.load_applied_kn,
+                        utilization_ratio=round(
+                            s.load_applied_kn / tower_shore_entry.load_capacity_kn, 4
+                        ),
+                        support_type=SupportType.TOWER,
+                        tower=selected_tower,
+                        distribution_beam=selected_dist_beam,
+                    )
 
         is_valid, errors = validate_result(shores, spacing, spacing)
         validation_errors.extend(errors)
@@ -697,7 +751,24 @@ def run_calculation(
     nervura_panel_count = 0
     solid_panel_count = 0
 
+    # Constants for filtering out thin-strip "slabs" (platibandas, cornijas,
+    # ornamental outlines) that real shoring plans never shore as slabs.
+    THIN_STRIP_MIN_DIM_M = 1.2   # narrow side smaller than this → strip
+    THIN_STRIP_RATIO = 5.0       # long/short aspect ratio above this → strip
+    rejected_strip = 0
+
     for i, polygon in enumerate(slab_polygons):
+        # Reject thin strip "slabs" — these are platibandas/cornijas
+        minx, miny, maxx, maxy = polygon.bounds
+        w = maxx - minx
+        h = maxy - miny
+        short = min(w, h)
+        long = max(w, h)
+        ratio = long / short if short > 0 else float("inf")
+        if short < THIN_STRIP_MIN_DIM_M and ratio > THIN_STRIP_RATIO:
+            rejected_strip += 1
+            continue
+
         is_cantilever = cantilever_flags[i] if i < len(cantilever_flags) else False
 
         slab = Slab.from_polygon(
@@ -718,8 +789,8 @@ def run_calculation(
         estimated_shores = max(1, int(slab.area_m2 / (ESPACAMENTO_MAX_DEFAULT ** 2)))
         load_per_shore_estimate = total_load / estimated_shores
 
-        # Decide: telescopic shore or tower?
-        slab_support_type, slab_decision_reasons = decide_support_type(
+        # Decide: telescopic shore, tower, or mixed?
+        slab_support_type, slab_tower_fraction, slab_decision_reasons = decide_support_type(
             required_height_m=slab_shore_height,
             load_per_point_kn=load_per_shore_estimate,
             slab_thickness_m=thickness,
@@ -734,7 +805,7 @@ def run_calculation(
 
         slab_tower = None
         use_tower_entry = None  # ShoreCatalogEntry representing the tower
-        if slab_support_type == SupportType.TOWER and tower_catalog:
+        if slab_support_type in (SupportType.TOWER, SupportType.MIXED) and tower_catalog:
             slab_tower = select_tower(tower_catalog, slab_shore_height, load_per_shore_estimate, mode=mode, inventory=inventory)
             if slab_tower:
                 warnings.append(
@@ -757,9 +828,9 @@ def run_calculation(
                     price_reference_brl=slab_tower.total_price_brl(slab_shore_height),
                 )
 
-        # When tower is selected, the "shore" catalog entry IS the tower
-        # (grid spacing increases from ~1m to ~2.5m → ~6x fewer supports)
-        if use_tower_entry is not None:
+        # Pure TOWER → all tower entries with wider spacing.
+        # MIXED → telescopic as primary (dense grid), towers added to subset.
+        if slab_support_type == SupportType.TOWER and use_tower_entry is not None:
             selected_shore = use_tower_entry
         else:
             selected_shore = select_shore(catalog, slab_shore_height, load_per_shore_estimate, mode=mode, inventory=inventory) if catalog else None
@@ -801,11 +872,10 @@ def run_calculation(
         max_spacing = _max_spacing_for_slab(thickness)
         if is_cantilever:
             max_spacing *= CANTILEVER_SPACING_FACTOR
-        # Tower grids use wider spacing (VM distribution beams span 2.5-3m).
-        # This is the primary reason Orguel plans have ~80-180 towers for areas
-        # where our uniform-shore approach would place 500-1500 supports.
-        if use_tower_entry is not None:
-            max_spacing = max(max_spacing * 2.5, 2.5)
+        # Pure TOWER grids use moderately wider spacing. MIXED keeps dense
+        # telescopic spacing (towers are added to a subset afterwards).
+        if slab_support_type == SupportType.TOWER and use_tower_entry is not None:
+            max_spacing = max(max_spacing * 1.3, 2.0)
         if density_correction > 0:
             max_spacing = max_spacing / density_correction
 
@@ -861,7 +931,13 @@ def run_calculation(
                             utilization_ratio=round(min(util, 1.0), 4),
                         ))
 
-                    if positioned:
+                    # Require the rib-based placement to reach at least
+                    # half the uniform-grid estimate; otherwise fall back.
+                    # Without this, globally-detected "nervura" flags force
+                    # sparse rib grids onto solid panels and some panels
+                    # end up with 0-3 shores while others get a dense grid.
+                    min_acceptable = max(3, int(estimated_shores * 0.5))
+                    if positioned and len(positioned) >= min_acceptable:
                         # Recalculate load per shore after filtering
                         load_per = total_load / len(positioned)
                         util = load_per / selected_shore.load_capacity_kn
@@ -899,6 +975,33 @@ def run_calculation(
             exclusions=all_exclusions,
         )
 
+        # === MIXED SLAB SUPPORT ===
+        # Swap a fraction of shores to tower entries at evenly spaced positions
+        # within the grid, matching Orguel practice of scattered towers on slabs.
+        if (slab_support_type == SupportType.MIXED and use_tower_entry is not None
+                and len(shores) >= 4):
+            import math as _m
+            n_tower = max(2, round(len(shores) * slab_tower_fraction))
+            n_tower = min(n_tower, len(shores))
+            # Pick tower positions: evenly distributed across the grid
+            step = len(shores) / n_tower
+            tower_indices = set()
+            for k in range(n_tower):
+                tower_indices.add(min(round(k * step), len(shores) - 1))
+            from src.models.shore import PositionedShore as _PS
+            for idx in tower_indices:
+                s = shores[idx]
+                shores[idx] = _PS(
+                    x=s.x, y=s.y,
+                    shore=use_tower_entry,
+                    load_applied_kn=s.load_applied_kn,
+                    utilization_ratio=round(
+                        s.load_applied_kn / use_tower_entry.load_capacity_kn, 4
+                    ),
+                    support_type=SupportType.TOWER,
+                    tower=slab_tower,
+                )
+
         is_valid, errors = validate_result(shores, sx, sy)
         validation_errors.extend(errors)
 
@@ -926,6 +1029,11 @@ def run_calculation(
     if solid_panel_count > 0:
         warnings.append(
             f"Laje maciça: {solid_panel_count} painel(éis) com escoras em grid uniforme"
+        )
+    if rejected_strip > 0:
+        warnings.append(
+            f"{rejected_strip} polígono(s) de faixa fina (platibanda/cornija) "
+            f"descartado(s) do cálculo de laje"
         )
 
     # === SLAB-BEAM SHORE PROXIMITY FILTER ===

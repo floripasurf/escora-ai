@@ -163,8 +163,9 @@ class TestInventoryMode:
         from src.engine.tower_selector import decide_support_type
         from src.models.shore import SupportType
 
-        # Heavy slab that would normally trigger TOWER (Rule 3, ≥20cm)
-        support, reasons = decide_support_type(
+        # Heavy slab that would normally trigger MIXED (Rule 4, ≥20cm)
+        # but no towers in inventory → falls back to TELESCOPIC
+        support, fraction, reasons = decide_support_type(
             required_height_m=3.0,
             load_per_point_kn=10.0,
             slab_thickness_m=0.25,
@@ -175,6 +176,7 @@ class TestInventoryMode:
             inventory=inv_no_towers,
         )
         assert support == SupportType.TELESCOPIC
+        assert fraction == 0.0
         assert any("Sem torres em estoque" in r for r in reasons)
 
 
@@ -258,7 +260,7 @@ class TestDerating:
         from src.models.shore import SupportType
 
         # 4.4 m, 12 kN/point → no shore can take 12 × 1.4 = 16.8 kN at 4.4m
-        support, reasons = decide_support_type(
+        support, fraction, reasons = decide_support_type(
             required_height_m=4.4,
             load_per_point_kn=12.0,
             slab_thickness_m=0.12,
@@ -266,10 +268,11 @@ class TestDerating:
             shore_catalog=catalog,
         )
         assert support == SupportType.TOWER
+        assert fraction == 1.0
         assert any("derateada" in r for r in reasons)
 
         # 2.8 m, 8 kN → well within ESC310/ESC450 capacity → telescopic
-        support, reasons = decide_support_type(
+        support, fraction, reasons = decide_support_type(
             required_height_m=2.8,
             load_per_point_kn=8.0,
             slab_thickness_m=0.12,
@@ -277,13 +280,15 @@ class TestDerating:
             shore_catalog=catalog,
         )
         assert support == SupportType.TELESCOPIC
+        assert fraction == 0.0
 
     def test_decide_support_type_beam_short_light_is_telescopic(self, catalog):
         from src.engine.tower_selector import decide_support_type
         from src.models.shore import SupportType
 
-        # Short beam, light load: the old blanket "beam→tower" rule is gone.
-        support, _ = decide_support_type(
+        # Short beam, light load, thin slab (12cm < 15cm threshold):
+        # No mixed support triggered → pure telescopic.
+        support, fraction, _ = decide_support_type(
             required_height_m=2.6,
             load_per_point_kn=6.0,
             slab_thickness_m=0.12,
@@ -292,3 +297,127 @@ class TestDerating:
             shore_catalog=catalog,
         )
         assert support == SupportType.TELESCOPIC
+        assert fraction == 0.0
+
+    def test_decide_support_type_mixed_beam_thick_slab(self, catalog):
+        from src.engine.tower_selector import decide_support_type
+        from src.models.shore import SupportType
+
+        # Beam with thick slab (≥15cm) → MIXED ~35% towers
+        support, fraction, reasons = decide_support_type(
+            required_height_m=2.8,
+            load_per_point_kn=8.0,
+            slab_thickness_m=0.18,
+            span_m=5.0,
+            element_type="beam",
+            shore_catalog=catalog,
+        )
+        assert support == SupportType.MIXED
+        assert 0.0 < fraction < 1.0
+        assert any("mista" in r.lower() or "misto" in r.lower() for r in reasons)
+
+    def test_decide_support_type_mixed_slab_thick(self, catalog):
+        from src.engine.tower_selector import decide_support_type
+        from src.models.shore import SupportType
+
+        # Thick slab ≥20cm → MIXED ~18% towers (not pure TOWER)
+        support, fraction, reasons = decide_support_type(
+            required_height_m=2.8,
+            load_per_point_kn=8.0,
+            slab_thickness_m=0.22,
+            element_type="slab",
+            slab_area_m2=30.0,
+            shore_catalog=catalog,
+        )
+        assert support == SupportType.MIXED
+        assert 0.10 <= fraction <= 0.25
+        assert any("misto" in r.lower() for r in reasons)
+
+    def test_decide_support_type_mixed_slab_large_area(self, catalog):
+        from src.engine.tower_selector import decide_support_type
+        from src.models.shore import SupportType
+
+        # Large slab ≥40m² with thin slab → MIXED ~15% towers
+        support, fraction, reasons = decide_support_type(
+            required_height_m=2.8,
+            load_per_point_kn=5.0,
+            slab_thickness_m=0.12,
+            element_type="slab",
+            slab_area_m2=55.0,
+            shore_catalog=catalog,
+        )
+        assert support == SupportType.MIXED
+        assert 0.10 <= fraction <= 0.20
+        assert any("misto" in r.lower() for r in reasons)
+
+    def test_decide_support_type_pure_tower_height(self, catalog):
+        from src.engine.tower_selector import decide_support_type
+        from src.models.shore import SupportType
+
+        # Height > 4.5m → still pure TOWER (physical limit)
+        support, fraction, reasons = decide_support_type(
+            required_height_m=5.0,
+            load_per_point_kn=8.0,
+            slab_thickness_m=0.12,
+            element_type="slab",
+            shore_catalog=catalog,
+        )
+        assert support == SupportType.TOWER
+        assert fraction == 1.0
+
+
+class TestCruzetaBom:
+    def _accs(self):
+        from src.models.shore import AccessoryCatalogEntry
+        return [
+            AccessoryCatalogEntry(
+                id="CRZ-ESC310", category="cruzeta",
+                manufacturer="Mecanor", model="Cruzeta ESC310",
+                associated_model_ids=["ESC310", "ESC360"],
+                weight_kg=3.4, price_brl=6.5,
+            ),
+            AccessoryCatalogEntry(
+                id="CRZ-ESC450", category="cruzeta",
+                manufacturer="Mecanor", model="Cruzeta ESC450",
+                associated_model_ids=["ESC450"],
+                weight_kg=4.6, price_brl=8.2,
+            ),
+            AccessoryCatalogEntry(
+                id="CRZ-TORRE", category="cruzeta",
+                manufacturer="Orguel", model="Cruzeta TA",
+                associated_model_ids=["TWR-TA100", "TWR-TA150"],
+                weight_kg=5.8, price_brl=11.0,
+            ),
+        ]
+
+    def test_compute_cruzeta_bom_telescopic_only(self):
+        from src.engine.tower_selector import compute_cruzeta_bom
+        result = compute_cruzeta_bom(
+            self._accs(),
+            telescopic_counts={"ESC310": 100, "ESC450": 40},
+            tower_count=0,
+        )
+        by_id = {acc.id: qty for acc, qty in result}
+        assert by_id["CRZ-ESC310"] == 25
+        assert by_id["CRZ-ESC450"] == 10
+        assert "CRZ-TORRE" not in by_id
+
+    def test_compute_cruzeta_bom_with_towers(self):
+        from src.engine.tower_selector import compute_cruzeta_bom
+        result = compute_cruzeta_bom(
+            self._accs(),
+            telescopic_counts={"ESC310": 0},
+            tower_count=5,
+        )
+        by_id = {acc.id: qty for acc, qty in result}
+        assert by_id["CRZ-TORRE"] == 20
+        assert "CRZ-ESC310" not in by_id
+
+    def test_load_tower_catalog_returns_accessories(self):
+        from src.engine.tower_selector import load_tower_catalog
+        towers, beams, accessories = load_tower_catalog()
+        assert len(towers) > 0
+        assert len(beams) > 0
+        cruzetas = [a for a in accessories if a.category == "cruzeta"]
+        assert len(cruzetas) == 3
+        assert {c.id for c in cruzetas} == {"CRZ-ESC310", "CRZ-ESC450", "CRZ-TORRE"}

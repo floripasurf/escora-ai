@@ -125,6 +125,20 @@ def distribute_shores(
                 )
             )
 
+    # Guarantee at least 1 shore at the polygon centroid if the grid
+    # produced no points (very small or irregular slabs).
+    if not shores:
+        centroid = slab.polygon.centroid
+        shores.append(
+            PositionedShore(
+                x=round(centroid.x, 4),
+                y=round(centroid.y, 4),
+                shore=shore,
+                load_applied_kn=0.0,
+                utilization_ratio=0.0,
+            )
+        )
+
     # Recalcular carga com número efetivo de escoras
     if shores:
         load_per_shore = total_load_kn / len(shores)

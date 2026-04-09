@@ -193,3 +193,13 @@ class TestBuildReportData:
         assert len(report.beam_rows) == 0
         assert len(report.slab_rows) == 0
         assert len(report.bom_rows) == 0
+
+    def test_bom_includes_cruzeta_rows_when_present(self):
+        # Use a real ESC310 id so cruzetas match the catalog rule
+        calc = _calc_result(beam_results=[
+            _beam_result(name="V1", shore_count=20, shore_id="ESC310"),
+        ])
+        report = build_report_data(calc, _metadata())
+        cruzeta_rows = [r for r in report.bom_rows if r.id.startswith("CRZ-")]
+        assert len(cruzeta_rows) >= 1
+        assert any(r.id == "CRZ-ESC310" for r in cruzeta_rows)

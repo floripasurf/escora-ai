@@ -332,6 +332,52 @@ def generate_ifc(
             )
             created["shores" if s.support_type == SupportType.TELESCOPIC else "towers"] += 1
 
+    # 5b. Accessories — cruzetas as IfcBuildingElementProxy under one assembly
+    try:
+        from src.engine.tower_selector import (
+            compute_cruzeta_bom, load_tower_catalog,
+        )
+        _, _, accessories = load_tower_catalog()
+        telescopic_counts: dict = {}
+        tower_count = 0
+        for br in calc.beam_results:
+            for s in br.shores:
+                if s.support_type == SupportType.TOWER:
+                    tower_count += 1
+                else:
+                    telescopic_counts[s.shore.id] = telescopic_counts.get(s.shore.id, 0) + 1
+        for sr in calc.slab_results:
+            for s in sr.shores:
+                if s.support_type == SupportType.TOWER:
+                    tower_count += 1
+                else:
+                    telescopic_counts[s.shore.id] = telescopic_counts.get(s.shore.id, 0) + 1
+        cruzeta_pairs = compute_cruzeta_bom(accessories, telescopic_counts, tower_count)
+        accessory_count = 0
+        for acc, qty in cruzeta_pairs:
+            for i in range(int(qty)):
+                proxy = _run(
+                    "root.create_entity",
+                    ifc,
+                    ifc_class="IfcBuildingElementProxy",
+                    name=f"{acc.model} #{i+1}",
+                )
+                proxy.ObjectType = "Cruzeta"
+                proxy.ObjectPlacement = _local_placement(
+                    ifc, storey_placement, (0.0, 0.0, 0.0)
+                )
+                _run(
+                    "spatial.assign_container",
+                    ifc,
+                    relating_structure=storey,
+                    products=[proxy],
+                )
+                accessory_count += 1
+        if accessory_count:
+            logger.info(f"IFC: added {accessory_count} cruzeta proxies")
+    except Exception as exc:
+        logger.warning(f"IFC: cruzeta accessories skipped: {exc}")
+
     # 6. Write out
     ifc.write(output_path)
     logger.info(

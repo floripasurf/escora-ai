@@ -21,10 +21,10 @@ import json
 import math
 import logging
 from pathlib import Path
-from typing import List, Literal, Optional, Tuple
+from typing import Dict, List, Literal, Optional, Tuple
 from src.models.shore import (
     ShoreCatalogEntry, TowerCatalogEntry, DistributionBeamEntry,
-    SupportType,
+    AccessoryCatalogEntry, SupportType,
 )
 from src.engine.inventory import InventoryAvailability, in_stock
 
@@ -40,14 +40,26 @@ HEAVY_SLAB_THICKNESS_M = 0.30       # Above this → tower with dist. beam
 SLAB_TOWER_AREA_M2 = 40.0           # ≥40m² panel → tower grid
 SLAB_TOWER_THICKNESS_M = 0.20       # ≥20cm slab → tower grid
 
+# Orguel-measured mixed tower fractions (from 12-project calibration):
+# Beams: 29-44% towers at intersections → use 0.35 (midpoint)
+# Slabs thick ≥20cm: 13-22% towers → use 0.18 (midpoint)
+# Slabs large ≥40m²: 13-22% towers → use 0.15 (conservative)
+BEAM_TOWER_FRACTION = 0.35
+SLAB_TOWER_FRACTION_THICK = 0.18
+SLAB_TOWER_FRACTION_LARGE = 0.15
+
+# Tower grid spacing for mixed mode (m) — Orguel measured: 2.55m consistent
+MIXED_TOWER_GRID_SPACING = 2.55
+
 # NBR 15696 safety factor for shore load combinations
 SHORE_SAFETY_FACTOR = 1.4
 
 
 def load_tower_catalog(catalog_path: Optional[str] = None) -> Tuple[
     List[TowerCatalogEntry], List[DistributionBeamEntry],
+    List[AccessoryCatalogEntry],
 ]:
-    """Load tower and distribution beam catalog from JSON."""
+    """Load tower, distribution beam and accessory catalog from JSON."""
     if catalog_path is None:
         catalog_path = str(
             Path(__file__).parent.parent.parent / "data" / "catalogs" / "shoring_towers.json"
@@ -58,7 +70,8 @@ def load_tower_catalog(catalog_path: Optional[str] = None) -> Tuple[
 
     towers = [TowerCatalogEntry(**t) for t in data.get("towers", [])]
     beams = [DistributionBeamEntry(**b) for b in data.get("distribution_beams", [])]
-    return towers, beams
+    accessories = [AccessoryCatalogEntry(**a) for a in data.get("accessories", [])]
+    return towers, beams, accessories
 
 
 def decide_support_type(
@@ -72,19 +85,26 @@ def decide_support_type(
     shore_catalog: Optional[List[ShoreCatalogEntry]] = None,
     mode: Literal["price", "inventory"] = "price",
     inventory: Optional[InventoryAvailability] = None,
-) -> Tuple[SupportType, List[str]]:
-    """Decide between telescopic shore and tower.
+) -> Tuple[SupportType, float, List[str]]:
+    """Decide between telescopic shore, tower, or mixed support.
 
-    Physics-based escalation (NBR 15696 + Euler derating of telescopic shores):
-    - Height > 4.5m → tower (ESC450 physical limit)
-    - If a shore_catalog is provided and NO shore's derated capacity at
-      required_height_m × SAFETY_FACTOR covers load_per_point_kn → tower
-    - Slab area ≥ 40m² or thickness ≥ 20cm → tower grid (Orguel practice)
-    - Otherwise → telescopic shore
+    Mixed support (MIXED) replicates real Orguel practice where beams use
+    29-44% towers at critical points and slabs use 13-22% towers scattered
+    in a wider grid, with telescopic shores filling the rest.
 
-    Returns (support_type, reasons) where reasons explain the decision.
+    Physics-based escalation (NBR 15696 + Euler derating):
+    - Height > 4.5m → 100% tower (ESC450 physical limit)
+    - Load exceeds all derated shores → 100% tower
+    - Large span > 15m → 100% tower (cimbramento)
+    - Thick slab ≥ 20cm → MIXED ~18% tower (Orguel measured: 13-22%)
+    - Large slab ≥ 40m² → MIXED ~15% tower
+    - Beam with thick slab or moderate span → MIXED ~35% tower at intersections
+    - Otherwise → 100% telescopic
+
+    Returns (support_type, tower_fraction, reasons):
+      tower_fraction: 0.0 = all telescopic, 1.0 = all tower, 0 < x < 1 = mixed
     """
-    reasons = []
+    reasons: List[str] = []
 
     inventory_no_towers = False
     if mode == "inventory" and inventory is not None:
@@ -100,12 +120,9 @@ def decide_support_type(
             f"Altura {required_height_m:.1f}m > {MAX_TELESCOPIC_HEIGHT_M}m "
             f"(limite ESC450)"
         )
-        return SupportType.TOWER, reasons
+        return SupportType.TOWER, 1.0, reasons
 
-    # Rule 1b: Load-based derating check. When a catalog is provided, compare
-    # the load per point against every shore's Euler-derated capacity at the
-    # required extension height. If no telescopic shore can take the load with
-    # the NBR 15696 safety factor, escalate to a tower.
+    # Rule 1b: Load-based derating check.
     if shore_catalog and load_per_point_kn > 0:
         best_cap_kn = 0.0
         for shore in shore_catalog:
@@ -120,52 +137,71 @@ def decide_support_type(
                 f"capacidade derateada máxima {best_cap_kn:.1f} kN "
                 f"para altura {required_height_m:.2f} m"
             )
-            return SupportType.TOWER, reasons
+            return SupportType.TOWER, 1.0, reasons
 
     if inventory_no_towers:
         reasons.append(
             f"Sem torres em estoque ({inventory.locadora}) — usando escora telescópica"
         )
-        return SupportType.TELESCOPIC, reasons
+        return SupportType.TELESCOPIC, 0.0, reasons
 
-    # Rule 2: Large span (cimbramento)
+    # Rule 2: Large span (cimbramento) → 100% tower
     if span_m > CIMBRAMENTO_SPAN_M:
         reasons.append(
             f"Vão {span_m:.1f}m > {CIMBRAMENTO_SPAN_M}m "
             f"(requer cimbramento com torres)"
         )
-        return SupportType.TOWER, reasons
+        return SupportType.TOWER, 1.0, reasons
 
-    # Rule 3: Heavy/thick slab (≥20cm) — Orguel uses TORRE_LAJE
+    # --- MIXED SUPPORT RULES (Orguel-calibrated) ---
+    # Real Orguel projects show BOTH towers and telescopic on the same element.
+    # Beams: 29-44% towers (at pillar intersections), rest telescopic.
+    # Slabs: 13-22% towers (wider grid), rest telescopic.
+
+    # Rule 3: Beam with moderate load or span → mixed ~35% towers
+    if element_type == "beam":
+        # Beams with slab ≥ 15cm or span > 6m benefit from mixed support
+        if slab_thickness_m >= 0.15 or span_m > 6.0:
+            fraction = BEAM_TOWER_FRACTION
+            reasons.append(
+                f"Viga mista: {fraction:.0%} torres em pontos críticos + "
+                f"escoras telescópicas (padrão Orguel medido: 29-44%)"
+            )
+            return SupportType.MIXED, fraction, reasons
+
+    # Rule 4: Heavy/thick slab (≥20cm) → mixed ~18% towers
     if slab_thickness_m >= SLAB_TOWER_THICKNESS_M:
+        fraction = SLAB_TOWER_FRACTION_THICK
         reasons.append(
-            f"Laje {slab_thickness_m*100:.0f}cm ≥ {SLAB_TOWER_THICKNESS_M*100:.0f}cm "
-            f"(TORRE_LAJE com viga de distribuição — padrão Orguel)"
+            f"Laje {slab_thickness_m*100:.0f}cm ≥ {SLAB_TOWER_THICKNESS_M*100:.0f}cm — "
+            f"misto {fraction:.0%} torres + escoras (Orguel medido: 13-22%)"
         )
-        return SupportType.TOWER, reasons
+        return SupportType.MIXED, fraction, reasons
 
-    # Rule 3b: Large slab panel — Orguel uses TORRE_LAJE for open areas
+    # Rule 5: Large slab panel → mixed ~15% towers
     if slab_area_m2 >= SLAB_TOWER_AREA_M2:
+        fraction = SLAB_TOWER_FRACTION_LARGE
         reasons.append(
-            f"Painel de laje {slab_area_m2:.0f}m² ≥ {SLAB_TOWER_AREA_M2:.0f}m² "
-            f"(TORRE_LAJE em grid — padrão Orguel para áreas contínuas)"
+            f"Painel de laje {slab_area_m2:.0f}m² ≥ {SLAB_TOWER_AREA_M2:.0f}m² — "
+            f"misto {fraction:.0%} torres em grid largo (Orguel medido: 13-22%)"
         )
-        return SupportType.TOWER, reasons
+        return SupportType.MIXED, fraction, reasons
 
-    # Rule 4: Ribbed slab ≥ 25cm
+    # Rule 6: Ribbed slab ≥ 25cm → mixed 20% towers
     if slab_type == "ribbed" and slab_thickness_m > 0.25:
+        fraction = 0.20
         reasons.append(
-            f"Laje nervurada h={slab_thickness_m*100:.0f}cm "
-            f"(peso de forma requer torre)"
+            f"Laje nervurada h={slab_thickness_m*100:.0f}cm — "
+            f"misto {fraction:.0%} torres (peso de forma elevado)"
         )
-        return SupportType.TOWER, reasons
+        return SupportType.MIXED, fraction, reasons
 
     # Default: telescopic shore (ESC310 or ESC450 by height)
     reasons.append(
         f"Escora telescópica adequada "
         f"(h={required_height_m:.1f}m, laje {slab_thickness_m*100:.0f}cm)"
     )
-    return SupportType.TELESCOPIC, reasons
+    return SupportType.TELESCOPIC, 0.0, reasons
 
 
 def select_tower(
@@ -300,3 +336,37 @@ def calculate_tower_grid(
         spacing_y = area_height_m / max(ny - 1, 1)
 
     return nx, ny, spacing_x, spacing_y
+
+
+# Cruzetas-per-shore ratio measured from Orguel SJC stock:
+# (371 + 5735) cruzetas / ~24,500 ESC units in active rotation ≈ 0.25
+ORGUEL_CRUZETA_RATIO_TELESCOPIC = 0.25
+CRUZETAS_PER_TOWER_FACE = 1
+TOWER_FACES = 4
+
+
+def compute_cruzeta_bom(
+    accessories: List[AccessoryCatalogEntry],
+    telescopic_counts: Dict[str, int],
+    tower_count: int,
+) -> List[Tuple[AccessoryCatalogEntry, int]]:
+    """Return (accessory, qty) pairs ready for the BOM.
+
+    Args:
+        accessories: full accessory catalog (filters internally to cruzetas).
+        telescopic_counts: {shore_id: count} for telescopic shores only.
+        tower_count: total number of towers in the project.
+    """
+    out: List[Tuple[AccessoryCatalogEntry, int]] = []
+    for acc in accessories:
+        if acc.category != "cruzeta":
+            continue
+        qty = 0
+        for shore_id, n in telescopic_counts.items():
+            if shore_id in acc.associated_model_ids:
+                qty += round(n * ORGUEL_CRUZETA_RATIO_TELESCOPIC)
+        if any(t.startswith("TWR-") for t in acc.associated_model_ids):
+            qty += tower_count * TOWER_FACES * CRUZETAS_PER_TOWER_FACE
+        if qty > 0:
+            out.append((acc, qty))
+    return out
