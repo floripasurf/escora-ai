@@ -249,7 +249,7 @@ def generate_memoria_calculo(report: ReportData, output_path: str) -> str:
         "NBR 15696:2009 — Fôrmas e escoramentos para estruturas de concreto",
         "NBR 6120:2019 — Ações para o cálculo de estruturas de edificações",
         "NBR 14931:2004 — Execução de estruturas de concreto — Procedimento",
-        "Manual de Lajes Martins — Espaçamento entre escoras",
+        "NBR 6118:2023 — Projeto de estruturas de concreto",
     ]
     for n in normas:
         el.append(Paragraph(f"• {n}", styles["Normal"]))
@@ -287,7 +287,7 @@ def generate_memoria_calculo(report: ReportData, output_path: str) -> str:
 
     # --- 3. CRITÉRIOS DE ESPAÇAMENTO ---
     el.append(Paragraph("3. Critérios de Espaçamento", styles["SectionTitle"]))
-    el.append(Paragraph("3.1 Lajes — Manual Lajes Martins", styles["SubSection"]))
+    el.append(Paragraph("3.1 Lajes — NBR 15696:2009 / NBR 6120:2019", styles["SubSection"]))
 
     esp_data = [["Espessura (cm)", "Espaçamento máx. (m)"]]
     for (min_cm, max_cm), spacing in ESPACAMENTO_POR_ALTURA.items():

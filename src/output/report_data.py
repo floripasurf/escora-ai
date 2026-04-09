@@ -177,6 +177,34 @@ def build_report_data(
             total_price_brl=round(shore.price_reference_brl * qty, 2),
         ))
 
+    # Accessories — cruzetas derived from telescopic + tower counts
+    try:
+        _, _, accessories = load_tower_catalog()
+        telescopic_counts = {
+            sid: c for sid, (_s, c) in shore_counts.items()
+            if not sid.startswith("TWR-")
+        }
+        tower_count = sum(
+            c for sid, (_s, c) in shore_counts.items()
+            if sid.startswith("TWR-")
+        )
+        for acc, qty in compute_cruzeta_bom(accessories, telescopic_counts, tower_count):
+            bom_rows.append(BomRow(
+                id=acc.id,
+                model=acc.model,
+                manufacturer=acc.manufacturer,
+                quantity=qty,
+                capacity_kn=0.0,
+                height_min_m=0.0,
+                height_max_m=0.0,
+                weight_kg=acc.weight_kg,
+                total_weight_kg=round(acc.weight_kg * qty, 1),
+                price_brl=acc.price_brl,
+                total_price_brl=round(acc.price_brl * qty, 2),
+            ))
+    except Exception:
+        pass
+
     # Warnings — merge warnings + validation_errors
     all_warnings = list(calc.warnings)
     for err in calc.validation_errors:

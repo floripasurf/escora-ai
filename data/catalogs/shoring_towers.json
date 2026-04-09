@@ -115,15 +115,158 @@
       "notes": "Viga Mecanor VM130 L=4.10m"
     },
     {
-      "id": "VD-VM80",
+      "id": "VD-VM80-100",
       "manufacturer": "Mecanor",
-      "model": "VM80",
+      "model": "VM80-100",
       "height_mm": 80,
       "moment_capacity_knm": 2.08,
-      "max_span_m": 2.50,
+      "max_span_m": 1.00,
       "weight_per_m_kg": 4.0,
       "price_per_m_brl": 6.00,
-      "notes": "Viga Mecanor VM80 (212 kgf.m), cargas leves/coberturas"
+      "notes": "Viga Mecanor VM80 L=1.00m"
+    },
+    {
+      "id": "VD-VM80-155",
+      "manufacturer": "Mecanor",
+      "model": "VM80-155",
+      "height_mm": 80,
+      "moment_capacity_knm": 2.08,
+      "max_span_m": 1.55,
+      "weight_per_m_kg": 4.0,
+      "price_per_m_brl": 6.00,
+      "notes": "Viga Mecanor VM80 L=1.55m — most common in Supplier plans"
+    },
+    {
+      "id": "VD-VM80-205",
+      "manufacturer": "Mecanor",
+      "model": "VM80-205",
+      "height_mm": 80,
+      "moment_capacity_knm": 2.08,
+      "max_span_m": 2.05,
+      "weight_per_m_kg": 4.0,
+      "price_per_m_brl": 6.00,
+      "notes": "Viga Mecanor VM80 L=2.05m"
+    },
+    {
+      "id": "VD-VM80-255",
+      "manufacturer": "Mecanor",
+      "model": "VM80-255",
+      "height_mm": 80,
+      "moment_capacity_knm": 2.08,
+      "max_span_m": 2.55,
+      "weight_per_m_kg": 4.0,
+      "price_per_m_brl": 6.00,
+      "notes": "Viga Mecanor VM80 L=2.55m — max practical span for VM80"
+    },
+    {
+      "id": "VD-VM80-310",
+      "manufacturer": "Mecanor",
+      "model": "VM80-310",
+      "height_mm": 80,
+      "moment_capacity_knm": 2.08,
+      "max_span_m": 3.10,
+      "weight_per_m_kg": 4.0,
+      "price_per_m_brl": 6.00,
+      "notes": "Viga Mecanor VM80 L=3.10m"
+    },
+    {
+      "id": "VD-VM80-360",
+      "manufacturer": "Mecanor",
+      "model": "VM80-360",
+      "height_mm": 80,
+      "moment_capacity_knm": 2.08,
+      "max_span_m": 3.60,
+      "weight_per_m_kg": 4.0,
+      "price_per_m_brl": 6.00,
+      "notes": "Viga Mecanor VM80 L=3.60m"
+    },
+    {
+      "id": "VD-VM80-410",
+      "manufacturer": "Mecanor",
+      "model": "VM80-410",
+      "height_mm": 80,
+      "moment_capacity_knm": 2.08,
+      "max_span_m": 4.10,
+      "weight_per_m_kg": 4.0,
+      "price_per_m_brl": 6.00,
+      "notes": "Viga Mecanor VM80 L=4.10m"
+    },
+    {
+      "id": "VD-VM50-100",
+      "manufacturer": "Mecanor",
+      "model": "VM50-100",
+      "height_mm": 50,
+      "moment_capacity_knm": 0.80,
+      "max_span_m": 1.00,
+      "weight_per_m_kg": 2.5,
+      "price_per_m_brl": 4.00,
+      "notes": "Viga Mecanor VM50 L=1.00m — TRAVAMENTO lateral"
+    },
+    {
+      "id": "VD-VM50-155",
+      "manufacturer": "Mecanor",
+      "model": "VM50-155",
+      "height_mm": 50,
+      "moment_capacity_knm": 0.80,
+      "max_span_m": 1.55,
+      "weight_per_m_kg": 2.5,
+      "price_per_m_brl": 4.00,
+      "notes": "Viga Mecanor VM50 L=1.55m — TRAVAMENTO lateral"
+    },
+    {
+      "id": "VD-VM50-205",
+      "manufacturer": "Mecanor",
+      "model": "VM50-205",
+      "height_mm": 50,
+      "moment_capacity_knm": 0.80,
+      "max_span_m": 2.05,
+      "weight_per_m_kg": 2.5,
+      "price_per_m_brl": 4.00,
+      "notes": "Viga Mecanor VM50 L=2.05m — TRAVAMENTO lateral"
+    },
+    {
+      "id": "VD-VM50-255",
+      "manufacturer": "Mecanor",
+      "model": "VM50-255",
+      "height_mm": 50,
+      "moment_capacity_knm": 0.80,
+      "max_span_m": 2.55,
+      "weight_per_m_kg": 2.5,
+      "price_per_m_brl": 4.00,
+      "notes": "Viga Mecanor VM50 L=2.55m — TRAVAMENTO lateral"
+    },
+    {
+      "id": "VD-VM50-310",
+      "manufacturer": "Mecanor",
+      "model": "VM50-310",
+      "height_mm": 50,
+      "moment_capacity_knm": 0.80,
+      "max_span_m": 3.10,
+      "weight_per_m_kg": 2.5,
+      "price_per_m_brl": 4.00,
+      "notes": "Viga Mecanor VM50 L=3.10m — TRAVAMENTO lateral"
+    },
+    {
+      "id": "VD-VM50-360",
+      "manufacturer": "Mecanor",
+      "model": "VM50-360",
+      "height_mm": 50,
+      "moment_capacity_knm": 0.80,
+      "max_span_m": 3.60,
+      "weight_per_m_kg": 2.5,
+      "price_per_m_brl": 4.00,
+      "notes": "Viga Mecanor VM50 L=3.60m — TRAVAMENTO lateral"
+    },
+    {
+      "id": "VD-VM50-410",
+      "manufacturer": "Mecanor",
+      "model": "VM50-410",
+      "height_mm": 50,
+      "moment_capacity_knm": 0.80,
+      "max_span_m": 4.10,
+      "weight_per_m_kg": 2.5,
+      "price_per_m_brl": 4.00,
+      "notes": "Viga Mecanor VM50 L=4.10m — TRAVAMENTO lateral"
     },
     {
       "id": "VD-H20",
@@ -157,6 +300,37 @@
       "weight_per_m_kg": 15.0,
       "price_per_m_brl": 22.00,
       "notes": "Perfil SF-500 para vigas muito pesadas"
+    }
+  ],
+  "accessories": [
+    {
+      "id": "CRZ-ESC310",
+      "category": "cruzeta",
+      "manufacturer": "Mecanor",
+      "model": "Cruzeta ESC310",
+      "associated_model_ids": ["ESC310", "ESC360"],
+      "weight_kg": 3.4,
+      "price_brl": 6.50,
+      "notes": "Travamento horizontal entre escoras adjacentes"
+    },
+    {
+      "id": "CRZ-ESC450",
+      "category": "cruzeta",
+      "manufacturer": "Mecanor",
+      "model": "Cruzeta ESC450",
+      "associated_model_ids": ["ESC450", "ESC-PESADA"],
+      "weight_kg": 4.6,
+      "price_brl": 8.20
+    },
+    {
+      "id": "CRZ-TORRE",
+      "category": "cruzeta",
+      "manufacturer": "Supplier",
+      "model": "Cruzeta TA",
+      "associated_model_ids": ["TWR-TA100", "TWR-TA150", "TWR-SH-LTT"],
+      "weight_kg": 5.8,
+      "price_brl": 11.00,
+      "notes": "Travamento de torres TA — 1 por face de painel"
     }
   ]
 }

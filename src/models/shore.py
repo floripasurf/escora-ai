@@ -1,7 +1,7 @@
 """Modelo Pydantic para escoras e torres."""
 
 from enum import Enum
-from typing import List, Optional, Tuple
+from typing import List, Literal, Optional, Tuple
 from pydantic import BaseModel, Field
 
 
@@ -9,6 +9,7 @@ class SupportType(str, Enum):
     """Type of shoring support."""
     TELESCOPIC = "telescopic"
     TOWER = "tower"
+    MIXED = "mixed"
 
 
 class ShoreCatalogEntry(BaseModel):
@@ -95,6 +96,18 @@ class DistributionBeamEntry(BaseModel):
     max_span_m: float
     weight_per_m_kg: float
     price_per_m_brl: float
+    notes: str = ""
+
+
+class AccessoryCatalogEntry(BaseModel):
+    """Equipment that is required by other equipment but not a primary support."""
+    id: str
+    category: Literal["cruzeta", "forcado", "sapata", "diagonal"]
+    manufacturer: str
+    model: str
+    associated_model_ids: List[str] = Field(default_factory=list)
+    weight_kg: float
+    price_brl: float
     notes: str = ""
 
 

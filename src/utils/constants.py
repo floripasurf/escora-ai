@@ -21,16 +21,18 @@ Q_SOBRECARGA_DEFAULT = 1.5
 # Coeficiente de majoração de ações — NBR 15696:2009
 GAMMA_F = 1.4
 
-# Espaçamento máximo entre escoras de LAJE (m) — Manual Lajes Martins
-# Varia por altura da laje (ver ESPACAMENTO_POR_ALTURA abaixo)
-ESPACAMENTO_MAX_DEFAULT = 1.30
+# Espaçamento máximo entre escoras de LAJE (m)
+# Calibrado com medições de projetos Supplier reais (84678, 92056):
+#   ESC310_Laje median = 1.00m, ESC450_Laje median = 1.08m
+# Mantemos 1.10m como valor padrão (entre os dois modelos).
+ESPACAMENTO_MAX_DEFAULT = 1.10
 
 # Espaçamento máximo entre escoras de VIGA (m)
 # Referência: projetos executivos de engenharia (mediana real: 0.70m)
 # Vigas concentram mais carga que lajes → espaçamento mais denso
 ESPACAMENTO_MAX_VIGA = 1.00
 
-# Espaçamento por faixa de altura da laje (m) — Manual Lajes Martins
+# Espaçamento por faixa de altura da laje (m) — NBR 15696:2009 + prática de projeto
 # Chave: (min_cm, max_cm) -> espaçamento máximo em metros
 ESPACAMENTO_POR_ALTURA = {
     (10, 16): 1.30,   # lajes leves
@@ -42,7 +44,7 @@ ESPACAMENTO_POR_ALTURA = {
 # Espaçamento mínimo entre escoras (m) — evita acúmulo próximo a apoios
 ESPACAMENTO_MIN = 0.30
 
-# Contra-flecha recomendada por faixa de vão (m) — Manual Lajes Martins
+# Contra-flecha recomendada por faixa de vão (m) — NBR 6118:2023 §13.4.2
 # Chave: (vão_min, vão_max) -> contra-flecha em metros
 CONTRA_FLECHA = {
     (2.0, 3.0): 0.005,   # 0.5 cm

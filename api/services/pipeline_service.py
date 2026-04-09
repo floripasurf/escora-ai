@@ -159,6 +159,31 @@ def regenerate_from_revision(
     )
 
 
+def _count_shores_by_id(calc):
+    """Return ({telescopic_id: count}, tower_count) from a CalculationResult.
+
+    Single source of truth for both BOM CSV and report_data accessory rules.
+    """
+    from src.models.shore import SupportType
+    telescopic_counts: dict = {}
+    tower_count = 0
+    for br in calc.beam_results:
+        for s in br.shores:
+            if getattr(s, "support_type", None) == SupportType.TOWER:
+                tower_count += 1
+            else:
+                sid = s.shore.id
+                telescopic_counts[sid] = telescopic_counts.get(sid, 0) + 1
+    for sr in calc.slab_results:
+        for s in sr.shores:
+            if getattr(s, "support_type", None) == SupportType.TOWER:
+                tower_count += 1
+            else:
+                sid = s.shore.id
+                telescopic_counts[sid] = telescopic_counts.get(sid, 0) + 1
+    return telescopic_counts, tower_count
+
+
 def _generate_bom_csv(calc, output_path: str):
     """Generate Bill of Materials CSV from calculation results."""
     rows = []
@@ -198,6 +223,22 @@ def _generate_bom_csv(calc, output_path: str):
         "Espacamento (m)": "",
     })
 
+    # Accessories — cruzetas
+    try:
+        _, _, accessories = load_tower_catalog()
+        telescopic_counts, tower_count = _count_shores_by_id(calc)
+        for acc, qty in compute_cruzeta_bom(accessories, telescopic_counts, tower_count):
+            rows.append({
+                "Tipo": "Acessório",
+                "Elemento": acc.model,
+                "Comprimento (m)": "",
+                "Secao (cm)": "",
+                "Qtd Escoras": qty,
+                "Espacamento (m)": "",
+            })
+    except Exception as exc:
+        logger.warning(f"Cruzeta BOM rows skipped: {exc}")
+
     fieldnames = ["Tipo", "Elemento", "Comprimento (m)", "Secao (cm)", "Qtd Escoras", "Espacamento (m)"]
     with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter=";")
@@ -206,54 +247,247 @@ def _generate_bom_csv(calc, output_path: str):
 
 
 def _generate_output_dxf(input_path: str, calc, output_path: str):
-    """Overlay shores onto the original DXF."""
+    """Overlay shores onto the original DXF using Supplier layer naming.
+
+    Symbology (Supplier convention):
+    - Telescopic shore — filled hexagon (~0.30 m across) + label on first
+      occurrence per cluster.
+    - Tower — double square (outer 0.40 m, inner 0.28 m) + 4 corner ticks.
+    - VM distribution beam — TWO parallel rails alongside the concrete beam,
+      one each side of the web (real Supplier plans never draw a single
+      centerline). Towers under those rails are nudged perpendicular to the
+      beam axis so they sit on the rails, not on the concrete centerline.
+    - Slab VM rails — each row gets a thin rectangle (paired lines).
+    """
+    import math
+    from src.output.dxf_generator import _ensure_layer, _shore_layer_name
+    from src.models.shore import SupportType
+
     doc = ezdxf.readfile(input_path)
+    # Upgrade old DXF versions so LWPOLYLINE / HATCH are supported
+    if doc.dxfversion < "AC1015":  # < R2000
+        doc.dxfversion = "AC1015"
     msp = doc.modelspace()
 
-    for layer_name, color in [
-        ("ESCORAS_VIGA", 1), ("ESCORAS_LAJE", 3),
-        ("INFO_ESCORAS", 5),
-    ]:
-        if layer_name not in doc.layers:
-            doc.layers.add(layer_name, color=color)
+    _ensure_layer(doc, "INFO_ESCORAS", 5)
 
-    # Draw beam shores — crosshair + circle for visibility
-    shore_radius = 0.12  # 12cm radius — clear but compact
-    cross_size = 0.15    # 15cm crosshair arm length
+    inv_scale = 1.0  # input DXF is in meters at 1:1
+    SHORE_HEX_RADIUS = 0.15 * inv_scale
+    SHORE_LABEL_HEIGHT = 0.20 * inv_scale
+    SHORE_LABEL_OFFSET = 0.18 * inv_scale
+    TOWER_OUTER = 0.20 * inv_scale
+    TOWER_INNER = 0.14 * inv_scale
+    TOWER_TICK = 0.08 * inv_scale
+    SLAB_RAIL_HALF = 0.04 * inv_scale
+
+    def _hex_points(cx, cy, r):
+        return [
+            (cx + r * math.cos(math.radians(60 * i)),
+             cy + r * math.sin(math.radians(60 * i)))
+            for i in range(6)
+        ]
+
+    def _draw_telescopic(cx, cy, layer, label: str = ""):
+        pts = _hex_points(cx, cy, SHORE_HEX_RADIUS)
+        msp.add_lwpolyline(pts, close=True, dxfattribs={"layer": layer})
+        try:
+            hatch = msp.add_hatch(dxfattribs={"layer": layer})
+            hatch.paths.add_polyline_path(pts + [pts[0]], is_closed=True)
+        except Exception:
+            pass
+        if label:
+            msp.add_text(
+                label,
+                height=SHORE_LABEL_HEIGHT,
+                dxfattribs={"layer": "INFO_ESCORAS"},
+            ).set_placement((cx + SHORE_HEX_RADIUS + SHORE_LABEL_OFFSET, cy))
+
+    def _draw_tower(cx, cy, layer):
+        outer = TOWER_OUTER
+        inner = TOWER_INNER
+        tick = TOWER_TICK
+        msp.add_lwpolyline(
+            [(cx - outer, cy - outer), (cx + outer, cy - outer),
+             (cx + outer, cy + outer), (cx - outer, cy + outer)],
+            close=True, dxfattribs={"layer": layer},
+        )
+        msp.add_lwpolyline(
+            [(cx - inner, cy - inner), (cx + inner, cy - inner),
+             (cx + inner, cy + inner), (cx - inner, cy + inner)],
+            close=True, dxfattribs={"layer": layer},
+        )
+        for ox, oy in [(-1, -1), (1, -1), (1, 1), (-1, 1)]:
+            x0, y0 = cx + ox * outer, cy + oy * outer
+            x1, y1 = x0 + ox * tick, y0 + oy * tick
+            msp.add_line((x0, y0), (x1, y1), dxfattribs={"layer": layer})
+
+    def _vm_layer_for(dist_beam, target: str) -> str:
+        """Map a DistributionBeamEntry to its VM*_{Viga|Laje} layer."""
+        if dist_beam is None:
+            return f"VM80_{target}"
+        token = next(
+            (t for t in dist_beam.id.split("-") if t.startswith("VM")),
+            "VM80",
+        )
+        return f"{token}_{target}"
+
+    # ----- Beam loop with VM rails + nudged tower markers ---------------
+    seen_models: set = set()
     for br in calc.beam_results:
-        for shore in br.shores:
-            cx, cy = shore.x, shore.y
-            msp.add_circle(
-                center=(cx, cy), radius=shore_radius,
-                dxfattribs={"layer": "ESCORAS_VIGA"},
-            )
-            msp.add_line(
-                (cx - cross_size, cy), (cx + cross_size, cy),
-                dxfattribs={"layer": "ESCORAS_VIGA"},
-            )
-            msp.add_line(
-                (cx, cy - cross_size), (cx, cy + cross_size),
-                dxfattribs={"layer": "ESCORAS_VIGA"},
-            )
+        beam = br.beam
+        if not beam.geometry or len(beam.geometry) < 2:
+            # Fallback: just place markers raw
+            for shore in br.shores:
+                layer = _shore_layer_name(shore, "Viga")
+                _ensure_layer(doc, layer)
+                if getattr(shore, "support_type", None) == SupportType.TOWER:
+                    _draw_tower(shore.x, shore.y, layer)
+                else:
+                    label = ""
+                    if shore.shore.id not in seen_models:
+                        seen_models.add(shore.shore.id)
+                        label = shore.shore.id
+                    _draw_telescopic(shore.x, shore.y, layer, label)
+            continue
 
-    # Draw slab shores
+        ax, ay = beam.geometry[0]
+        bx, by = beam.geometry[1]
+        length = math.hypot(bx - ax, by - ay) or 1.0
+        ux, uy = (bx - ax) / length, (by - ay) / length
+        nx, ny = -uy, ux
+        half_w = (beam.section_width_m or 0.14) / 2.0
+        clearance = 0.05
+        offset = (half_w + clearance) * inv_scale
+
+        tower_shores = [
+            s for s in br.shores
+            if getattr(s, "support_type", None) == SupportType.TOWER
+        ]
+        telescopic_shores = [
+            s for s in br.shores
+            if getattr(s, "support_type", None) != SupportType.TOWER
+        ]
+
+        # Draw two VM rails when this beam is shored by towers
+        if len(tower_shores) >= 2:
+            dist_beam = getattr(tower_shores[0], "distribution_beam", None)
+            vm_layer = _vm_layer_for(dist_beam, "Viga")
+            _ensure_layer(doc, vm_layer)
+            p_start = (ax + nx * offset, ay + ny * offset)
+            p_end = (bx + nx * offset, by + ny * offset)
+            q_start = (ax - nx * offset, ay - ny * offset)
+            q_end = (bx - nx * offset, by - ny * offset)
+            msp.add_line(p_start, p_end, dxfattribs={"layer": vm_layer})
+            msp.add_line(q_start, q_end, dxfattribs={"layer": vm_layer})
+
+        # Place tower markers shifted onto the rails (alternating sides)
+        for idx, shore in enumerate(tower_shores):
+            layer = _shore_layer_name(shore, "Viga")
+            _ensure_layer(doc, layer)
+            side = 1 if (idx % 2 == 0) else -1
+            cx = shore.x + nx * offset * side
+            cy = shore.y + ny * offset * side
+            _draw_tower(cx, cy, layer)
+
+        # Draw VM50 travamento (lateral bracing) perpendicular to beam axis
+        # between consecutive telescopic shores — this creates the Supplier-style
+        # grid pattern. Supplier places VM50-TRAV every ~0.45m perpendicular.
+        if len(telescopic_shores) >= 2:
+            vm50_layer = "VM50_Viga"
+            _ensure_layer(doc, vm50_layer, 6)
+            sorted_tel = sorted(telescopic_shores, key=lambda s: s.x * ux + s.y * uy)
+            for si in range(len(sorted_tel) - 1):
+                s1, s2 = sorted_tel[si], sorted_tel[si + 1]
+                # Short perpendicular VM50 lines at shore positions
+                trav_half = 0.20 * inv_scale
+                for s in (s1, s2):
+                    tx0 = s.x - nx * trav_half
+                    ty0 = s.y - ny * trav_half
+                    tx1 = s.x + nx * trav_half
+                    ty1 = s.y + ny * trav_half
+                    msp.add_line((tx0, ty0), (tx1, ty1),
+                                 dxfattribs={"layer": vm50_layer})
+
+        # Place telescopic shore markers as-is (no VM rails)
+        for shore in telescopic_shores:
+            layer = _shore_layer_name(shore, "Viga")
+            _ensure_layer(doc, layer)
+            label = ""
+            if shore.shore.id not in seen_models:
+                seen_models.add(shore.shore.id)
+                label = shore.shore.id
+            _draw_telescopic(shore.x, shore.y, layer, label)
+
+    # ----- Slab loop ----------------------------------------------------
     for sr in calc.slab_results:
-        for shore in sr.shores:
-            cx, cy = shore.x, shore.y
-            msp.add_circle(
-                center=(cx, cy), radius=shore_radius,
-                dxfattribs={"layer": "ESCORAS_LAJE"},
-            )
-            msp.add_line(
-                (cx - cross_size, cy), (cx + cross_size, cy),
-                dxfattribs={"layer": "ESCORAS_LAJE"},
-            )
-            msp.add_line(
-                (cx, cy - cross_size), (cx, cy + cross_size),
-                dxfattribs={"layer": "ESCORAS_LAJE"},
-            )
+        # Detect VM family for slab rails (use first tower shore's dist_beam)
+        slab_tower_shores = [
+            s for s in sr.shores
+            if getattr(s, "support_type", None) == SupportType.TOWER
+        ]
+        slab_vm_layer = None
+        if slab_tower_shores:
+            dist_beam = getattr(slab_tower_shores[0], "distribution_beam", None)
+            slab_vm_layer = _vm_layer_for(dist_beam, "Laje")
+            _ensure_layer(doc, slab_vm_layer)
 
-    # Summary text
+        # Group slab shores into rows by Y coordinate (to draw rails)
+        if slab_vm_layer and len(sr.shores) >= 2:
+            rows: dict = {}
+            for s in sr.shores:
+                key = round(s.y / 0.5) * 0.5  # bin by 0.5m
+                rows.setdefault(key, []).append(s)
+            for key, row_shores in rows.items():
+                if len(row_shores) < 2:
+                    continue
+                row_shores.sort(key=lambda s: s.x)
+                x0 = row_shores[0].x
+                x1 = row_shores[-1].x
+                y = key
+                # Two parallel lines (a thin rectangle along the row)
+                msp.add_line(
+                    (x0, y - SLAB_RAIL_HALF), (x1, y - SLAB_RAIL_HALF),
+                    dxfattribs={"layer": slab_vm_layer},
+                )
+                msp.add_line(
+                    (x0, y + SLAB_RAIL_HALF), (x1, y + SLAB_RAIL_HALF),
+                    dxfattribs={"layer": slab_vm_layer},
+                )
+
+        # Draw VM50 travamento perpendicular to slab rows (vertical connectors)
+        # This creates the Supplier-style grid connecting shore rows
+        if len(sr.shores) >= 4:
+            vm50_slab_layer = "VM50_Laje"
+            _ensure_layer(doc, vm50_slab_layer, 6)
+            # Group by X column (vertical travamento connecting horizontal rows)
+            cols: dict = {}
+            for s in sr.shores:
+                ckey = round(s.x / 0.5) * 0.5
+                cols.setdefault(ckey, []).append(s)
+            for ckey, col_shores in cols.items():
+                if len(col_shores) < 2:
+                    continue
+                col_shores.sort(key=lambda s: s.y)
+                for ci in range(len(col_shores) - 1):
+                    s1, s2 = col_shores[ci], col_shores[ci + 1]
+                    msp.add_line(
+                        (s1.x, s1.y), (s2.x, s2.y),
+                        dxfattribs={"layer": vm50_slab_layer},
+                    )
+
+        for shore in sr.shores:
+            layer = _shore_layer_name(shore, "Laje")
+            _ensure_layer(doc, layer)
+            if getattr(shore, "support_type", None) == SupportType.TOWER:
+                _draw_tower(shore.x, shore.y, layer)
+            else:
+                label = ""
+                if shore.shore.id not in seen_models:
+                    seen_models.add(shore.shore.id)
+                    label = shore.shore.id
+                _draw_telescopic(shore.x, shore.y, layer, label)
+
+    # ----- Summary text + small legend ----------------------------------
     total_beam = sum(br.shore_count for br in calc.beam_results)
     total_slab = sum(len(sr.shores) for sr in calc.slab_results)
     all_pts = [p for br in calc.beam_results for p in br.beam.geometry]
@@ -267,5 +501,21 @@ def _generate_output_dxf(input_path: str, calc, output_path: str):
         msp.add_text(info, height=0.25, dxfattribs={
             "layer": "INFO_ESCORAS", "insert": (min_x, max_y + 1.5),
         })
+
+        # Legend in top-left corner: hexagon = escora, double square = torre
+        lx = min_x
+        ly = max_y + 0.8
+        _draw_telescopic(lx, ly, "INFO_ESCORAS", "")
+        msp.add_text(
+            "Escora telescópica",
+            height=SHORE_LABEL_HEIGHT * 0.8,
+            dxfattribs={"layer": "INFO_ESCORAS"},
+        ).set_placement((lx + 0.4, ly - 0.05))
+        _draw_tower(lx + 3.5, ly, "INFO_ESCORAS")
+        msp.add_text(
+            "Torre de escoramento",
+            height=SHORE_LABEL_HEIGHT * 0.8,
+            dxfattribs={"layer": "INFO_ESCORAS"},
+        ).set_placement((lx + 3.9, ly - 0.05))
 
     doc.saveas(output_path)

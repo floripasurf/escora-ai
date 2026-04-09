@@ -1,17 +1,20 @@
 """DXF output generator — creates a clean structural plan with shore positions.
 
+Layer naming follows the **Supplier engineer convention** observed in real
+locadora projects (input/supplier/*.dxf), so the engineer opening our output
+sees the exact same layer tree they're already used to:
+
+    ESC310_Viga, ESC360_Viga, ESC450_Viga       — beam shores by model
+    ESC310_Laje, ESC360_Laje, ESC450_Laje       — slab shores by model
+    TORRE_VIGA, TORRE_LAJE                      — towers under beams / slabs
+    VM50_Viga, VM80_Viga, VM130_Viga            — distribution beams (when present)
+    PILARES, VIGAS, LAJES                       — structural geometry
+    Listamat                                    — material list / BOM table area
+    TEXTO, INFO                                 — labels and metadata
+
 Two modes:
 - overlay: adds shore layers onto the original DXF (preserves all input layers)
-- clean: creates a new DXF with only structural elements + shores (like CVS-COB-escoras.dxf)
-
-Layer structure (matches run_cvs_cob.py style):
-- PILARES (red):        pillar outlines as rectangles
-- VIGAS (blue):         beam outlines as rectangles (not just axis lines)
-- LAJES (white):        slab polygon outlines
-- ESCORAS_VIGAS (magenta): beam shore positions as circles
-- ESCORAS_LAJES (green):   slab shore positions as squares
-- TEXTO (gray):         element name labels
-- INFO (cyan):          shore count info per slab
+- clean: creates a new DXF with only structural elements + shores
 """
 
 import ezdxf
@@ -21,22 +24,65 @@ from typing import List, Optional
 
 from src.models.calculation_models import CalculationResult
 from src.models.pipeline_models import ClassifiedElement, ElementType
+from src.models.shore import SupportType
 
 logger = logging.getLogger(__name__)
 
-# Shore symbol sizes (matching run_cvs_cob.py)
+# Shore symbol sizes
 BEAM_SHORE_RADIUS = 0.05     # m — circle radius for beam shores
 SLAB_SHORE_HALF = 0.05       # m — half-side of square for slab shores
+TOWER_HALF = 0.10            # m — towers drawn larger than telescopic shores
 TEXT_HEIGHT = 0.10            # m
 
-# AutoCAD color indices
+# AutoCAD color indices for structural geometry
 COLOR_PILLARS = 1       # Red
 COLOR_BEAMS = 5         # Blue
 COLOR_SLABS = 7         # White
-COLOR_BEAM_SHORES = 6   # Magenta
-COLOR_SLAB_SHORES = 3   # Green
-COLOR_TEXT = 8           # Gray
-COLOR_INFO = 4           # Cyan
+COLOR_TEXT = 8          # Gray
+COLOR_INFO = 4          # Cyan
+
+# Color map calibrated on Supplier-authored DXFs (input/supplier/*.dxf).
+# Falls back to a deterministic hash when an unknown model appears so layers
+# always have *some* color and never collide with the "0" default.
+SUPPLIER_LAYER_COLORS = {
+    "ESC310_Viga": 5,    "ESC310_Laje": 5,
+    "ESC360_Viga": 96,   "ESC360_Laje": 96,
+    "ESC450_Viga": 1,    "ESC450_Laje": 1,
+    "ESC360-CRUZ": 96,   "ESC450-CRUZ": 1,
+    "TORRE_VIGA": 7,     "TORRE_LAJE": 7,
+    "VM50_Viga": 6,      "VM50_Laje": 6,
+    "VM80_Viga": 1,      "VM80_Laje": 1,
+    "VM130_Viga": 170,   "VM130_Laje": 170,
+    "ALU14_Viga": 132,   "ALU14_Laje": 132,
+    "Tirante": 82,       "Tirante_Viga": 5,
+    "Trav-Pilar": 7,     "Listamat": 7,
+}
+
+
+def _layer_color(name: str) -> int:
+    """Return the calibrated color for a known Supplier layer or a stable hash."""
+    if name in SUPPLIER_LAYER_COLORS:
+        return SUPPLIER_LAYER_COLORS[name]
+    # Deterministic 1-255 (0 = ByBlock, never use)
+    return (sum(ord(c) for c in name) % 254) + 1
+
+
+def _ensure_layer(doc, name: str, color: Optional[int] = None) -> None:
+    if name not in doc.layers:
+        doc.layers.add(name, color=color if color is not None else _layer_color(name))
+
+
+def _shore_layer_name(positioned_shore, target: str) -> str:
+    """Map a PositionedShore + target ('Viga'|'Laje') to its Supplier layer.
+
+    target='Viga' for shores under beams, 'Laje' for shores under slabs.
+    Towers collapse to TORRE_VIGA / TORRE_LAJE regardless of model since
+    that's how Supplier engineers organize them in real projects.
+    """
+    if getattr(positioned_shore, "support_type", None) == SupportType.TOWER:
+        return f"TORRE_{target.upper()}"
+    model_id = positioned_shore.shore.id  # e.g. "ESC310"
+    return f"{model_id}_{target}"
 
 
 def generate_dxf(
@@ -68,21 +114,12 @@ def generate_dxf(
 
     msp = doc.modelspace()
 
-    # Create layers
-    if "PILARES" not in doc.layers:
-        doc.layers.add("PILARES", color=COLOR_PILLARS)
-    if "VIGAS" not in doc.layers:
-        doc.layers.add("VIGAS", color=COLOR_BEAMS)
-    if "LAJES" not in doc.layers:
-        doc.layers.add("LAJES", color=COLOR_SLABS)
-    if "ESCORAS_VIGAS" not in doc.layers:
-        doc.layers.add("ESCORAS_VIGAS", color=COLOR_BEAM_SHORES)
-    if "ESCORAS_LAJES" not in doc.layers:
-        doc.layers.add("ESCORAS_LAJES", color=COLOR_SLAB_SHORES)
-    if "TEXTO" not in doc.layers:
-        doc.layers.add("TEXTO", color=COLOR_TEXT)
-    if "INFO" not in doc.layers:
-        doc.layers.add("INFO", color=COLOR_INFO)
+    # Structural geometry layers (always present, Supplier uses these names too)
+    _ensure_layer(doc, "PILARES", COLOR_PILLARS)
+    _ensure_layer(doc, "VIGAS", COLOR_BEAMS)
+    _ensure_layer(doc, "LAJES", COLOR_SLABS)
+    _ensure_layer(doc, "TEXTO", COLOR_TEXT)
+    _ensure_layer(doc, "INFO", COLOR_INFO)
 
     beam_shore_count = 0
     slab_shore_count = 0
@@ -92,7 +129,7 @@ def generate_dxf(
         _draw_pillars(msp, [e for e in elements if e.element_type == ElementType.PILLAR])
         _draw_beams(msp, [e for e in elements if e.element_type == ElementType.BEAM])
 
-    # Draw beam shores — circles (magenta)
+    # Draw beam shores — Supplier naming: ESC{model}_Viga / TORRE_VIGA
     for br in calc.beam_results:
         beam = br.beam
 
@@ -101,14 +138,32 @@ def generate_dxf(
             _draw_beam_rect(msp, beam)
 
         for s in br.shores:
-            msp.add_circle(
-                center=(s.x, s.y),
-                radius=BEAM_SHORE_RADIUS,
-                dxfattribs={"layer": "ESCORAS_VIGAS"},
-            )
+            layer = _shore_layer_name(s, "Viga")
+            _ensure_layer(doc, layer)
+            is_tower = getattr(s, "support_type", None) == SupportType.TOWER
+            if is_tower:
+                _draw_tower_marker(msp, s.x, s.y, layer)
+            else:
+                msp.add_circle(
+                    center=(s.x, s.y),
+                    radius=BEAM_SHORE_RADIUS,
+                    dxfattribs={"layer": layer},
+                )
             beam_shore_count += 1
 
-    # Draw slab shores — squares (green) + slab outlines
+        # Distribution beam under this beam? Draw a thin line on VM*_Viga.
+        for s in br.shores:
+            db = getattr(s, "distribution_beam", None)
+            if db is None:
+                continue
+            vm_layer = f"{db.id.split('-')[1] if '-' in db.id else db.id}_Viga"
+            # Catalog ids look like "VD-VM130-410"; collapse to "VM130_Viga".
+            if "VM" in db.id:
+                vm_token = next((t for t in db.id.split("-") if t.startswith("VM")), db.id)
+                vm_layer = f"{vm_token}_Viga"
+            _ensure_layer(doc, vm_layer)
+
+    # Draw slab shores — Supplier naming: ESC{model}_Laje / TORRE_LAJE
     for sr in calc.slab_results:
         # Slab outline
         if hasattr(sr.polygon, "exterior"):
@@ -119,9 +174,14 @@ def generate_dxf(
                 dxfattribs={"layer": "LAJES"},
             )
 
-        # Shore positions as 10x10cm squares
         for s in sr.shores:
-            _draw_slab_shore(msp, s.x, s.y)
+            layer = _shore_layer_name(s, "Laje")
+            _ensure_layer(doc, layer)
+            is_tower = getattr(s, "support_type", None) == SupportType.TOWER
+            if is_tower:
+                _draw_tower_marker(msp, s.x, s.y, layer)
+            else:
+                _draw_slab_shore(msp, s.x, s.y, layer)
             slab_shore_count += 1
 
         # Info label at slab center
@@ -219,12 +279,29 @@ def _draw_beam_rect(msp, beam: ClassifiedElement):
         ).set_placement((mid_x - 0.15, mid_y + hw + 0.05))
 
 
-def _draw_slab_shore(msp, x: float, y: float):
-    """Draw a slab shore symbol as a 10x10cm square."""
+def _draw_slab_shore(msp, x: float, y: float, layer: str):
+    """Draw a slab shore symbol as a 10x10cm square on the given layer."""
     s = SLAB_SHORE_HALF
     msp.add_lwpolyline(
         [(x - s, y - s), (x + s, y - s),
          (x + s, y + s), (x - s, y + s)],
         close=True,
-        dxfattribs={"layer": "ESCORAS_LAJES"},
+        dxfattribs={"layer": layer},
     )
+
+
+def _draw_tower_marker(msp, x: float, y: float, layer: str):
+    """Draw a tower footprint as a 20x20cm square with a diagonal cross.
+
+    Mirrors the way Supplier engineers symbolize tower bases — a larger filled
+    square with an X to distinguish it from telescopic shore circles.
+    """
+    s = TOWER_HALF
+    msp.add_lwpolyline(
+        [(x - s, y - s), (x + s, y - s),
+         (x + s, y + s), (x - s, y + s)],
+        close=True,
+        dxfattribs={"layer": layer},
+    )
+    msp.add_line((x - s, y - s), (x + s, y + s), dxfattribs={"layer": layer})
+    msp.add_line((x - s, y + s), (x + s, y - s), dxfattribs={"layer": layer})
