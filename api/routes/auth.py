@@ -64,7 +64,7 @@ class LoginResponse(BaseModel):
 
 @router.post("/login", response_model=LoginResponse)
 async def login(body: LoginRequest):
-    user = authenticate_user(body.username, body.password)
+    user = authenticate_user(body.username.strip().lower(), body.password)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -101,6 +101,9 @@ async def signup(body: SignupRequest):
         raise HTTPException(status_code=400, detail="Nome, email e senha são obrigatórios")
     if len(body.password) < 6:
         raise HTTPException(status_code=400, detail="A senha precisa ter ao menos 6 caracteres")
+    import re
+    if not re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", body.email.strip()):
+        raise HTTPException(status_code=400, detail="Email inválido")
     user = create_user(
         name=body.name,
         email=body.email,

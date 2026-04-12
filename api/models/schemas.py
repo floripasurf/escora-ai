@@ -44,6 +44,7 @@ class JobStatusResponse(BaseModel):
     slabs: Optional[List[SlabResult]] = None
     warnings: Optional[List[str]] = None
     has_output_dxf: bool = False
+    has_dwg: bool = False
     has_csv: bool = False
     has_ifc: bool = False
     has_relatorio: bool = False

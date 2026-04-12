@@ -51,7 +51,7 @@ def process_dxf(
     stem_base = Path(input_path).stem
     output_dxf = str(output_dir / f"{stem_base}_escoras{output_suffix}.dxf")
 
-    _generate_output_dxf(input_path, calc, output_dxf)
+    _generate_output_dxf(input_path, calc, output_dxf, scale=result.scale)
 
     # Build results summary
     beam_results = []
@@ -82,6 +82,20 @@ def process_dxf(
     pillar_count = 0
     for level in result.levels:
         pillar_count += sum(1 for e in level.elements if e.element_type == ElementType.PILLAR)
+
+    # Generate DWG from the DXF (requires ODA File Converter)
+    dwg_path: Optional[str] = None
+    try:
+        from ezdxf.addons import odafc
+        if odafc.is_installed():
+            dwg_candidate = str(output_dir / f"{stem_base}_escoras{output_suffix}.dwg")
+            odafc.export_dwg(ezdxf.readfile(output_dxf), dwg_candidate)
+            dwg_path = dwg_candidate
+            logger.info(f"Generated DWG: {dwg_path}")
+        else:
+            logger.debug("ODA File Converter not installed — DWG export skipped")
+    except Exception as e:
+        logger.debug(f"DWG conversion skipped: {e}")
 
     # Generate BOM CSV
     csv_path = str(output_dir / f"{stem_base}_BOM{output_suffix}.csv")
@@ -134,6 +148,7 @@ def process_dxf(
         "slabs": slab_results,
         "warnings": result.warnings[:20],  # Limit warnings
         "output_dxf_path": output_dxf,
+        "dwg_path": dwg_path,
         "csv_path": csv_path,
         "ifc_path": ifc_path,
         **pdf_paths,
@@ -246,7 +261,7 @@ def _generate_bom_csv(calc, output_path: str):
         writer.writerows(rows)
 
 
-def _generate_output_dxf(input_path: str, calc, output_path: str):
+def _generate_output_dxf(input_path: str, calc, output_path: str, scale: float = 1.0):
     """Overlay shores onto the original DXF using Supplier layer naming.
 
     Symbology (Supplier convention):
@@ -258,6 +273,10 @@ def _generate_output_dxf(input_path: str, calc, output_path: str):
       centerline). Towers under those rails are nudged perpendicular to the
       beam axis so they sit on the rails, not on the concrete centerline.
     - Slab VM rails — each row gets a thin rectangle (paired lines).
+
+    All internal coordinates (shore positions, beam geometry) are in meters.
+    We convert back to DXF units using inv_scale = 1/scale so entities overlay
+    correctly on the original drawing.
     """
     import math
     from src.output.dxf_generator import _ensure_layer, _shore_layer_name
@@ -271,7 +290,7 @@ def _generate_output_dxf(input_path: str, calc, output_path: str):
 
     _ensure_layer(doc, "INFO_ESCORAS", 5)
 
-    inv_scale = 1.0  # input DXF is in meters at 1:1
+    inv_scale = 1.0 / scale if scale > 0 else 1.0
     SHORE_HEX_RADIUS = 0.15 * inv_scale
     SHORE_LABEL_HEIGHT = 0.20 * inv_scale
     SHORE_LABEL_OFFSET = 0.18 * inv_scale
@@ -279,6 +298,10 @@ def _generate_output_dxf(input_path: str, calc, output_path: str):
     TOWER_INNER = 0.14 * inv_scale
     TOWER_TICK = 0.08 * inv_scale
     SLAB_RAIL_HALF = 0.04 * inv_scale
+
+    def _dx(v):
+        """Convert a meters-coordinate to DXF units."""
+        return v * inv_scale
 
     def _hex_points(cx, cy, r):
         return [
@@ -340,18 +363,19 @@ def _generate_output_dxf(input_path: str, calc, output_path: str):
             for shore in br.shores:
                 layer = _shore_layer_name(shore, "Viga")
                 _ensure_layer(doc, layer)
+                sx, sy = _dx(shore.x), _dx(shore.y)
                 if getattr(shore, "support_type", None) == SupportType.TOWER:
-                    _draw_tower(shore.x, shore.y, layer)
+                    _draw_tower(sx, sy, layer)
                 else:
                     label = ""
                     if shore.shore.id not in seen_models:
                         seen_models.add(shore.shore.id)
                         label = shore.shore.id
-                    _draw_telescopic(shore.x, shore.y, layer, label)
+                    _draw_telescopic(sx, sy, layer, label)
             continue
 
-        ax, ay = beam.geometry[0]
-        bx, by = beam.geometry[1]
+        ax, ay = _dx(beam.geometry[0][0]), _dx(beam.geometry[0][1])
+        bx, by = _dx(beam.geometry[1][0]), _dx(beam.geometry[1][1])
         length = math.hypot(bx - ax, by - ay) or 1.0
         ux, uy = (bx - ax) / length, (by - ay) / length
         nx, ny = -uy, ux
@@ -385,8 +409,8 @@ def _generate_output_dxf(input_path: str, calc, output_path: str):
             layer = _shore_layer_name(shore, "Viga")
             _ensure_layer(doc, layer)
             side = 1 if (idx % 2 == 0) else -1
-            cx = shore.x + nx * offset * side
-            cy = shore.y + ny * offset * side
+            cx = _dx(shore.x) + nx * offset * side
+            cy = _dx(shore.y) + ny * offset * side
             _draw_tower(cx, cy, layer)
 
         # Draw VM50 travamento (lateral bracing) perpendicular to beam axis
@@ -395,16 +419,17 @@ def _generate_output_dxf(input_path: str, calc, output_path: str):
         if len(telescopic_shores) >= 2:
             vm50_layer = "VM50_Viga"
             _ensure_layer(doc, vm50_layer, 6)
-            sorted_tel = sorted(telescopic_shores, key=lambda s: s.x * ux + s.y * uy)
+            sorted_tel = sorted(telescopic_shores, key=lambda s: _dx(s.x) * ux + _dx(s.y) * uy)
             for si in range(len(sorted_tel) - 1):
                 s1, s2 = sorted_tel[si], sorted_tel[si + 1]
                 # Short perpendicular VM50 lines at shore positions
                 trav_half = 0.20 * inv_scale
                 for s in (s1, s2):
-                    tx0 = s.x - nx * trav_half
-                    ty0 = s.y - ny * trav_half
-                    tx1 = s.x + nx * trav_half
-                    ty1 = s.y + ny * trav_half
+                    sx, sy = _dx(s.x), _dx(s.y)
+                    tx0 = sx - nx * trav_half
+                    ty0 = sy - ny * trav_half
+                    tx1 = sx + nx * trav_half
+                    ty1 = sy + ny * trav_half
                     msp.add_line((tx0, ty0), (tx1, ty1),
                                  dxfattribs={"layer": vm50_layer})
 
@@ -416,7 +441,7 @@ def _generate_output_dxf(input_path: str, calc, output_path: str):
             if shore.shore.id not in seen_models:
                 seen_models.add(shore.shore.id)
                 label = shore.shore.id
-            _draw_telescopic(shore.x, shore.y, layer, label)
+            _draw_telescopic(_dx(shore.x), _dx(shore.y), layer, label)
 
     # ----- Slab loop ----------------------------------------------------
     for sr in calc.slab_results:
@@ -441,9 +466,9 @@ def _generate_output_dxf(input_path: str, calc, output_path: str):
                 if len(row_shores) < 2:
                     continue
                 row_shores.sort(key=lambda s: s.x)
-                x0 = row_shores[0].x
-                x1 = row_shores[-1].x
-                y = key
+                x0 = _dx(row_shores[0].x)
+                x1 = _dx(row_shores[-1].x)
+                y = _dx(key)
                 # Two parallel lines (a thin rectangle along the row)
                 msp.add_line(
                     (x0, y - SLAB_RAIL_HALF), (x1, y - SLAB_RAIL_HALF),
@@ -471,29 +496,30 @@ def _generate_output_dxf(input_path: str, calc, output_path: str):
                 for ci in range(len(col_shores) - 1):
                     s1, s2 = col_shores[ci], col_shores[ci + 1]
                     msp.add_line(
-                        (s1.x, s1.y), (s2.x, s2.y),
+                        (_dx(s1.x), _dx(s1.y)), (_dx(s2.x), _dx(s2.y)),
                         dxfattribs={"layer": vm50_slab_layer},
                     )
 
         for shore in sr.shores:
             layer = _shore_layer_name(shore, "Laje")
             _ensure_layer(doc, layer)
+            sx, sy = _dx(shore.x), _dx(shore.y)
             if getattr(shore, "support_type", None) == SupportType.TOWER:
-                _draw_tower(shore.x, shore.y, layer)
+                _draw_tower(sx, sy, layer)
             else:
                 label = ""
                 if shore.shore.id not in seen_models:
                     seen_models.add(shore.shore.id)
                     label = shore.shore.id
-                _draw_telescopic(shore.x, shore.y, layer, label)
+                _draw_telescopic(sx, sy, layer, label)
 
     # ----- Summary text + small legend ----------------------------------
     total_beam = sum(br.shore_count for br in calc.beam_results)
     total_slab = sum(len(sr.shores) for sr in calc.slab_results)
     all_pts = [p for br in calc.beam_results for p in br.beam.geometry]
     if all_pts:
-        min_x = min(p[0] for p in all_pts)
-        max_y = max(p[1] for p in all_pts)
+        min_x = _dx(min(p[0] for p in all_pts))
+        max_y = _dx(max(p[1] for p in all_pts))
         info = (
             f"ESCORA.AI — {len(calc.beam_results)} vigas ({total_beam} esc.), "
             f"{len(calc.slab_results)} lajes ({total_slab} esc.), total={total_beam + total_slab}"
