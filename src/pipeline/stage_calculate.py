@@ -633,12 +633,11 @@ def run_calculation(
             f"{len(slab_polygons)} total after merge"
         )
 
-    # Tier 2: Extended beam axes (when beam grid produces too few slabs)
-    MIN_SLAB_PANELS = 3
-    beams_vs_slabs_mismatch = (
-        len(valid_beams) >= 5 and len(slab_polygons) < len(valid_beams) * 0.3
-    )
-    if (len(slab_polygons) < MIN_SLAB_PANELS or beams_vs_slabs_mismatch) and beam_layer_segments:
+    # Tier 2: Extended beam axes — always run when beam segments exist.
+    # merge_slab_sources deduplicates overlapping panels, so running Tier 2
+    # unconditionally is safe and catches regions where beam pairs are sparse
+    # (e.g. single-line beams in the center section of 110749).
+    if beam_layer_segments:
         from src.parser.segment_classifier import find_beam_candidates
         all_candidates = find_beam_candidates(beam_layer_segments)
         if all_candidates:

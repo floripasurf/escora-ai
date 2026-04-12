@@ -62,6 +62,7 @@ def _pipeline_worker(job_id: str) -> None:
             status="done",
             results_data=results,
             output_dxf_path=results.get("output_dxf_path"),
+            dwg_path=results.get("dwg_path"),
             csv_path=results.get("csv_path"),
             ifc_path=results.get("ifc_path"),
         )
@@ -219,6 +220,7 @@ async def get_status(
             "beams": results.get("beams"),
             "slabs": results.get("slabs"),
             "warnings": results.get("warnings"),
+            "has_dwg": job.get("dwg_path") is not None,
         })
 
     revision = job.get("revision_data")
@@ -248,6 +250,30 @@ async def download_dxf(
     return FileResponse(
         output_path,
         media_type="application/dxf",
+        filename=filename,
+    )
+
+
+@router.get("/{job_id}/download/dwg")
+async def download_dwg(
+    job_id: str,
+    branch: Branch = Depends(get_current_branch),
+):
+    """Download the output DWG (converted from DXF via ODA File Converter)."""
+    job = job_service.get_job(job_id, branch_id=branch.id)
+    if not job:
+        raise HTTPException(404, "Job nao encontrado")
+    if job["status"] != "done":
+        raise HTTPException(400, "Processamento ainda nao concluido")
+
+    dwg_path = job.get("dwg_path")
+    if not dwg_path or not Path(dwg_path).exists():
+        raise HTTPException(404, "Arquivo DWG nao disponivel — ODA File Converter nao instalado no servidor")
+
+    filename = Path(job["filename"]).stem + "_escoras.dwg"
+    return FileResponse(
+        dwg_path,
+        media_type="application/acad",
         filename=filename,
     )
 

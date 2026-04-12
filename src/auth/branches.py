@@ -50,11 +50,22 @@ def _sessions_db_path() -> Path:
     return root / "sessions.db"
 
 
+_session_conn_cache: Optional[sqlite3.Connection] = None
+
+
 def _session_conn() -> sqlite3.Connection:
+    global _session_conn_cache
+    if _session_conn_cache is not None:
+        try:
+            _session_conn_cache.execute("SELECT 1")
+            return _session_conn_cache
+        except Exception:
+            _session_conn_cache = None
     path = _sessions_db_path()
     conn = sqlite3.connect(str(path), isolation_level=None, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
+    _session_conn_cache = conn
     return conn
 
 
@@ -185,7 +196,11 @@ def authenticate_user(username: str, password: str) -> Optional[User]:
     return None
 
 
+_session_create_counter = 0
+
+
 def create_session(user: User) -> str:
+    global _session_create_counter
     init_sessions_db()
     token = secrets.token_urlsafe(32)
     expires_at = time.time() + SESSION_TTL_SECONDS
@@ -194,6 +209,9 @@ def create_session(user: User) -> str:
             "INSERT OR REPLACE INTO sessions (token, username, locadora_id, expires_at) VALUES (?, ?, ?, ?)",
             (token, user.username, user.locadora_id, expires_at),
         )
+    _session_create_counter += 1
+    if _session_create_counter % 100 == 0:
+        purge_expired_sessions()
     return token
 
 
@@ -225,6 +243,18 @@ def revoke_session(token: str) -> None:
         logger.warning(f"Failed to revoke session: {e}")
 
 
+def purge_expired_sessions() -> int:
+    """Remove all expired sessions. Returns count deleted."""
+    try:
+        init_sessions_db()
+        now = time.time()
+        with _session_lock, _session_conn() as conn:
+            cursor = conn.execute("DELETE FROM sessions WHERE expires_at < ?", (now,))
+            return cursor.rowcount
+    except Exception:
+        return 0
+
+
 def clear_sessions() -> None:
     """Test helper: wipe all sessions."""
     try:
@@ -233,6 +263,13 @@ def clear_sessions() -> None:
             conn.execute("DELETE FROM sessions")
     except Exception:
         pass
+
+
+import re
+import fcntl
+
+_EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+_create_user_lock = threading.Lock()
 
 
 def create_user(
@@ -246,47 +283,63 @@ def create_user(
 
     Returns the User on success, None if the email is already taken.
     Writes to the same locadoras JSON file used by the rest of the system.
+    Thread-safe: uses both a threading lock and file-level locking.
     """
     if not password or len(password) < 6:
         return None
-    path = _locadoras_path()
-    if not path.exists():
-        data = {"version": 1, "locadoras": []}
-    else:
-        data = json.loads(path.read_text(encoding="utf-8"))
+    email = email.strip().lower()
+    if not _EMAIL_RE.match(email):
+        return None
 
-    # Check uniqueness (email = username)
-    for entry in data.get("locadoras", []):
-        for u in entry.get("users", []):
-            if u["username"] == email:
-                return None
+    with _create_user_lock:
+        path = _locadoras_path()
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            data = {"version": 1, "locadoras": []}
+        else:
+            data = json.loads(path.read_text(encoding="utf-8"))
 
-    # Slugify company name for IDs
-    slug = email.split("@")[0].lower().replace(" ", "-")
-    loc_id = f"loc-{slug}"
-    branch_id = f"{loc_id}-default"
+        # Check uniqueness (email = username)
+        for entry in data.get("locadoras", []):
+            for u in entry.get("users", []):
+                if u["username"] == email:
+                    return None
 
-    new_locadora = {
-        "id": loc_id,
-        "name": company or name,
-        "branches": [
-            {
-                "id": branch_id,
-                "branch_name": "Sede",
-                "inventory_name": "default",
-            }
-        ],
-        "users": [
-            {
-                "username": email,
-                "name": name,
-                "password_hash": hash_password(password),
-                "phone": phone,
-            }
-        ],
-    }
-    data["locadoras"].append(new_locadora)
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        # Slugify for IDs
+        slug = re.sub(r"[^a-z0-9-]", "-", email.split("@")[0].lower())
+        loc_id = f"loc-{slug}"
+        branch_id = f"{loc_id}-default"
+
+        new_locadora = {
+            "id": loc_id,
+            "name": company or name,
+            "branches": [
+                {
+                    "id": branch_id,
+                    "branch_name": "Sede",
+                    "inventory_name": "default",
+                }
+            ],
+            "users": [
+                {
+                    "username": email,
+                    "name": name,
+                    "password_hash": hash_password(password),
+                    "phone": phone,
+                }
+            ],
+        }
+        data["locadoras"].append(new_locadora)
+
+        # Atomic write with file lock to prevent race conditions
+        tmp_path = path.with_suffix(".tmp")
+        content = json.dumps(data, indent=2, ensure_ascii=False)
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        tmp_path.replace(path)
 
     return User(
         username=email,

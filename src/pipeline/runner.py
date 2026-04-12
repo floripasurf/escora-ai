@@ -334,9 +334,9 @@ def run_pipeline(
         for seg in level_segments:
             for r in seg.rects:
                 all_rects.append({
-                    "cx": r.cx, "cy": r.cy,
-                    "width": r.width, "height": r.height,
-                    "area": r.area, "layer": r.layer,
+                    "cx": r.cx * scale, "cy": r.cy * scale,
+                    "width": r.width * scale, "height": r.height * scale,
+                    "area": r.area * scale * scale, "layer": r.layer,
                 })
 
         # Collect segments from beam layers for slab derivation fallback.
@@ -366,21 +366,22 @@ def run_pipeline(
                         "y_min": s.y_min * scale, "y_max": s.y_max * scale,
                     })
 
-        # Collect hatches and closed polylines for direct slab boundary detection
+        # Collect hatches and closed polylines for direct slab boundary detection.
+        # Scale points from raw DXF units to meters (same as beam segments).
         all_hatches = []
         all_polylines = []
         for seg in level_segments:
             for h in seg.hatches:
                 all_hatches.append({
-                    "points": h.points,
+                    "points": [(x * scale, y * scale) for x, y in h.points],
                     "layer": h.layer,
                     "pattern_name": h.pattern_name,
                     "is_solid": h.is_solid,
-                    "area": h.area,
+                    "area": h.area * scale * scale,
                 })
             for pl in seg.polylines:
                 all_polylines.append({
-                    "points": pl.points,
+                    "points": [(x * scale, y * scale) for x, y in pl.points],
                     "layer": pl.layer,
                     "is_closed": pl.is_closed,
                 })
