@@ -445,3 +445,249 @@ def _polygon_to_xy(polygon) -> List[Tuple[float, float]]:
     if len(cleaned) >= 2 and cleaned[0] == cleaned[-1]:
         cleaned = cleaned[:-1]
     return cleaned
+
+
+# -------- Masonry IFC export --------------------------------------------------
+
+def generate_masonry_ifc(
+    project: 'MasonryProject',
+    output_path: str,
+    project_name: Optional[str] = None,
+) -> str:
+    """Write an IFC4 file for a masonry structural project.
+
+    Creates IfcWall, IfcSlab, IfcDoor, IfcWindow, and IfcFooting entities
+    from the masonry project model.
+
+    Args:
+        project: Complete masonry project with floor plans and foundations.
+        output_path: Destination .ifc path.
+        project_name: Optional project name.
+
+    Returns the output path on success.
+    """
+    from src.models.masonry import MasonryProject, FoundationType
+
+    input_data = project.input
+    stem = project_name or f"Alvenaria_{input_data.bedrooms}q_{int(input_data.target_area_m2)}m2"
+
+    # 1. Bootstrap IFC4 file
+    ifc = ifcopenshell.api.run("project.create_file", version="IFC4")
+    ifc_project = _run("root.create_entity", ifc, ifc_class="IfcProject", name=f"Estrutura.AI — {stem}")
+    _run("unit.assign_unit", ifc, length={"is_metric": True, "raw": "METERS"})
+
+    model_context = _run("context.add_context", ifc, context_type="Model")
+    body_context = _run(
+        "context.add_context", ifc,
+        context_type="Model", context_identifier="Body",
+        target_view="MODEL_VIEW", parent=model_context,
+    )
+
+    # Spatial structure
+    site = _run("root.create_entity", ifc, ifc_class="IfcSite", name="Terreno")
+    building = _run("root.create_entity", ifc, ifc_class="IfcBuilding", name="Residência")
+    storey = _run("root.create_entity", ifc, ifc_class="IfcBuildingStorey", name="Térreo")
+    _run("aggregate.assign_object", ifc, relating_object=ifc_project, products=[site])
+    _run("aggregate.assign_object", ifc, relating_object=site, products=[building])
+    _run("aggregate.assign_object", ifc, relating_object=building, products=[storey])
+
+    storey_placement = storey.ObjectPlacement
+    created = {"walls": 0, "doors": 0, "windows": 0, "slabs": 0, "footings": 0}
+
+    # 2. Walls
+    for fp in project.floor_plans:
+        for wall in fp.walls:
+            try:
+                # Wall as extruded rectangle along its axis
+                dx = wall.end[0] - wall.start[0]
+                dy = wall.end[1] - wall.start[1]
+                length = (dx**2 + dy**2) ** 0.5
+                if length <= 0:
+                    continue
+
+                angle = math.atan2(dy, dx)
+                profile = _rect_profile(ifc, wall.thickness_m, wall.height_m, name=f"Wall_{wall.id}")
+
+                # Wall local coordinate system:
+                #   local Z = along wall axis (extrusion direction)
+                #   local X = global Z (so height points up)
+                local_z = (math.cos(angle), math.sin(angle), 0.0)
+                local_x = (0.0, 0.0, 1.0)
+                placement_3d = ifc.createIfcAxis2Placement3D(
+                    _point3d(ifc, (wall.start[0], wall.start[1], 0.0)),
+                    _dir3d(ifc, local_z),
+                    _dir3d(ifc, local_x),
+                )
+                local_pl = ifc.createIfcLocalPlacement(storey_placement, placement_3d)
+
+                solid = ifc.createIfcExtrudedAreaSolid(
+                    profile,
+                    _axis2_placement_3d(ifc),
+                    _dir3d(ifc, (0.0, 0.0, 1.0)),
+                    float(length),
+                )
+
+                ifc_wall = _run(
+                    "root.create_entity", ifc,
+                    ifc_class="IfcWall", name=f"Parede {wall.id}",
+                )
+                ifc_wall.PredefinedType = "STANDARD"
+                ifc_wall.ObjectPlacement = local_pl
+                _assign_product_representation(ifc, ifc_wall, body_context, solid)
+                _run("spatial.assign_container", ifc, relating_structure=storey, products=[ifc_wall])
+                created["walls"] += 1
+
+                # 3. Openings (doors and windows) on this wall
+                for oi, opening in enumerate(wall.openings):
+                    try:
+                        op_profile = _rect_profile(
+                            ifc, wall.thickness_m * 1.1, opening.height_m,
+                            name=f"Opening_{wall.id}_{oi}",
+                        )
+                        op_solid = ifc.createIfcExtrudedAreaSolid(
+                            op_profile,
+                            _axis2_placement_3d(ifc),
+                            _dir3d(ifc, (0.0, 0.0, 1.0)),
+                            float(opening.width_m),
+                        )
+
+                        # Position along the wall
+                        op_placement_3d = ifc.createIfcAxis2Placement3D(
+                            _point3d(ifc, (0.0, opening.sill_height_m, opening.position_m)),
+                            _dir3d(ifc, (0.0, 0.0, 1.0)),
+                            _dir3d(ifc, (1.0, 0.0, 0.0)),
+                        )
+                        op_local_pl = ifc.createIfcLocalPlacement(local_pl, op_placement_3d)
+
+                        if opening.type.value == "door":
+                            entity = _run(
+                                "root.create_entity", ifc,
+                                ifc_class="IfcDoor", name=f"Porta {wall.id}",
+                            )
+                            entity.OverallHeight = float(opening.height_m)
+                            entity.OverallWidth = float(opening.width_m)
+                            created["doors"] += 1
+                        else:
+                            entity = _run(
+                                "root.create_entity", ifc,
+                                ifc_class="IfcWindow", name=f"Janela {wall.id}",
+                            )
+                            entity.OverallHeight = float(opening.height_m)
+                            entity.OverallWidth = float(opening.width_m)
+                            created["windows"] += 1
+
+                        entity.ObjectPlacement = op_local_pl
+                        _assign_product_representation(ifc, entity, body_context, op_solid)
+                        _run("spatial.assign_container", ifc, relating_structure=storey, products=[entity])
+
+                    except Exception as exc:
+                        logger.warning(f"IFC masonry: skipping opening {oi} on {wall.id}: {exc}")
+
+            except Exception as exc:
+                logger.warning(f"IFC masonry: skipping wall {wall.id}: {exc}")
+
+    # 4. Floor slab (simple rectangle)
+    for fp in project.floor_plans:
+        try:
+            slab_pts = [
+                (0.0, 0.0),
+                (fp.width_m, 0.0),
+                (fp.width_m, fp.depth_m),
+                (0.0, fp.depth_m),
+            ]
+            slab_profile = _arbitrary_profile(ifc, slab_pts, name="FloorSlab")
+            slab_thickness = 0.10  # 10cm floor slab
+            slab_solid = _extruded_solid(ifc, slab_profile, depth_m=slab_thickness)
+
+            ifc_slab = _run(
+                "root.create_entity", ifc,
+                ifc_class="IfcSlab", name="Piso Térreo",
+            )
+            ifc_slab.PredefinedType = "FLOOR"
+            ifc_slab.ObjectPlacement = _local_placement(ifc, storey_placement, (0.0, 0.0, -slab_thickness))
+            _assign_product_representation(ifc, ifc_slab, body_context, slab_solid)
+            _run("spatial.assign_container", ifc, relating_structure=storey, products=[ifc_slab])
+            created["slabs"] += 1
+        except Exception as exc:
+            logger.warning(f"IFC masonry: skipping floor slab: {exc}")
+
+    # 5. Foundations
+    for foundation in project.foundations:
+        try:
+            if foundation.type == FoundationType.SAPATA_CORRIDA:
+                # Sapata corrida under all structural walls
+                for fp in project.floor_plans:
+                    for wall in fp.walls:
+                        if not wall.is_structural:
+                            continue
+                        dx = wall.end[0] - wall.start[0]
+                        dy = wall.end[1] - wall.start[1]
+                        length = (dx**2 + dy**2) ** 0.5
+                        if length <= 0:
+                            continue
+
+                        f_profile = _rect_profile(
+                            ifc, foundation.width_m, foundation.height_m,
+                            name="SapataSection",
+                        )
+                        angle = math.atan2(dy, dx)
+                        f_z = (math.cos(angle), math.sin(angle), 0.0)
+                        f_x = (0.0, 0.0, 1.0)
+                        f_placement_3d = ifc.createIfcAxis2Placement3D(
+                            _point3d(ifc, (wall.start[0], wall.start[1], -foundation.depth_m)),
+                            _dir3d(ifc, f_z),
+                            _dir3d(ifc, f_x),
+                        )
+                        f_local_pl = ifc.createIfcLocalPlacement(storey_placement, f_placement_3d)
+                        f_solid = ifc.createIfcExtrudedAreaSolid(
+                            f_profile,
+                            _axis2_placement_3d(ifc),
+                            _dir3d(ifc, (0.0, 0.0, 1.0)),
+                            float(length),
+                        )
+                        footing = _run(
+                            "root.create_entity", ifc,
+                            ifc_class="IfcFooting", name=f"Sapata {wall.id}",
+                        )
+                        footing.PredefinedType = "STRIP_FOOTING"
+                        footing.ObjectPlacement = f_local_pl
+                        _assign_product_representation(ifc, footing, body_context, f_solid)
+                        _run("spatial.assign_container", ifc, relating_structure=storey, products=[footing])
+                        created["footings"] += 1
+                break  # Only process first foundation config
+
+            elif foundation.type == FoundationType.RADIER:
+                for fp in project.floor_plans:
+                    r_pts = [
+                        (0.0, 0.0),
+                        (fp.width_m, 0.0),
+                        (fp.width_m, fp.depth_m),
+                        (0.0, fp.depth_m),
+                    ]
+                    r_profile = _arbitrary_profile(ifc, r_pts, name="Radier")
+                    r_solid = _extruded_solid(ifc, r_profile, depth_m=foundation.height_m)
+                    footing = _run(
+                        "root.create_entity", ifc,
+                        ifc_class="IfcFooting", name="Radier",
+                    )
+                    footing.PredefinedType = "PAD_FOOTING"
+                    footing.ObjectPlacement = _local_placement(
+                        ifc, storey_placement, (0.0, 0.0, -foundation.depth_m)
+                    )
+                    _assign_product_representation(ifc, footing, body_context, r_solid)
+                    _run("spatial.assign_container", ifc, relating_structure=storey, products=[footing])
+                    created["footings"] += 1
+                break
+
+        except Exception as exc:
+            logger.warning(f"IFC masonry: skipping foundation: {exc}")
+
+    # 6. Write
+    ifc.write(output_path)
+    logger.info(
+        f"IFC masonry: wrote {output_path} "
+        f"(walls={created['walls']}, doors={created['doors']}, "
+        f"windows={created['windows']}, slabs={created['slabs']}, "
+        f"footings={created['footings']})"
+    )
+    return output_path

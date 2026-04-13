@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>estrutura.app — Projetos de Alvenaria Estrutural</title>
+    <meta name="description" content="Gere projetos completos de alvenaria estrutural para casas MCMV em segundos. DXF, memorial de cálculo e lista de materiais.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300;12..96,400;12..96,500;12..96,600;12..96,700&family=Geist+Mono:wght@400;500&family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg: #0A0A0B; --bg-1: #111114; --bg-2: #17171C; --bg-3: #1E1E25;
+            --fg: #F5F5F7; --fg-dim: #A1A1AA; --fg-mute: #6B6B74;
+            --line: #26262E; --line-soft: #1A1A20;
+            --accent: #CFFF1A; --accent-soft: rgba(207,255,26,0.10); --accent-line: rgba(207,255,26,0.35);
+            --ok: #4ADE80; --err: #F87171; --warn: #FBBF24;
+            --display: "Bricolage Grotesque", -apple-system, sans-serif;
+            --sans: "Geist", -apple-system, BlinkMacSystemFont, sans-serif;
+            --mono: "Geist Mono", "SF Mono", ui-monospace, monospace;
+            --radius: 10px; --radius-sm: 6px;
+        }
+        html { -webkit-font-smoothing: antialiased; }
+        body { font-family: var(--sans); background: var(--bg); color: var(--fg); min-height: 100vh; font-size: 15px; line-height: 1.55; }
+        body::before { content:""; position:fixed; inset:-20% -20% auto -20%; height:70vh; background:radial-gradient(ellipse 60% 50% at 50% 0%,rgba(207,255,26,0.07),transparent 70%); pointer-events:none; z-index:0; }
+        ::selection { background: var(--accent); color: var(--bg); }
+        a { color: inherit; text-decoration: none; }
+
+        /* Header */
+        header { position:sticky; top:0; z-index:100; backdrop-filter:blur(20px); background:rgba(10,10,11,0.85); border-bottom:1px solid var(--line-soft); }
+        .header-inner { max-width:960px; margin:0 auto; padding:14px 24px; display:flex; align-items:center; justify-content:space-between; }
+        .logo { font-family:var(--display); font-weight:700; font-size:20px; letter-spacing:-0.03em; }
+        .logo span { color:var(--accent); }
+        nav a { font-size:13px; color:var(--fg-dim); margin-left:24px; transition:color .2s; }
+        nav a:hover, nav a.active { color:var(--accent); }
+
+        /* Main */
+        main { max-width:720px; margin:0 auto; padding:48px 24px 80px; position:relative; z-index:1; }
+        h1 { font-family:var(--display); font-size:28px; font-weight:600; letter-spacing:-0.03em; margin-bottom:8px; }
+        .subtitle { color:var(--fg-dim); font-size:14px; margin-bottom:32px; }
+
+        /* Steps indicator */
+        .steps { display:flex; gap:4px; margin-bottom:32px; }
+        .step-dot { flex:1; height:3px; border-radius:2px; background:var(--line); transition:background .3s; }
+        .step-dot.active { background:var(--accent); }
+        .step-dot.done { background:var(--ok); }
+
+        /* Form */
+        .form-step { display:none; animation:fadeIn .3s; }
+        .form-step.active { display:block; }
+        @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
+
+        .step-title { font-family:var(--display); font-size:18px; font-weight:600; margin-bottom:4px; }
+        .step-desc { color:var(--fg-mute); font-size:13px; margin-bottom:24px; }
+
+        .field { margin-bottom:20px; }
+        .field label { display:block; font-size:13px; font-weight:500; color:var(--fg-dim); margin-bottom:6px; }
+        .field input, .field select { width:100%; padding:10px 14px; background:var(--bg-2); border:1px solid var(--line); border-radius:var(--radius-sm); color:var(--fg); font-family:var(--sans); font-size:14px; outline:none; transition:border-color .2s; }
+        .field input:focus, .field select:focus { border-color:var(--accent-line); }
+        .field .hint { font-size:11px; color:var(--fg-mute); margin-top:4px; }
+
+        .row { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+        .row-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; }
+
+        /* Radio cards */
+        .radio-group { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+        .radio-card { position:relative; }
+        .radio-card input { position:absolute; opacity:0; }
+        .radio-card label { display:block; padding:14px 16px; background:var(--bg-2); border:1px solid var(--line); border-radius:var(--radius); cursor:pointer; transition:all .2s; }
+        .radio-card input:checked + label { border-color:var(--accent); background:var(--accent-soft); }
+        .radio-card label strong { display:block; font-size:14px; margin-bottom:2px; }
+        .radio-card label span { font-size:12px; color:var(--fg-mute); }
+
+        /* Buttons */
+        .btn-row { display:flex; gap:12px; margin-top:32px; }
+        .btn { padding:10px 24px; border-radius:var(--radius-sm); font-family:var(--sans); font-size:14px; font-weight:500; cursor:pointer; transition:all .2s; border:none; }
+        .btn-primary { background:var(--accent); color:var(--bg); }
+        .btn-primary:hover { filter:brightness(1.1); }
+        .btn-primary:disabled { opacity:.4; cursor:not-allowed; }
+        .btn-secondary { background:var(--bg-2); color:var(--fg-dim); border:1px solid var(--line); }
+        .btn-secondary:hover { border-color:var(--fg-mute); }
+
+        /* Results */
+        #results { display:none; }
+        .result-card { background:var(--bg-1); border:1px solid var(--line); border-radius:var(--radius); padding:24px; margin-bottom:16px; }
+        .result-card h3 { font-family:var(--display); font-size:16px; margin-bottom:12px; }
+        .stat-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:16px; }
+        .stat { background:var(--bg-2); border-radius:var(--radius-sm); padding:12px; }
+        .stat .val { font-family:var(--mono); font-size:20px; font-weight:600; color:var(--accent); }
+        .stat .lbl { font-size:11px; color:var(--fg-mute); margin-top:2px; }
+
+        /* SVG Preview */
+        #preview-svg { width:100%; background:var(--bg-2); border-radius:var(--radius); border:1px solid var(--line); min-height:300px; }
+
+        /* Downloads */
+        .dl-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+        .dl-btn { display:flex; align-items:center; gap:10px; padding:12px 16px; background:var(--bg-2); border:1px solid var(--line); border-radius:var(--radius-sm); cursor:pointer; transition:all .2s; text-decoration:none; color:var(--fg); }
+        .dl-btn:hover { border-color:var(--accent-line); background:var(--accent-soft); }
+        .dl-btn .ext { font-family:var(--mono); font-size:11px; font-weight:500; color:var(--accent); background:rgba(207,255,26,0.15); padding:2px 6px; border-radius:3px; }
+        .dl-btn .name { font-size:13px; }
+
+        /* Loading */
+        .loading { text-align:center; padding:60px 0; }
+        .spinner { width:32px; height:32px; border:3px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite; margin:0 auto 16px; }
+        @keyframes spin { to{transform:rotate(360deg)} }
+
+        /* Warnings */
+        .warnings { margin-top:12px; }
+        .warn-item { font-size:12px; color:var(--warn); padding:4px 0; }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-inner">
+            <a href="/" class="logo">estrutura<span>.app</span></a>
+            <nav>
+                <a href="/">Escoramento</a>
+                <a href="/projetos.html" class="active">Projetos</a>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <h1>Projeto de Alvenaria Estrutural</h1>
+        <p class="subtitle">Gere projetos completos para casas MCMV com planta, cálculos e lista de materiais.</p>
+
+        <!-- Step dots -->
+        <div class="steps" id="step-dots">
+            <div class="step-dot active"></div>
+            <div class="step-dot"></div>
+            <div class="step-dot"></div>
+            <div class="step-dot"></div>
+        </div>
+
+        <!-- STEP 1: Basic info -->
+        <div class="form-step active" id="step-1">
+            <div class="step-title">1. Dados Básicos</div>
+            <div class="step-desc">Defina o programa da casa — quartos, banheiros e área desejada.</div>
+
+            <div class="row">
+                <div class="field">
+                    <label>Quartos</label>
+                    <select id="bedrooms">
+                        <option value="1">1 quarto</option>
+                        <option value="2" selected>2 quartos</option>
+                        <option value="3">3 quartos</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label>Banheiros</label>
+                    <select id="bathrooms">
+                        <option value="1" selected>1 banheiro</option>
+                        <option value="2">2 banheiros</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="field">
+                <label>Área desejada (m²)</label>
+                <input type="range" id="area" min="35" max="80" value="50" oninput="areaVal.textContent=this.value+'m²'">
+                <div class="hint"><span id="areaVal">50m²</span> — MCMV faixa: 40–70m²</div>
+            </div>
+
+            <div class="field">
+                <label>Pavimentos</label>
+                <div class="radio-group">
+                    <div class="radio-card">
+                        <input type="radio" name="floors" id="floor1" value="1" checked>
+                        <label for="floor1"><strong>Térreo</strong><span>1 pavimento</span></label>
+                    </div>
+                    <div class="radio-card">
+                        <input type="radio" name="floors" id="floor2" value="2">
+                        <label for="floor2"><strong>2 Pisos</strong><span>Térreo + superior</span></label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="field">
+                <label>Layout</label>
+                <div class="radio-group">
+                    <div class="radio-card">
+                        <input type="radio" name="layout" id="layout_open" value="open_kitchen" checked>
+                        <label for="layout_open"><strong>Integrado</strong><span>Sala + cozinha aberta</span></label>
+                    </div>
+                    <div class="radio-card">
+                        <input type="radio" name="layout" id="layout_sep" value="separate_kitchen">
+                        <label for="layout_sep"><strong>Separado</strong><span>Cozinha independente</span></label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="field">
+                <label>
+                    <input type="checkbox" id="has_garage"> Incluir garagem coberta
+                </label>
+            </div>
+
+            <div class="btn-row">
+                <button class="btn btn-primary" onclick="nextStep(2)">Continuar</button>
+            </div>
+        </div>
+
+        <!-- STEP 2: Lot -->
+        <div class="form-step" id="step-2">
+            <div class="step-title">2. Terreno</div>
+            <div class="step-desc">Dimensões do lote disponível.</div>
+
+            <div class="row">
+                <div class="field">
+                    <label>Largura do lote (m)</label>
+                    <input type="number" id="lot_width" value="8" min="5" max="20" step="0.5">
+                    <div class="hint">Testada — frente do lote</div>
+                </div>
+                <div class="field">
+                    <label>Profundidade do lote (m)</label>
+                    <input type="number" id="lot_depth" value="20" min="10" max="40" step="0.5">
+                </div>
+            </div>
+
+            <div class="btn-row">
+                <button class="btn btn-secondary" onclick="nextStep(1)">Voltar</button>
+                <button class="btn btn-primary" onclick="nextStep(3)">Continuar</button>
+            </div>
+        </div>
+
+        <!-- STEP 3: Technical -->
+        <div class="form-step" id="step-3">
+            <div class="step-title">3. Dados Técnicos</div>
+            <div class="step-desc">Parâmetros estruturais — valores padrão são seguros para a maioria dos casos.</div>
+
+            <div class="row">
+                <div class="field">
+                    <label>Bloco estrutural</label>
+                    <div class="radio-group">
+                        <div class="radio-card">
+                            <input type="radio" name="block" id="block14" value="14" checked>
+                            <label for="block14"><strong>14 cm</strong><span>Módulo 15cm — padrão MCMV</span></label>
+                        </div>
+                        <div class="radio-card">
+                            <input type="radio" name="block" id="block19" value="19">
+                            <label for="block19"><strong>19 cm</strong><span>Módulo 20cm — 2+ pisos</span></label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="field">
+                    <label>Pé-direito (m)</label>
+                    <input type="number" id="ceiling" value="2.80" min="2.50" max="3.20" step="0.05">
+                </div>
+                <div class="field">
+                    <label>Capacidade do solo (kPa)</label>
+                    <input type="number" id="soil" value="100" min="50" max="500" step="10">
+                    <div class="hint">100 kPa = conservador sem sondagem</div>
+                </div>
+            </div>
+
+            <div class="btn-row">
+                <button class="btn btn-secondary" onclick="nextStep(2)">Voltar</button>
+                <button class="btn btn-primary" onclick="nextStep(4)">Revisar</button>
+            </div>
+        </div>
+
+        <!-- STEP 4: Review -->
+        <div class="form-step" id="step-4">
+            <div class="step-title">4. Revisão</div>
+            <div class="step-desc">Confira os dados antes de gerar o projeto.</div>
+
+            <div class="result-card">
+                <div id="review-summary" style="font-size:13px; line-height:1.8;"></div>
+            </div>
+
+            <div class="btn-row">
+                <button class="btn btn-secondary" onclick="nextStep(3)">Voltar</button>
+                <button class="btn btn-primary" id="btn-generate" onclick="generateProject()">Gerar Projeto</button>
+            </div>
+        </div>
+
+        <!-- LOADING -->
+        <div class="form-step" id="step-loading">
+            <div class="loading">
+                <div class="spinner"></div>
+                <div style="color:var(--fg-dim); font-size:14px;">Gerando projeto estrutural...</div>
+                <div style="color:var(--fg-mute); font-size:12px; margin-top:8px;">Layout, cálculos, DXF e memorial</div>
+            </div>
+        </div>
+
+        <!-- RESULTS -->
+        <div id="results">
+            <div class="step-title">Projeto Gerado</div>
+            <div class="step-desc">Planta, cálculos e materiais prontos para download.</div>
+
+            <!-- Stats -->
+            <div class="stat-grid">
+                <div class="stat"><div class="val" id="r-area">—</div><div class="lbl">Área (m²)</div></div>
+                <div class="stat"><div class="val" id="r-block">—</div><div class="lbl">fbk (MPa)</div></div>
+                <div class="stat"><div class="val" id="r-blocks">—</div><div class="lbl">Blocos</div></div>
+                <div class="stat"><div class="val" id="r-rooms">—</div><div class="lbl">Cômodos</div></div>
+                <div class="stat"><div class="val" id="r-walls">—</div><div class="lbl">Paredes</div></div>
+                <div class="stat"><div class="val" id="r-fund">—</div><div class="lbl">Fundação</div></div>
+            </div>
+
+            <!-- Preview -->
+            <div class="result-card">
+                <h3>Planta Baixa</h3>
+                <svg id="preview-svg" viewBox="0 0 500 500"></svg>
+            </div>
+
+            <!-- Downloads -->
+            <div class="result-card">
+                <h3>Downloads</h3>
+                <div class="dl-grid" id="dl-grid"></div>
+            </div>
+
+            <!-- Warnings -->
+            <div class="warnings" id="warnings"></div>
+
+            <div class="btn-row" style="margin-top:24px;">
+                <button class="btn btn-secondary" onclick="resetForm()">Novo Projeto</button>
+            </div>
+        </div>
+    </main>
+
+<script>
+const API = window.location.origin;
+let currentStep = 1;
+let projectId = null;
+
+function nextStep(n) {
+    document.querySelectorAll('.form-step').forEach(s => s.classList.remove('active'));
+    document.getElementById(`step-${n}`).classList.add('active');
+    currentStep = n;
+
+    // Update dots
+    document.querySelectorAll('.step-dot').forEach((d, i) => {
+        d.className = 'step-dot';
+        if (i + 1 < n) d.classList.add('done');
+        if (i + 1 === n) d.classList.add('active');
+    });
+
+    // Build review
+    if (n === 4) buildReview();
+}
+
+function getFormData() {
+    return {
+        bedrooms: parseInt(document.getElementById('bedrooms').value),
+        bathrooms: parseInt(document.getElementById('bathrooms').value),
+        target_area_m2: parseFloat(document.getElementById('area').value),
+        floors: parseInt(document.querySelector('input[name="floors"]:checked').value),
+        layout_type: document.querySelector('input[name="layout"]:checked').value,
+        has_garage: document.getElementById('has_garage').checked,
+        lot_width_m: parseFloat(document.getElementById('lot_width').value),
+        lot_depth_m: parseFloat(document.getElementById('lot_depth').value),
+        block_size: document.querySelector('input[name="block"]:checked').value,
+        ceiling_height_m: parseFloat(document.getElementById('ceiling').value),
+        soil_capacity_kpa: parseFloat(document.getElementById('soil').value),
+        roof_type: 'wooden_truss',
+        region: 'sudeste',
+    };
+}
+
+function buildReview() {
+    const d = getFormData();
+    const layoutLabel = d.layout_type === 'open_kitchen' ? 'Integrado' : 'Separado';
+    const blockLabel = d.block_size === '14' ? '14cm (mod. 15cm)' : '19cm (mod. 20cm)';
+    document.getElementById('review-summary').innerHTML = `
+        <b>Programa:</b> ${d.bedrooms} quarto(s), ${d.bathrooms} banheiro(s), ${d.target_area_m2}m²${d.has_garage ? ', garagem' : ''}<br>
+        <b>Layout:</b> ${layoutLabel}, ${d.floors} pavimento(s)<br>
+        <b>Terreno:</b> ${d.lot_width_m}m × ${d.lot_depth_m}m<br>
+        <b>Bloco:</b> ${blockLabel}<br>
+        <b>Pé-direito:</b> ${d.ceiling_height_m}m<br>
+        <b>Solo:</b> ${d.soil_capacity_kpa} kPa
+    `;
+}
+
+async function generateProject() {
+    const data = getFormData();
+    const btn = document.getElementById('btn-generate');
+    btn.disabled = true;
+
+    // Show loading
+    document.querySelectorAll('.form-step').forEach(s => s.classList.remove('active'));
+    document.getElementById('step-loading').classList.add('active');
+
+    try {
+        // Create project
+        const res = await fetch(`${API}/api/v1/projects`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const { id } = await res.json();
+        projectId = id;
+
+        // Poll status
+        await pollStatus(id);
+    } catch (err) {
+        alert('Erro ao gerar projeto: ' + err.message);
+        nextStep(4);
+        btn.disabled = false;
+    }
+}
+
+async function pollStatus(id) {
+    const maxAttempts = 60;
+    for (let i = 0; i < maxAttempts; i++) {
+        await new Promise(r => setTimeout(r, 1000));
+        try {
+            const res = await fetch(`${API}/api/v1/projects/${id}/status`);
+            const data = await res.json();
+
+            if (data.status === 'done') {
+                showResults(data);
+                return;
+            }
+            if (data.status === 'error') {
+                throw new Error(data.error || 'Pipeline falhou');
+            }
+        } catch (err) {
+            if (i === maxAttempts - 1) throw err;
+        }
+    }
+    throw new Error('Timeout — projeto demorou demais');
+}
+
+function showResults(data) {
+    document.getElementById('step-loading').classList.remove('active');
+    document.getElementById('results').style.display = 'block';
+    document.querySelectorAll('.step-dot').forEach(d => d.className = 'step-dot done');
+
+    const s = data.summary || {};
+    document.getElementById('r-area').textContent = s.area_m2 || '—';
+    document.getElementById('r-block').textContent = s.block_fbk_mpa || '—';
+    document.getElementById('r-blocks').textContent = s.total_blocks ? s.total_blocks.toLocaleString() : '—';
+    document.getElementById('r-rooms').textContent = s.rooms || '—';
+    document.getElementById('r-walls').textContent = s.walls || '—';
+    document.getElementById('r-fund').textContent = (s.foundation_type || '').replace('_', ' ');
+
+    // Downloads
+    const dlGrid = document.getElementById('dl-grid');
+    dlGrid.innerHTML = '';
+    const files = [
+        { key: 'has_arch_dxf', url: `/api/v1/projects/${projectId}/download/dxf/arch`, ext: 'DXF', name: 'Planta Arquitetônica' },
+        { key: 'has_struct_dxf', url: `/api/v1/projects/${projectId}/download/dxf/struct`, ext: 'DXF', name: 'Planta Estrutural' },
+        { key: 'has_memorial_pdf', url: `/api/v1/projects/${projectId}/download/pdf`, ext: 'PDF', name: 'Memorial de Cálculo' },
+        { key: 'has_bom_csv', url: `/api/v1/projects/${projectId}/download/csv`, ext: 'CSV', name: 'Lista de Materiais' },
+        { key: 'has_zip', url: `/api/v1/projects/${projectId}/download/zip`, ext: 'ZIP', name: 'Pacote Completo' },
+    ];
+    files.forEach(f => {
+        if (data[f.key]) {
+            const a = document.createElement('a');
+            a.href = f.url;
+            a.className = 'dl-btn';
+            a.innerHTML = `<span class="ext">${f.ext}</span><span class="name">${f.name}</span>`;
+            dlGrid.appendChild(a);
+        }
+    });
+
+    // SVG Preview
+    if (data.preview) renderPreview(data.preview);
+
+    // Warnings
+    const warnDiv = document.getElementById('warnings');
+    warnDiv.innerHTML = '';
+    if (s.warnings && s.warnings.length) {
+        s.warnings.forEach(w => {
+            const d = document.createElement('div');
+            d.className = 'warn-item';
+            d.textContent = '⚠ ' + w;
+            warnDiv.appendChild(d);
+        });
+    }
+}
+
+function renderPreview(preview) {
+    const svg = document.getElementById('preview-svg');
+    const W = preview.width_m;
+    const D = preview.depth_m;
+    const pad = 1.0;
+    const scale = 450 / Math.max(W, D);
+    const ox = (500 - W * scale) / 2;
+    const oy = (500 - D * scale) / 2;
+
+    const roomColors = {
+        bedroom: '#3B82F6', living: '#10B981', kitchen: '#F59E0B',
+        bathroom: '#6366F1', service: '#8B5CF6', circulation: '#6B7280', garage: '#9CA3AF',
+    };
+
+    let html = '';
+
+    // Rooms
+    (preview.rooms || []).forEach(room => {
+        const pts = room.polygon.map(p => `${ox + p[0]*scale},${oy + (D - p[1])*scale}`).join(' ');
+        const fill = roomColors[room.type] || '#555';
+        html += `<polygon points="${pts}" fill="${fill}" fill-opacity="0.15" stroke="${fill}" stroke-width="0.5"/>`;
+
+        // Label
+        const cx = room.polygon.reduce((s, p) => s + p[0], 0) / room.polygon.length;
+        const cy = room.polygon.reduce((s, p) => s + p[1], 0) / room.polygon.length;
+        const tx = ox + cx * scale;
+        const ty = oy + (D - cy) * scale;
+        html += `<text x="${tx}" y="${ty - 6}" text-anchor="middle" fill="${fill}" font-size="10" font-family="Geist,sans-serif" font-weight="500">${room.name}</text>`;
+        html += `<text x="${tx}" y="${ty + 8}" text-anchor="middle" fill="#888" font-size="8" font-family="Geist Mono,monospace">${room.area_m2}m²</text>`;
+    });
+
+    // Walls
+    (preview.walls || []).forEach(wall => {
+        const x1 = ox + wall.start[0] * scale;
+        const y1 = oy + (D - wall.start[1]) * scale;
+        const x2 = ox + wall.end[0] * scale;
+        const y2 = oy + (D - wall.end[1]) * scale;
+        const sw = Math.max(wall.thickness_m * scale * 0.5, 1.5);
+        html += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#F5F5F7" stroke-width="${sw}" stroke-linecap="round"/>`;
+    });
+
+    // Dimensions
+    const dimY = oy + D * scale + 25;
+    html += `<line x1="${ox}" y1="${dimY}" x2="${ox + W*scale}" y2="${dimY}" stroke="#666" stroke-width="0.5"/>`;
+    html += `<text x="${ox + W*scale/2}" y="${dimY + 14}" text-anchor="middle" fill="#888" font-size="10" font-family="Geist Mono,monospace">${W.toFixed(2)}m</text>`;
+
+    const dimX = ox - 25;
+    html += `<line x1="${dimX}" y1="${oy}" x2="${dimX}" y2="${oy + D*scale}" stroke="#666" stroke-width="0.5"/>`;
+    html += `<text x="${dimX}" y="${oy + D*scale/2}" text-anchor="middle" fill="#888" font-size="10" font-family="Geist Mono,monospace" transform="rotate(-90,${dimX},${oy + D*scale/2})">${D.toFixed(2)}m</text>`;
+
+    svg.innerHTML = html;
+}
+
+function resetForm() {
+    document.getElementById('results').style.display = 'none';
+    document.getElementById('btn-generate').disabled = false;
+    projectId = null;
+    nextStep(1);
+}
+</script>
+</body>
+</html>

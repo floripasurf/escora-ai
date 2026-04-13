@@ -419,7 +419,7 @@ def run_pipeline(
 
     # Stage 6: Learning — save what we learned from this run
     try:
-        learn_and_save(result, level_segments=level_segments, store=store)
+        learn_and_save(result, level_segments=level_segments, store=store, source_dxf_path=filepath)
     except Exception as e:
         logger.warning(f"Learning stage failed (non-fatal): {e}")
 
