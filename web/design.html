@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>estrutura.app — Design Interativo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300;12..96,400;12..96,500;12..96,600;12..96,700&family=Geist+Mono:wght@400;500&family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg: #0A0A0B; --bg-1: #111114; --bg-2: #17171C; --bg-3: #1E1E25;
+            --fg: #F5F5F7; --fg-dim: #A1A1AA; --fg-mute: #6B6B74;
+            --line: #26262E; --line-soft: #1A1A20;
+            --accent: #CFFF1A; --accent-soft: rgba(207,255,26,0.10); --accent-line: rgba(207,255,26,0.35);
+            --ok: #4ADE80; --err: #F87171; --warn: #FBBF24;
+            --display: "Bricolage Grotesque", -apple-system, sans-serif;
+            --sans: "Geist", -apple-system, BlinkMacSystemFont, sans-serif;
+            --mono: "Geist Mono", "SF Mono", ui-monospace, monospace;
+            --radius: 10px; --radius-sm: 6px;
+        }
+        html { -webkit-font-smoothing: antialiased; }
+        body { font-family: var(--sans); background: var(--bg); color: var(--fg); min-height: 100vh; font-size: 15px; line-height: 1.55; overflow-x: hidden; }
+        body::before { content:""; position:fixed; inset:-20% -20% auto -20%; height:70vh; background:radial-gradient(ellipse 60% 50% at 50% 0%,rgba(207,255,26,0.07),transparent 70%); pointer-events:none; z-index:0; }
+        ::selection { background: var(--accent); color: var(--bg); }
+        a { color: inherit; text-decoration: none; }
+
+        /* Header */
+        header { position:sticky; top:0; z-index:100; backdrop-filter:blur(20px); background:rgba(10,10,11,0.85); border-bottom:1px solid var(--line-soft); }
+        .header-inner { max-width:1280px; margin:0 auto; padding:14px 24px; display:flex; align-items:center; justify-content:space-between; }
+        .logo { font-family:var(--display); font-weight:700; font-size:20px; letter-spacing:-0.03em; }
+        .logo span { color:var(--accent); }
+        nav a { font-size:13px; color:var(--fg-dim); margin-left:24px; transition:color .2s; }
+        nav a:hover, nav a.active { color:var(--accent); }
+
+        /* Layout */
+        .editor { display:grid; grid-template-columns:320px 1fr; min-height:calc(100vh - 53px); position:relative; z-index:1; }
+
+        /* Sidebar */
+        .sidebar { background:var(--bg-1); border-right:1px solid var(--line-soft); padding:20px; overflow-y:auto; max-height:calc(100vh - 53px); }
+        .section { margin-bottom:20px; }
+        .section-header { display:flex; align-items:center; justify-content:space-between; cursor:pointer; padding:8px 0; border-bottom:1px solid var(--line-soft); margin-bottom:12px; }
+        .section-header h3 { font-family:var(--display); font-size:14px; font-weight:600; letter-spacing:-0.02em; }
+        .section-header .toggle { color:var(--fg-mute); font-size:12px; transition:transform .2s; }
+        .section-header.collapsed .toggle { transform:rotate(-90deg); }
+        .section-body { }
+        .section-body.hidden { display:none; }
+
+        .field { margin-bottom:14px; }
+        .field label { display:block; font-size:12px; font-weight:500; color:var(--fg-dim); margin-bottom:4px; }
+        .field input, .field select { width:100%; padding:8px 10px; background:var(--bg-2); border:1px solid var(--line); border-radius:var(--radius-sm); color:var(--fg); font-family:var(--sans); font-size:13px; outline:none; transition:border-color .2s; }
+        .field input:focus, .field select:focus { border-color:var(--accent-line); }
+        .field .hint { font-size:10px; color:var(--fg-mute); margin-top:3px; }
+        .row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+
+        .range-row { display:flex; align-items:center; gap:10px; }
+        .range-row input[type="range"] { flex:1; accent-color:var(--accent); }
+        .range-row .range-val { font-family:var(--mono); font-size:12px; color:var(--accent); min-width:40px; text-align:right; }
+
+        /* Radio pills */
+        .pill-group { display:flex; gap:4px; }
+        .pill-group label { flex:1; text-align:center; padding:6px 8px; background:var(--bg-2); border:1px solid var(--line); border-radius:var(--radius-sm); cursor:pointer; font-size:12px; font-weight:500; color:var(--fg-dim); transition:all .2s; }
+        .pill-group input { display:none; }
+        .pill-group input:checked + label { border-color:var(--accent); color:var(--accent); background:var(--accent-soft); }
+
+        .checkbox-field { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--fg-dim); cursor:pointer; }
+        .checkbox-field input[type="checkbox"] { accent-color:var(--accent); }
+
+        /* Cost indicators */
+        .cost-tag { font-family:var(--mono); font-size:9px; opacity:0.45; margin-left:2px; }
+        .cost-tag.eco { color:var(--ok); opacity:0.7; }
+        .cost-group label.eco-highlight { border-color:rgba(74,222,128,0.5) !important; box-shadow:0 0 0 1px rgba(74,222,128,0.15); }
+        .cost-group label.eco-highlight .cost-tag { opacity:1; }
+
+        /* Generate button */
+        .btn-generate { width:100%; padding:12px; background:var(--accent); color:var(--bg); border:none; border-radius:var(--radius-sm); font-family:var(--sans); font-size:14px; font-weight:600; cursor:pointer; transition:all .2s; margin-top:8px; }
+        .btn-generate:hover { filter:brightness(1.1); }
+        .btn-generate:disabled { opacity:.4; cursor:not-allowed; }
+
+        /* Preview area */
+        .preview-area { display:flex; flex-direction:column; background:var(--bg); }
+
+        /* Tab bar */
+        .tab-bar { display:flex; gap:0; border-bottom:1px solid var(--line-soft); background:var(--bg-1); }
+        .tab-btn { padding:10px 20px; font-family:var(--sans); font-size:13px; font-weight:500; color:var(--fg-mute); background:transparent; border:none; border-bottom:2px solid transparent; cursor:pointer; transition:all .2s; }
+        .tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); }
+
+        /* Stats bar */
+        .stats-bar { display:flex; gap:20px; padding:12px 20px; background:var(--bg-1); border-bottom:1px solid var(--line-soft); }
+        .stat-item { font-size:12px; color:var(--fg-dim); }
+        .stat-item .stat-val { font-family:var(--mono); font-weight:600; color:var(--accent); margin-right:4px; }
+
+        /* SVG canvas */
+        .preview-canvas { flex:1; display:flex; align-items:center; justify-content:center; padding:20px; }
+        .preview-canvas svg { max-width:100%; max-height:calc(100vh - 160px); }
+        #tab-3d { display:none; }
+        #viewer3d-container { width:100%; height:calc(100vh - 160px); }
+
+        /* Warnings */
+        .warn-bar { padding:8px 20px; background:rgba(251,191,36,0.08); border-top:1px solid rgba(251,191,36,0.2); }
+        .warn-bar span { font-size:11px; color:var(--warn); }
+
+        /* Download modal */
+        .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:200; align-items:center; justify-content:center; }
+        .modal-overlay.active { display:flex; }
+        .modal { background:var(--bg-1); border:1px solid var(--line); border-radius:var(--radius); padding:32px; max-width:480px; width:90%; }
+        .modal h2 { font-family:var(--display); font-size:20px; margin-bottom:8px; }
+        .modal p { color:var(--fg-dim); font-size:13px; margin-bottom:20px; }
+        .dl-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+        .dl-btn { display:flex; align-items:center; gap:10px; padding:12px 16px; background:var(--bg-2); border:1px solid var(--line); border-radius:var(--radius-sm); cursor:pointer; transition:all .2s; text-decoration:none; color:var(--fg); }
+        .dl-btn:hover { border-color:var(--accent-line); background:var(--accent-soft); }
+        .dl-btn .ext { font-family:var(--mono); font-size:11px; font-weight:500; color:var(--accent); background:rgba(207,255,26,0.15); padding:2px 6px; border-radius:3px; }
+        .dl-btn .name { font-size:13px; }
+        .modal-close { margin-top:16px; width:100%; padding:10px; background:var(--bg-2); color:var(--fg-dim); border:1px solid var(--line); border-radius:var(--radius-sm); font-family:var(--sans); font-size:13px; cursor:pointer; }
+
+        .spinner-sm { width:16px; height:16px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite; display:inline-block; vertical-align:middle; margin-right:8px; }
+        @keyframes spin { to{transform:rotate(360deg)} }
+
+        @media (max-width: 768px) {
+            .editor { grid-template-columns:1fr; }
+            .sidebar { max-height:none; border-right:none; border-bottom:1px solid var(--line-soft); }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-inner">
+            <a href="/" class="logo">estrutura<span>.app</span></a>
+            <nav>
+                <a href="/">Escoramento</a>
+                <a href="/projetos.html">Projetos</a>
+                <a href="/design" class="active">Design</a>
+            </nav>
+        </div>
+    </header>
+
+    <div class="editor">
+        <!-- Sidebar: all inputs -->
+        <div class="sidebar">
+            <!-- Basico -->
+            <div class="section">
+                <div class="section-header" onclick="toggleSection(this)">
+                    <h3>Programa</h3>
+                    <span class="toggle">&#9660;</span>
+                </div>
+                <div class="section-body">
+                    <div class="row">
+                        <div class="field">
+                            <label>Quartos</label>
+                            <select id="bedrooms" onchange="onInputChange()">
+                                <option value="1">1</option>
+                                <option value="2" selected>2</option>
+                                <option value="3">3</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label>Banheiros</label>
+                            <select id="bathrooms" onchange="onInputChange()">
+                                <option value="1" selected>1</option>
+                                <option value="2">2</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="field">
+                        <label>Area desejada</label>
+                        <div class="range-row">
+                            <input type="range" id="area" min="35" max="80" value="50" oninput="onInputChange()">
+                            <span class="range-val" id="areaVal">50m2</span>
+                        </div>
+                    </div>
+
+                    <div class="field">
+                        <label>Layout</label>
+                        <div class="pill-group">
+                            <input type="radio" name="layout" id="lo_open" value="open_kitchen" checked onchange="onInputChange()">
+                            <label for="lo_open">Integrado</label>
+                            <input type="radio" name="layout" id="lo_sep" value="separate_kitchen" onchange="onInputChange()">
+                            <label for="lo_sep">Separado</label>
+                        </div>
+                    </div>
+
+                    <label class="checkbox-field">
+                        <input type="checkbox" id="has_garage" onchange="onInputChange()"> Garagem coberta
+                    </label>
+                </div>
+            </div>
+
+            <!-- Regiao -->
+            <div class="section">
+                <div class="section-header" onclick="toggleSection(this)">
+                    <h3>Regiao</h3>
+                    <span class="toggle">&#9660;</span>
+                </div>
+                <div class="section-body">
+                    <div class="field">
+                        <label>Pais</label>
+                        <select id="country" onchange="onInputChange()">
+                            <optgroup label="America Latina">
+                                <option value="BR" selected>Brasil</option>
+                                <option value="MX">Mexico</option>
+                                <option value="CO">Colombia</option>
+                                <option value="AR">Argentina</option>
+                                <option value="CL">Chile</option>
+                                <option value="PE">Peru</option>
+                            </optgroup>
+                            <optgroup label="America do Norte">
+                                <option value="US">Estados Unidos</option>
+                                <option value="CA">Canada</option>
+                            </optgroup>
+                            <optgroup label="Europa">
+                                <option value="ES">Espanha</option>
+                                <option value="PT">Portugal</option>
+                                <option value="IT">Italia</option>
+                                <option value="FR">Franca</option>
+                            </optgroup>
+                            <optgroup label="Mediterraneo">
+                                <option value="GR">Grecia</option>
+                                <option value="TR">Turquia</option>
+                                <option value="MA">Marrocos</option>
+                            </optgroup>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Terreno -->
+            <div class="section">
+                <div class="section-header" onclick="toggleSection(this)">
+                    <h3>Terreno</h3>
+                    <span class="toggle">&#9660;</span>
+                </div>
+                <div class="section-body">
+                    <div class="row">
+                        <div class="field">
+                            <label>Largura (m)</label>
+                            <input type="number" id="lot_width" value="8" min="5" max="20" step="0.5" onchange="onInputChange()">
+                        </div>
+                        <div class="field">
+                            <label>Profundidade (m)</label>
+                            <input type="number" id="lot_depth" value="20" min="10" max="40" step="0.5" onchange="onInputChange()">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Orientacao -->
+            <div class="section">
+                <div class="section-header" onclick="toggleSection(this)">
+                    <h3>Orientacao</h3>
+                    <span class="toggle">&#9660;</span>
+                </div>
+                <div class="section-body">
+                    <div class="field">
+                        <label>Lado da rua</label>
+                        <div class="pill-group">
+                            <input type="radio" name="street" id="st_s" value="south" checked onchange="onInputChange()">
+                            <label for="st_s">Sul</label>
+                            <input type="radio" name="street" id="st_n" value="north" onchange="onInputChange()">
+                            <label for="st_n">Norte</label>
+                            <input type="radio" name="street" id="st_e" value="east" onchange="onInputChange()">
+                            <label for="st_e">Leste</label>
+                            <input type="radio" name="street" id="st_w" value="west" onchange="onInputChange()">
+                            <label for="st_w">Oeste</label>
+                        </div>
+                    </div>
+
+                    <div class="field">
+                        <label>Privacidade</label>
+                        <div class="pill-group">
+                            <input type="radio" name="privacy" id="pr_max" value="max_privacy" onchange="onInputChange()">
+                            <label for="pr_max">Maxima</label>
+                            <input type="radio" name="privacy" id="pr_bal" value="balanced" checked onchange="onInputChange()">
+                            <label for="pr_bal">Equilibrado</label>
+                            <input type="radio" name="privacy" id="pr_open" value="open" onchange="onInputChange()">
+                            <label for="pr_open">Aberto</label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Estilo -->
+            <div class="section">
+                <div class="section-header" onclick="toggleSection(this)">
+                    <h3>Estilo</h3>
+                    <span class="toggle">&#9660;</span>
+                </div>
+                <div class="section-body">
+                    <div class="field">
+                        <label>Estilo arquitetonico</label>
+                        <div class="pill-group" style="flex-wrap:wrap;">
+                            <input type="radio" name="style" id="sty_mod" value="modern" checked onchange="onInputChange()">
+                            <label for="sty_mod">Moderno</label>
+                            <input type="radio" name="style" id="sty_col" value="colonial" onchange="onInputChange()">
+                            <label for="sty_col">Colonial</label>
+                            <input type="radio" name="style" id="sty_min" value="minimal" onchange="onInputChange()">
+                            <label for="sty_min">Minimal</label>
+                            <input type="radio" name="style" id="sty_tro" value="tropical" onchange="onInputChange()">
+                            <label for="sty_tro">Tropical</label>
+                            <input type="radio" name="style" id="sty_con" value="contemporary" onchange="onInputChange()">
+                            <label for="sty_con">Contemporaneo</label>
+                        </div>
+                    </div>
+
+                    <div class="field">
+                        <label>Telhado</label>
+                        <div class="pill-group" style="flex-wrap:wrap;">
+                            <input type="radio" name="roof" id="rf_gable" value="gable" checked onchange="onInputChange()">
+                            <label for="rf_gable">2 aguas</label>
+                            <input type="radio" name="roof" id="rf_hip" value="hip" onchange="onInputChange()">
+                            <label for="rf_hip">4 aguas</label>
+                            <input type="radio" name="roof" id="rf_shed" value="shed" onchange="onInputChange()">
+                            <label for="rf_shed">Shed</label>
+                            <input type="radio" name="roof" id="rf_flat" value="flat" onchange="onInputChange()">
+                            <label for="rf_flat">Laje</label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Construcao -->
+            <div class="section">
+                <div class="section-header" onclick="toggleSection(this)">
+                    <h3>Construcao</h3>
+                    <span class="toggle">&#9660;</span>
+                </div>
+                <div class="section-body">
+                    <label class="checkbox-field" style="margin-bottom:14px;">
+                        <input type="checkbox" id="economy_mode" onchange="onEconomyToggle()"> Modo Economico
+                    </label>
+                    <div class="hint" id="eco_hint" style="margin-bottom:12px;"></div>
+
+                    <div class="field">
+                        <label>Fundacao</label>
+                        <div class="pill-group cost-group">
+                            <input type="radio" name="foundation" id="fd_sapata" value="sapata_corrida" checked onchange="onInputChange()">
+                            <label for="fd_sapata">Sapata Corrida <span class="cost-tag">$$</span></label>
+                            <input type="radio" name="foundation" id="fd_radier" value="radier" onchange="onInputChange()">
+                            <label for="fd_radier">Radier <span class="cost-tag eco">$</span></label>
+                        </div>
+                    </div>
+
+                    <div class="field">
+                        <label>Estrutura</label>
+                        <div class="pill-group cost-group">
+                            <input type="radio" name="structure" id="st_masonry" value="masonry" checked onchange="onInputChange()">
+                            <label for="st_masonry">Alv. Estrutural <span class="cost-tag eco">$</span></label>
+                            <input type="radio" name="structure" id="st_self" value="self_supporting" onchange="onInputChange()">
+                            <label for="st_self">Autoportante <span class="cost-tag">$$</span></label>
+                        </div>
+                    </div>
+
+                    <div class="field">
+                        <label>Cobertura</label>
+                        <div class="pill-group cost-group" style="flex-wrap:wrap;">
+                            <input type="radio" name="roof_mat" id="rm_ceramic" value="ceramic" checked onchange="onInputChange()">
+                            <label for="rm_ceramic">Ceramica <span class="cost-tag">$$</span></label>
+                            <input type="radio" name="roof_mat" id="rm_fiber" value="fiber_cement" onchange="onInputChange()">
+                            <label for="rm_fiber">Fibrocimento <span class="cost-tag eco">$</span></label>
+                            <input type="radio" name="roof_mat" id="rm_sandwich" value="sandwich" onchange="onInputChange()">
+                            <label for="rm_sandwich">Sanduiche <span class="cost-tag">$$</span></label>
+                            <input type="radio" name="roof_mat" id="rm_metal" value="metal" onchange="onInputChange()">
+                            <label for="rm_metal">Metalica <span class="cost-tag eco">$</span></label>
+                        </div>
+                    </div>
+
+                    <div class="field">
+                        <label>Laje</label>
+                        <div class="pill-group cost-group">
+                            <input type="radio" name="slab" id="sl_pre" value="pre_moldada" checked onchange="onInputChange()">
+                            <label for="sl_pre">Pre-moldada <span class="cost-tag eco">$</span></label>
+                            <input type="radio" name="slab" id="sl_macica" value="macica" onchange="onInputChange()">
+                            <label for="sl_macica">Macica <span class="cost-tag">$$$</span></label>
+                        </div>
+                    </div>
+
+                    <div class="field">
+                        <label>Revestimento</label>
+                        <div class="pill-group cost-group" style="flex-wrap:wrap;">
+                            <input type="radio" name="finish" id="fn_basic" value="basic" checked onchange="onInputChange()">
+                            <label for="fn_basic">Basico <span class="cost-tag eco">$</span></label>
+                            <input type="radio" name="finish" id="fn_standard" value="standard" onchange="onInputChange()">
+                            <label for="fn_standard">Padrao <span class="cost-tag">$$</span></label>
+                            <input type="radio" name="finish" id="fn_premium" value="premium" onchange="onInputChange()">
+                            <label for="fn_premium">Premium <span class="cost-tag">$$$</span></label>
+                        </div>
+                    </div>
+
+                    <div id="cost-estimate" style="margin-top:12px; padding:10px; background:var(--bg-2); border:1px solid var(--line); border-radius:var(--radius-sm); display:none;">
+                        <div style="font-size:11px; color:var(--fg-mute); margin-bottom:4px;">Estimativa custo construtivo</div>
+                        <div style="display:flex; justify-content:space-between; align-items:baseline;">
+                            <span id="cost-label" style="font-family:var(--mono); font-size:13px; color:var(--fg);"></span>
+                            <span id="cost-savings" style="font-family:var(--mono); font-size:11px; color:var(--ok);"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tecnico -->
+            <div class="section">
+                <div class="section-header collapsed" onclick="toggleSection(this)">
+                    <h3>Tecnico</h3>
+                    <span class="toggle">&#9660;</span>
+                </div>
+                <div class="section-body hidden">
+                    <div class="field">
+                        <label>Bloco estrutural</label>
+                        <div class="pill-group">
+                            <input type="radio" name="block" id="b14" value="14" checked onchange="onInputChange()">
+                            <label for="b14">14cm</label>
+                            <input type="radio" name="block" id="b19" value="19" onchange="onInputChange()">
+                            <label for="b19">19cm</label>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="field">
+                            <label>Pe-direito (m)</label>
+                            <input type="number" id="ceiling" value="2.80" min="2.50" max="3.20" step="0.05" onchange="onInputChange()">
+                        </div>
+                        <div class="field">
+                            <label>Solo (kPa)</label>
+                            <input type="number" id="soil" value="100" min="50" max="500" step="10" onchange="onInputChange()">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Action -->
+            <button class="btn-generate" id="btn-generate" onclick="generateFiles()">
+                Gerar Arquivos (DXF + PDF)
+            </button>
+        </div>
+
+        <!-- Preview -->
+        <div class="preview-area">
+            <div class="tab-bar">
+                <button class="tab-btn active" onclick="switchTab('2d')">Planta 2D</button>
+                <button class="tab-btn" onclick="switchTab('3d')">Vista 3D</button>
+            </div>
+
+            <div class="stats-bar" id="stats-bar">
+                <div class="stat-item"><span class="stat-val" id="s-area">--</span>m2</div>
+                <div class="stat-item"><span class="stat-val" id="s-rooms">--</span>comodos</div>
+                <div class="stat-item"><span class="stat-val" id="s-walls">--</span>paredes</div>
+                <div class="stat-item"><span class="stat-val" id="s-block">14</span>cm</div>
+                <div class="stat-item"><span class="stat-val" id="s-country">BR</span></div>
+                <div class="stat-item" id="s-eco-item" style="display:none;"><span class="stat-val" id="s-eco" style="color:var(--ok);">ECO</span></div>
+            </div>
+
+            <div class="preview-canvas" id="tab-2d">
+                <svg id="preview-svg" viewBox="0 0 600 500"></svg>
+            </div>
+
+            <div id="tab-3d">
+                <div id="viewer3d-container"></div>
+            </div>
+
+            <div class="warn-bar" id="warn-bar" style="display:none;">
+                <span id="warn-text"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Download modal -->
+    <div class="modal-overlay" id="dl-modal">
+        <div class="modal">
+            <h2>Arquivos Gerados</h2>
+            <p>Projeto estrutural completo pronto para download.</p>
+            <div class="dl-grid" id="dl-grid"></div>
+            <button class="modal-close" onclick="closeModal()">Fechar</button>
+        </div>
+    </div>
+
+<script type="module">
+    // 3D viewer (lazy loaded)
+    let viewer3d = null;
+    let lastPreview = null;
+
+    window.switchTab = function(tab) {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        if (tab === '3d') {
+            document.getElementById('tab-2d').style.display = 'none';
+            document.getElementById('tab-3d').style.display = 'block';
+            document.querySelectorAll('.tab-btn')[1].classList.add('active');
+            initViewer3D();
+        } else {
+            document.getElementById('tab-2d').style.display = 'flex';
+            document.getElementById('tab-3d').style.display = 'none';
+            document.querySelectorAll('.tab-btn')[0].classList.add('active');
+        }
+    };
+
+    async function initViewer3D() {
+        if (viewer3d) {
+            if (lastPreview) viewer3d.updateFromPreview(lastPreview);
+            return;
+        }
+        try {
+            const { HouseViewer3D } = await import('/static/js/viewer3d.js');
+            const container = document.getElementById('viewer3d-container');
+            viewer3d = new HouseViewer3D(container);
+            if (lastPreview) viewer3d.loadFromPreview(lastPreview);
+        } catch (e) {
+            console.error('3D viewer failed to load:', e);
+            document.getElementById('viewer3d-container').innerHTML =
+                '<div style="padding:40px;color:var(--fg-mute);text-align:center;">3D viewer requires WebGL support</div>';
+        }
+    }
+
+    // Make functions accessible from inline handlers
+    window.lastPreview = null;
+    window.setLastPreview = function(p) {
+        lastPreview = p;
+        if (viewer3d && document.getElementById('tab-3d').style.display !== 'none') {
+            viewer3d.updateFromPreview(p);
+        }
+    };
+</script>
+
+<script>
+const API = window.location.origin;
+let debounceTimer = null;
+let projectId = null;
+
+// --- Input change handler ---
+function onInputChange() {
+    // Update range display
+    document.getElementById('areaVal').textContent = document.getElementById('area').value + 'm2';
+
+    // Update cost estimate
+    updateCostEstimate();
+
+    // Debounce API call
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(fetchPreview, 300);
+}
+
+function getDesignData() {
+    return {
+        bedrooms: parseInt(document.getElementById('bedrooms').value),
+        bathrooms: parseInt(document.getElementById('bathrooms').value),
+        target_area_m2: parseFloat(document.getElementById('area').value),
+        floors: 1,
+        layout_type: (document.querySelector('input[name="layout"]:checked') || {}).value || 'open_kitchen',
+        has_garage: document.getElementById('has_garage').checked,
+        lot_width_m: parseFloat(document.getElementById('lot_width').value),
+        lot_depth_m: parseFloat(document.getElementById('lot_depth').value),
+        block_size: (document.querySelector('input[name="block"]:checked') || {}).value || '14',
+        ceiling_height_m: parseFloat(document.getElementById('ceiling').value),
+        soil_capacity_kpa: parseFloat(document.getElementById('soil').value),
+        roof_type: 'wooden_truss',
+        region: 'sudeste',
+        // Extended design fields
+        country: document.getElementById('country').value || 'BR',
+        street_side: (document.querySelector('input[name="street"]:checked') || {}).value || 'south',
+        sun_orientation_deg: 0,
+        style: (document.querySelector('input[name="style"]:checked') || {}).value || 'modern',
+        roof_style: (document.querySelector('input[name="roof"]:checked') || {}).value || 'gable',
+        privacy_priority: (document.querySelector('input[name="privacy"]:checked') || {}).value || 'balanced',
+        // Economic construction options
+        economy_mode: document.getElementById('economy_mode').checked,
+        foundation_type: (document.querySelector('input[name="foundation"]:checked') || {}).value || 'sapata_corrida',
+        structure_type: (document.querySelector('input[name="structure"]:checked') || {}).value || 'masonry',
+        roof_material: (document.querySelector('input[name="roof_mat"]:checked') || {}).value || 'ceramic',
+        slab_type: (document.querySelector('input[name="slab"]:checked') || {}).value || 'pre_moldada',
+        finish_level: (document.querySelector('input[name="finish"]:checked') || {}).value || 'basic',
+    };
+}
+
+// Cost ratios for each option (1.0 = reference)
+const COST_DATA = {
+    foundation: { sapata_corrida: 1.0, radier: 0.75 },
+    structure: { masonry: 1.0, self_supporting: 1.1 },
+    roof_mat: { ceramic: 1.0, fiber_cement: 0.65, sandwich: 0.80, metal: 0.55 },
+    roof: { gable: 1.0, hip: 1.15, shed: 0.75, flat: 1.3 },
+    slab: { pre_moldada: 1.0, macica: 1.5 },
+    finish: { basic: 0.7, standard: 1.0, premium: 1.5 },
+};
+
+// Weight of each system in total construction cost (approximate)
+const COST_WEIGHT = {
+    foundation: 0.08, structure: 0.25, roof_mat: 0.10,
+    roof: 0.05, slab: 0.12, finish: 0.15,
+};
+
+function onEconomyToggle() {
+    const eco = document.getElementById('economy_mode').checked;
+    // Highlight cheapest options visually
+    document.querySelectorAll('.cost-group label').forEach(lbl => lbl.classList.remove('eco-highlight'));
+    if (eco) {
+        document.getElementById('eco_hint').textContent = 'Opcoes mais economicas destacadas em verde';
+        // Highlight cheapest per group
+        const cheapest = {
+            foundation: 'fd_radier', structure: 'st_masonry',
+            roof_mat: 'rm_metal', slab: 'sl_pre', finish: 'fn_basic',
+        };
+        Object.values(cheapest).forEach(id => {
+            const el = document.getElementById(id);
+            if (el && el.nextElementSibling) el.nextElementSibling.classList.add('eco-highlight');
+        });
+    } else {
+        document.getElementById('eco_hint').textContent = '';
+    }
+    updateCostEstimate();
+    onInputChange();
+}
+
+function updateCostEstimate() {
+    const data = getDesignData();
+    const area = data.target_area_m2;
+
+    // Compute weighted cost index (1.0 = standard reference)
+    let costIndex = 0;
+    let totalWeight = 0;
+    for (const [system, weight] of Object.entries(COST_WEIGHT)) {
+        let val = null;
+        if (system === 'foundation') val = COST_DATA.foundation[data.foundation_type];
+        else if (system === 'structure') val = COST_DATA.structure[data.structure_type];
+        else if (system === 'roof_mat') val = COST_DATA.roof_mat[data.roof_material];
+        else if (system === 'roof') val = COST_DATA.roof[data.roof_style];
+        else if (system === 'slab') val = COST_DATA.slab[data.slab_type];
+        else if (system === 'finish') val = COST_DATA.finish[data.finish_level];
+        if (val != null) {
+            costIndex += val * weight;
+            totalWeight += weight;
+        }
+    }
+    if (totalWeight > 0) costIndex /= totalWeight;
+
+    // Reference CUB medio residencial ~R$2.200/m² (SINAPI 2024 simplificado)
+    const cubRef = 2200;
+    const estimatedTotal = Math.round(cubRef * costIndex * area / 1000) * 1000;
+    const standardTotal = Math.round(cubRef * area / 1000) * 1000;
+    const savings = standardTotal - estimatedTotal;
+
+    const el = document.getElementById('cost-estimate');
+    el.style.display = '';
+    document.getElementById('cost-label').textContent =
+        'R$ ' + estimatedTotal.toLocaleString('pt-BR') + ' (~R$ ' + Math.round(cubRef * costIndex).toLocaleString('pt-BR') + '/m2)';
+    if (savings > 0) {
+        document.getElementById('cost-savings').textContent =
+            '-R$ ' + savings.toLocaleString('pt-BR') + ' (' + Math.round(savings/standardTotal*100) + '% economia)';
+    } else {
+        document.getElementById('cost-savings').textContent = '';
+    }
+}
+
+async function fetchPreview() {
+    try {
+        const data = getDesignData();
+        const res = await fetch(`${API}/api/v1/design/preview`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || `HTTP ${res.status}`);
+        }
+        const preview = await res.json();
+        renderPreview(preview);
+        updateStats(preview);
+        window.setLastPreview(preview);
+    } catch (err) {
+        console.error('Preview error:', err);
+        document.getElementById('warn-bar').style.display = 'block';
+        document.getElementById('warn-text').textContent = 'Erro: ' + err.message;
+    }
+}
+
+function updateStats(preview) {
+    document.getElementById('s-area').textContent = preview.total_area_m2 || '--';
+    document.getElementById('s-rooms').textContent = (preview.rooms || []).length;
+    document.getElementById('s-walls').textContent = (preview.walls || []).length;
+    document.getElementById('s-block').textContent = preview.block_size_cm || '14';
+    document.getElementById('s-country').textContent = preview.country || 'BR';
+
+    // Economy mode indicator
+    const ecoItem = document.getElementById('s-eco-item');
+    ecoItem.style.display = document.getElementById('economy_mode').checked ? '' : 'none';
+
+    document.getElementById('warn-bar').style.display = 'none';
+}
+
+function renderPreview(preview) {
+    const svg = document.getElementById('preview-svg');
+    const W = preview.width_m;
+    const D = preview.depth_m;
+    const scale = 500 / Math.max(W, D);
+    const ox = (600 - W * scale) / 2;
+    const oy = (500 - D * scale) / 2;
+
+    const roomColors = {
+        bedroom: '#3B82F6', living: '#10B981', kitchen: '#F59E0B',
+        bathroom: '#6366F1', service: '#8B5CF6', circulation: '#6B7280', garage: '#9CA3AF',
+    };
+
+    let html = '';
+
+    // Rooms
+    (preview.rooms || []).forEach(room => {
+        const pts = room.polygon.map(p => `${ox + p[0]*scale},${oy + (D - p[1])*scale}`).join(' ');
+        const fill = roomColors[room.type] || '#555';
+        html += `<polygon points="${pts}" fill="${fill}" fill-opacity="0.12" stroke="${fill}" stroke-width="0.5"/>`;
+
+        const cx = room.polygon.reduce((s, p) => s + p[0], 0) / room.polygon.length;
+        const cy = room.polygon.reduce((s, p) => s + p[1], 0) / room.polygon.length;
+        const tx = ox + cx * scale;
+        const ty = oy + (D - cy) * scale;
+        html += `<text x="${tx}" y="${ty - 6}" text-anchor="middle" fill="${fill}" font-size="10" font-family="Geist,sans-serif" font-weight="500">${room.name}</text>`;
+        html += `<text x="${tx}" y="${ty + 8}" text-anchor="middle" fill="#666" font-size="8" font-family="Geist Mono,monospace">${room.area_m2}m2</text>`;
+    });
+
+    // Walls
+    (preview.walls || []).forEach(wall => {
+        const x1 = ox + wall.start[0] * scale;
+        const y1 = oy + (D - wall.start[1]) * scale;
+        const x2 = ox + wall.end[0] * scale;
+        const y2 = oy + (D - wall.end[1]) * scale;
+        const sw = Math.max(wall.thickness_m * scale * 0.5, 1.5);
+        html += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#F5F5F7" stroke-width="${sw}" stroke-linecap="round"/>`;
+
+        // Openings
+        (wall.openings || []).forEach(op => {
+            const dx = wall.end[0] - wall.start[0];
+            const dy = wall.end[1] - wall.start[1];
+            const len = Math.sqrt(dx*dx + dy*dy);
+            if (len < 0.01) return;
+            const nx = dx/len, ny = dy/len;
+            const t = (op.position_m || 0.15) / len;
+            const t2 = Math.min(t + (op.width_m || 0.8) / len, 1);
+
+            const ox1 = ox + (wall.start[0] + dx*t) * scale;
+            const oy1 = oy + (D - (wall.start[1] + dy*t)) * scale;
+            const ox2 = ox + (wall.start[0] + dx*t2) * scale;
+            const oy2 = oy + (D - (wall.start[1] + dy*t2)) * scale;
+
+            if (op.type === 'door') {
+                html += `<line x1="${ox1}" y1="${oy1}" x2="${ox2}" y2="${oy2}" stroke="var(--bg)" stroke-width="${sw + 1}"/>`;
+                html += `<line x1="${ox1}" y1="${oy1}" x2="${ox2}" y2="${oy2}" stroke="#F59E0B" stroke-width="1" stroke-dasharray="3,2"/>`;
+            } else {
+                html += `<line x1="${ox1}" y1="${oy1}" x2="${ox2}" y2="${oy2}" stroke="var(--bg)" stroke-width="${sw + 1}"/>`;
+                html += `<line x1="${ox1}" y1="${oy1}" x2="${ox2}" y2="${oy2}" stroke="#3B82F6" stroke-width="1.5"/>`;
+            }
+        });
+    });
+
+    // Dimensions
+    const dimY = oy + D * scale + 25;
+    html += `<line x1="${ox}" y1="${dimY}" x2="${ox + W*scale}" y2="${dimY}" stroke="#444" stroke-width="0.5"/>`;
+    html += `<text x="${ox + W*scale/2}" y="${dimY + 14}" text-anchor="middle" fill="#666" font-size="10" font-family="Geist Mono,monospace">${W.toFixed(2)}m</text>`;
+
+    const dimX = ox - 25;
+    html += `<line x1="${dimX}" y1="${oy}" x2="${dimX}" y2="${oy + D*scale}" stroke="#444" stroke-width="0.5"/>`;
+    html += `<text x="${dimX}" y="${oy + D*scale/2}" text-anchor="middle" fill="#666" font-size="10" font-family="Geist Mono,monospace" transform="rotate(-90,${dimX},${oy + D*scale/2})">${D.toFixed(2)}m</text>`;
+
+    // Street side indicator
+    const street = getDesignData().street_side;
+    const streetLabel = {south:'RUA (Sul)', north:'RUA (Norte)', east:'RUA (Leste)', west:'RUA (Oeste)'}[street] || 'RUA';
+    if (street === 'south') {
+        html += `<text x="${ox + W*scale/2}" y="${oy + D*scale + 40}" text-anchor="middle" fill="var(--accent)" font-size="9" font-family="Geist Mono,monospace" opacity="0.6">${streetLabel}</text>`;
+    } else if (street === 'north') {
+        html += `<text x="${ox + W*scale/2}" y="${oy - 10}" text-anchor="middle" fill="var(--accent)" font-size="9" font-family="Geist Mono,monospace" opacity="0.6">${streetLabel}</text>`;
+    } else if (street === 'east') {
+        html += `<text x="${ox + W*scale + 15}" y="${oy + D*scale/2}" text-anchor="start" fill="var(--accent)" font-size="9" font-family="Geist Mono,monospace" opacity="0.6" transform="rotate(90,${ox + W*scale + 15},${oy + D*scale/2})">${streetLabel}</text>`;
+    } else if (street === 'west') {
+        html += `<text x="${ox - 15}" y="${oy + D*scale/2}" text-anchor="start" fill="var(--accent)" font-size="9" font-family="Geist Mono,monospace" opacity="0.6" transform="rotate(-90,${ox - 15},${oy + D*scale/2})">${streetLabel}</text>`;
+    }
+
+    // Driveway and vehicle access
+    const va = preview.vehicle_access;
+    if (va && va.driveway) {
+        const dw = va.driveway;
+        // Draw driveway zone (setback area from garage to street)
+        const dx0 = ox + Math.max(dw.x0, 0) * scale;
+        const dy0 = oy + (D - Math.min(dw.y1, D)) * scale;
+        const dw_w = Math.abs(dw.x1 - Math.max(dw.x0, 0)) * scale;
+        const dw_h = Math.abs(Math.min(dw.y1, D) - Math.max(dw.y0, 0)) * scale;
+
+        // Driveway surface
+        html += `<rect x="${dx0}" y="${dy0}" width="${dw_w}" height="${dw_h}" fill="#9CA3AF" fill-opacity="0.08" stroke="#9CA3AF" stroke-width="0.5" stroke-dasharray="4,3"/>`;
+
+        // Access arrow showing car entry direction
+        const gb = va.garage_bounds;
+        const gcx = ox + ((gb.x0 + gb.x1) / 2) * scale;
+        const gcy = oy + (D - (gb.y0 + gb.y1) / 2) * scale;
+        const arrowLen = 20;
+
+        let ax1, ay1, ax2, ay2;
+        if (dw.direction === 'south') {
+            ax1 = gcx; ay1 = oy + D * scale + 15;
+            ax2 = gcx; ay2 = gcy + 5;
+        } else if (dw.direction === 'north') {
+            ax1 = gcx; ay1 = oy - 15;
+            ax2 = gcx; ay2 = gcy - 5;
+        } else if (dw.direction === 'west') {
+            ax1 = ox - 15; ay1 = gcy;
+            ax2 = dx0 + 5; ay2 = gcy;
+        } else {
+            ax1 = ox + W * scale + 15; ay1 = gcy;
+            ax2 = ox + (gb.x1) * scale - 5; ay2 = gcy;
+        }
+        html += `<line x1="${ax1}" y1="${ay1}" x2="${ax2}" y2="${ay2}" stroke="#9CA3AF" stroke-width="1" marker-end="url(#arrow)" opacity="0.5"/>`;
+        html += `<text x="${(ax1+ax2)/2 + 8}" y="${(ay1+ay2)/2 - 4}" fill="#9CA3AF" font-size="7" font-family="Geist Mono,monospace" opacity="0.5">acesso</text>`;
+    }
+
+    // Arrow marker definition
+    html = `<defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#9CA3AF" opacity="0.5"/></marker></defs>` + html;
+
+    svg.innerHTML = html;
+}
+
+// --- Section toggle ---
+function toggleSection(header) {
+    header.classList.toggle('collapsed');
+    const body = header.nextElementSibling;
+    body.classList.toggle('hidden');
+}
+
+// --- File generation ---
+async function generateFiles() {
+    const btn = document.getElementById('btn-generate');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-sm"></span>Gerando...';
+
+    try {
+        const data = getDesignData();
+        // Use the existing projects endpoint for full generation
+        const res = await fetch(`${API}/api/v1/projects`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const { id } = await res.json();
+        projectId = id;
+
+        // Poll
+        for (let i = 0; i < 60; i++) {
+            await new Promise(r => setTimeout(r, 1000));
+            const sr = await fetch(`${API}/api/v1/projects/${id}/status`);
+            const sd = await sr.json();
+            if (sd.status === 'done') {
+                showDownloads(sd);
+                return;
+            }
+            if (sd.status === 'error') throw new Error(sd.error || 'Pipeline falhou');
+        }
+        throw new Error('Timeout');
+    } catch (err) {
+        alert('Erro: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Gerar Arquivos (DXF + PDF)';
+    }
+}
+
+function showDownloads(data) {
+    const grid = document.getElementById('dl-grid');
+    grid.innerHTML = '';
+    const files = [
+        { key: 'has_arch_dxf', url: `/api/v1/projects/${projectId}/download/dxf/arch`, ext: 'DXF', name: 'Planta Arquitetonica' },
+        { key: 'has_struct_dxf', url: `/api/v1/projects/${projectId}/download/dxf/struct`, ext: 'DXF', name: 'Planta Estrutural' },
+        { key: 'has_memorial_pdf', url: `/api/v1/projects/${projectId}/download/pdf`, ext: 'PDF', name: 'Memorial de Calculo' },
+        { key: 'has_bom_csv', url: `/api/v1/projects/${projectId}/download/csv`, ext: 'CSV', name: 'Lista de Materiais' },
+        { key: 'has_ifc', url: `/api/v1/projects/${projectId}/download/ifc`, ext: 'IFC', name: 'Modelo BIM' },
+        { key: 'has_zip', url: `/api/v1/projects/${projectId}/download/zip`, ext: 'ZIP', name: 'Pacote Completo' },
+    ];
+    files.forEach(f => {
+        if (data[f.key]) {
+            const a = document.createElement('a');
+            a.href = f.url;
+            a.className = 'dl-btn';
+            a.innerHTML = `<span class="ext">${f.ext}</span><span class="name">${f.name}</span>`;
+            grid.appendChild(a);
+        }
+    });
+    document.getElementById('dl-modal').classList.add('active');
+}
+
+function closeModal() {
+    document.getElementById('dl-modal').classList.remove('active');
+}
+
+// Initial load
+document.addEventListener('DOMContentLoaded', () => fetchPreview());
+</script>
+</body>
+</html>

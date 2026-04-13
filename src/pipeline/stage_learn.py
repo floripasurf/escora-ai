@@ -8,16 +8,27 @@ After each DXF is processed, this stage records what happened:
 
 This data accumulates in the LearningStore and is used to improve
 future runs (layer prioritization, default sections, threshold tuning).
+
+Additionally, the source DXF and a results snapshot are preserved in
+data/learning/files/ so a training dataset grows organically.
 """
 
+import hashlib
+import json
+import logging
+import os
+import shutil
 from collections import Counter
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from src.models.pipeline_models import PipelineResult, ElementType
 from src.pipeline.learning_store import LearningRecord, LearningStore, LayerLearning
 from src.pipeline.stage_segment import LevelSegment
 from src.parser.segment_classifier import find_beam_candidates, find_pillar_candidates
+
+logger = logging.getLogger(__name__)
 
 
 def extract_learning(
@@ -145,10 +156,95 @@ def extract_learning(
     )
 
 
+def _learning_files_dir() -> Path:
+    """Directory where input DXFs and result snapshots are preserved."""
+    return Path(os.environ.get("ESCORA_DATA_DIR", "./data")) / "learning" / "files"
+
+
+def _preserve_source_file(source_path: str, result: PipelineResult) -> None:
+    """Copy input DXF and save a results JSON snapshot for future training.
+
+    Files are stored as:
+        data/learning/files/{stem}_{hash8}/input.dxf
+        data/learning/files/{stem}_{hash8}/results.json
+
+    The hash is derived from file content so re-runs of the same file
+    overwrite the previous snapshot (dedup by content, not name).
+    """
+    src = Path(source_path)
+    if not src.exists():
+        return
+
+    # Content hash for dedup (first 8 hex chars)
+    h = hashlib.md5()
+    with open(src, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    content_hash = h.hexdigest()[:8]
+
+    stem = src.stem
+    dest_dir = _learning_files_dir() / f"{stem}_{content_hash}"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    # Copy input DXF (only if not already there)
+    dest_dxf = dest_dir / f"input{src.suffix}"
+    if not dest_dxf.exists():
+        shutil.copy2(str(src), str(dest_dxf))
+
+    # Save results snapshot
+    calc = result.calculation
+    snapshot = {
+        "filename": result.filename,
+        "timestamp": datetime.now().isoformat(),
+        "scale": result.scale,
+        "construction_type": result.construction_type,
+        "slab_type": result.slab_type,
+        "warnings": result.warnings[:50],
+        "beam_count": sum(
+            1 for lvl in result.levels for e in lvl.elements
+            if e.element_type == ElementType.BEAM
+        ),
+        "pillar_count": sum(
+            1 for lvl in result.levels for e in lvl.elements
+            if e.element_type == ElementType.PILLAR
+        ),
+    }
+    if calc:
+        snapshot["total_shores"] = getattr(calc, "total_shores", 0)
+        snapshot["total_load_kn"] = getattr(calc, "total_load_kn", 0.0)
+        snapshot["is_valid"] = getattr(calc, "is_valid", False)
+        snapshot["beam_results_count"] = len(getattr(calc, "beam_results", []))
+        snapshot["slab_results_count"] = len(getattr(calc, "slab_results", []))
+        # Save per-beam summary
+        beam_summaries = []
+        for br in getattr(calc, "beam_results", []):
+            beam_summaries.append({
+                "name": getattr(br, "name", None) or getattr(getattr(br, "beam", None), "name", None),
+                "shore_count": getattr(br, "shore_count", 0),
+                "spacing_m": getattr(br, "spacing_m", 0),
+            })
+        snapshot["beam_results"] = beam_summaries[:200]
+        # Save per-slab summary
+        slab_summaries = []
+        for sr in getattr(calc, "slab_results", []):
+            slab_summaries.append({
+                "area_m2": getattr(sr, "area_m2", 0),
+                "thickness_m": getattr(sr, "thickness_m", 0),
+                "shore_count": getattr(sr, "shore_count", 0),
+            })
+        snapshot["slab_results"] = slab_summaries[:200]
+
+    (dest_dir / "results.json").write_text(
+        json.dumps(snapshot, indent=2, ensure_ascii=False)
+    )
+    logger.info(f"Preserved learning files: {dest_dir}")
+
+
 def learn_and_save(
     result: PipelineResult,
     level_segments: Optional[list] = None,
     store: Optional[LearningStore] = None,
+    source_dxf_path: Optional[str] = None,
 ) -> LearningRecord:
     """Extract learning from a pipeline run and save it.
 
@@ -156,6 +252,7 @@ def learn_and_save(
         result: Completed PipelineResult.
         level_segments: Original level segments for layer analysis.
         store: LearningStore instance (creates default if None).
+        source_dxf_path: Path to the original input DXF (preserved for training).
 
     Returns:
         The saved LearningRecord.
@@ -165,4 +262,12 @@ def learn_and_save(
 
     record = extract_learning(result, level_segments)
     store.add(record)
+
+    # Preserve source file + results for future training
+    if source_dxf_path:
+        try:
+            _preserve_source_file(source_dxf_path, result)
+        except Exception as e:
+            logger.warning(f"Failed to preserve learning files (non-fatal): {e}")
+
     return record
