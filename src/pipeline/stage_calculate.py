@@ -1342,33 +1342,13 @@ def run_calculation(
             exclusions=all_exclusions,
         )
 
-        # === CAPITEL DENSIFICATION (Orguel Q6) ===
-        # Laje lisa (não nervurada, não em balanço): densificar grid ao redor
-        # de cada pilar no anel 0.70-1.50m, com espaçamento 30% menor.
-        if not is_cantilever:
-            from src.engine.capitel_densification import (
-                capitel_densification_shores,
-            )
-            pillar_xy = [
-                (p.geometry[0][0], p.geometry[0][1])
-                for p in pillars
-                if p.element_type == ElementType.PILLAR and p.geometry
-            ]
-            extra_shores = capitel_densification_shores(
-                polygon=polygon,
-                shore_entry=selected_shore,
-                pillar_positions=pillar_xy,
-                existing_shores=shores,
-                max_spacing=max_spacing,
-            )
-            shores.extend(extra_shores)
-
         # === MIXED SLAB SUPPORT ===
-        # Swap a fraction of shores to tower entries at evenly spaced positions
-        # within the grid, matching Orguel practice of scattered towers on slabs.
+        # Runs BEFORE capitel densification (Orguel Q6): só o grid regular
+        # recebe torres distribuídas. O anel de capitel, adicionado depois,
+        # permanece 100% telescópico — torres grudadas a pilares em pé
+        # direito baixo não fazem sentido e contradizem a prática Orguel.
         if (slab_support_type == SupportType.MIXED and use_tower_entry is not None
                 and len(shores) >= 4):
-            import math as _m
             n_tower = max(2, round(len(shores) * slab_tower_fraction))
             n_tower = min(n_tower, len(shores))
             # Pick tower positions: evenly distributed across the grid
@@ -1389,6 +1369,29 @@ def run_calculation(
                     support_type=SupportType.TOWER,
                     tower=slab_tower,
                 )
+
+        # === CAPITEL DENSIFICATION (Orguel Q6) ===
+        # Laje lisa (não nervurada, não em balanço): densificar grid ao redor
+        # de cada pilar no anel 0.70-1.50m, com espaçamento 30% menor.
+        # Rodamos APÓS o swap MIXED para garantir que as escoras de capitel
+        # fiquem sempre telescópicas (ver comentário do bloco MIXED acima).
+        if not is_cantilever:
+            from src.engine.capitel_densification import (
+                capitel_densification_shores,
+            )
+            pillar_xy = [
+                (p.geometry[0][0], p.geometry[0][1])
+                for p in pillars
+                if p.element_type == ElementType.PILLAR and p.geometry
+            ]
+            extra_shores = capitel_densification_shores(
+                polygon=polygon,
+                shore_entry=selected_shore,
+                pillar_positions=pillar_xy,
+                existing_shores=shores,
+                max_spacing=max_spacing,
+            )
+            shores.extend(extra_shores)
 
         is_valid, errors = validate_result(shores, sx, sy)
         validation_errors.extend(errors)
