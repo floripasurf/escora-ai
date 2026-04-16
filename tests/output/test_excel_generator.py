@@ -68,7 +68,7 @@ class TestExcelGenerator:
         path = str(tmp_path / "test.xlsx")
         generate_excel(_report_with_data(), path)
         wb = load_workbook(path)
-        assert wb.sheetnames == ["BOM", "Vigas", "Lajes"]
+        assert wb.sheetnames == ["BOM", "Vigas", "Lajes", "Volumes", "Consumo"]
 
     def test_bom_sheet_headers(self, tmp_path):
         path = str(tmp_path / "test.xlsx")
@@ -107,4 +107,4 @@ class TestExcelGenerator:
         generate_excel(_empty_report(), path)
         assert os.path.exists(path)
         wb = load_workbook(path)
-        assert wb.sheetnames == ["BOM", "Vigas", "Lajes"]
+        assert wb.sheetnames == ["BOM", "Vigas", "Lajes", "Volumes", "Consumo"]

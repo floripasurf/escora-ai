@@ -91,9 +91,25 @@
         .stat-item { font-size:12px; color:var(--fg-dim); }
         .stat-item .stat-val { font-family:var(--mono); font-weight:600; color:var(--accent); margin-right:4px; }
 
+        /* Template selector */
+        .template-selector { padding:12px 16px; background:var(--bg-1); border-bottom:1px solid var(--line-soft); overflow-x:auto; }
+        .template-cards { display:flex; gap:10px; }
+        .template-card {
+            flex:0 0 auto; width:140px; padding:10px 12px; background:var(--bg-2); border:2px solid var(--line);
+            border-radius:var(--radius-sm); cursor:pointer; transition:all .2s; position:relative;
+        }
+        .template-card:hover { border-color:var(--accent-line); background:var(--bg-3); }
+        .template-card.active { border-color:var(--accent); background:var(--accent-soft); }
+        .template-card .tc-name { font-size:11px; font-weight:600; color:var(--fg); margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .template-card .tc-type { font-size:9px; font-family:var(--mono); color:var(--fg-mute); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.05em; }
+        .template-card .tc-mini { height:60px; margin-bottom:6px; }
+        .template-card .tc-mini svg { width:100%; height:100%; }
+        .template-card .tc-area { font-size:10px; font-family:var(--mono); color:var(--accent); }
+        .template-card .tc-score { position:absolute; top:6px; right:8px; font-size:8px; font-family:var(--mono); color:var(--fg-mute); }
+
         /* SVG canvas */
         .preview-canvas { flex:1; display:flex; align-items:center; justify-content:center; padding:20px; }
-        .preview-canvas svg { max-width:100%; max-height:calc(100vh - 160px); }
+        .preview-canvas svg { max-width:100%; max-height:calc(100vh - 220px); }
         #tab-3d { display:none; }
         #viewer3d-container { width:100%; height:calc(100vh - 160px); }
 
@@ -449,6 +465,11 @@
                 <div class="stat-item" id="s-eco-item" style="display:none;"><span class="stat-val" id="s-eco" style="color:var(--ok);">ECO</span></div>
             </div>
 
+            <!-- Template alternatives selector -->
+            <div class="template-selector" id="template-selector" style="display:none;">
+                <div class="template-cards" id="template-cards"></div>
+            </div>
+
             <div class="preview-canvas" id="tab-2d">
                 <svg id="preview-svg" viewBox="0 0 600 500"></svg>
             </div>
@@ -523,6 +544,8 @@
 const API = window.location.origin;
 let debounceTimer = null;
 let projectId = null;
+let currentAlternatives = [];
+let selectedTemplateId = null;
 
 // --- Input change handler ---
 function onInputChange() {
@@ -532,9 +555,10 @@ function onInputChange() {
     // Update cost estimate
     updateCostEstimate();
 
-    // Debounce API call
+    // Debounce API call — fetch alternatives first, then preview
     clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(fetchPreview, 300);
+    selectedTemplateId = null;
+    debounceTimer = setTimeout(fetchAlternatives, 300);
 }
 
 function getDesignData() {
@@ -647,9 +671,116 @@ function updateCostEstimate() {
     }
 }
 
-async function fetchPreview() {
+async function fetchAlternatives() {
     try {
         const data = getDesignData();
+        const res = await fetch(`${API}/api/v1/design/alternatives`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        });
+        if (!res.ok) {
+            // Fallback to single preview if alternatives endpoint fails
+            return fetchPreview();
+        }
+        const result = await res.json();
+        currentAlternatives = result.alternatives || [];
+        renderTemplateCards(currentAlternatives);
+
+        // Auto-select first (or previously selected if still available)
+        const stillAvailable = selectedTemplateId && currentAlternatives.find(a => a.id === selectedTemplateId);
+        const autoId = stillAvailable ? selectedTemplateId : (currentAlternatives[0] || {}).id;
+        if (autoId) {
+            selectTemplate(autoId);
+        }
+    } catch (err) {
+        console.error('Alternatives error:', err);
+        fetchPreview();
+    }
+}
+
+function renderTemplateCards(alternatives) {
+    const container = document.getElementById('template-cards');
+    const selector = document.getElementById('template-selector');
+
+    if (!alternatives.length) {
+        selector.style.display = 'none';
+        return;
+    }
+    selector.style.display = '';
+
+    const roomColors = {
+        bedroom: '#3B82F6', living: '#10B981', kitchen: '#F59E0B',
+        bathroom: '#6366F1', service: '#8B5CF6', circulation: '#6B7280',
+        garage: '#9CA3AF', varanda: '#34D399',
+    };
+
+    const typeLabels = {
+        rectangle: 'Retangular', l_shape: 'Em L', u_shape: 'Em U',
+    };
+
+    container.innerHTML = alternatives.map((alt, i) => {
+        const isActive = (selectedTemplateId === alt.id || (!selectedTemplateId && i === 0)) ? 'active' : '';
+        const W = alt.preferred_width_m || 8;
+        const D = alt.preferred_depth_m || 8;
+        const scale = 50 / Math.max(W, D);
+        const svgW = W * scale;
+        const svgD = D * scale;
+
+        // Mini zone rendering
+        let miniSvg = '';
+        (alt.zones || []).forEach(z => {
+            const zx = (z.anchor_x - (alt.zones[0]?.anchor_x || 0)) * scale;
+            const zy = (z.anchor_y - Math.min(...alt.zones.map(zz => zz.anchor_y))) * scale;
+            const zw = z.width_m * scale;
+            const zd = z.depth_m * scale;
+            const fill = z.is_outdoor ? '#34D399' : '#3B82F6';
+            const opacity = z.is_outdoor ? 0.15 : 0.08;
+            miniSvg += `<rect x="${zx}" y="${zy}" width="${zw}" height="${zd}" fill="${fill}" fill-opacity="${opacity}" stroke="${fill}" stroke-width="0.5" stroke-opacity="0.4"/>`;
+        });
+
+        // Room mini boxes
+        (alt.rooms || []).forEach(r => {
+            const fill = roomColors[r.type] || '#555';
+            // Find zone for this room to estimate position
+            miniSvg += ''; // Zones already give shape outline
+        });
+
+        const areaStr = alt.area_range ? `${alt.area_range[0]}-${alt.area_range[1]}m2` : '';
+        const typeStr = typeLabels[alt.typology] || alt.typology;
+        const tags = (alt.tags || []).filter(t => !['mcmv','cozinha_integrada'].includes(t)).slice(0, 2);
+        const tagStr = tags.length ? tags.join(', ') : '';
+
+        return `
+            <div class="template-card ${isActive}" onclick="selectTemplate('${alt.id}')" data-id="${alt.id}">
+                <div class="tc-score">${Math.round(alt.score)}pt</div>
+                <div class="tc-name">${alt.name}</div>
+                <div class="tc-type">${typeStr}${tagStr ? ' · ' + tagStr : ''}</div>
+                <div class="tc-mini">
+                    <svg viewBox="0 0 ${Math.ceil(svgW + 4)} ${Math.ceil(svgD + 4)}" preserveAspectRatio="xMidYMid meet">
+                        <g transform="translate(2,2)">${miniSvg}</g>
+                    </svg>
+                </div>
+                <div class="tc-area">${areaStr}</div>
+            </div>
+        `;
+    }).join('');
+}
+
+function selectTemplate(templateId) {
+    selectedTemplateId = templateId;
+    // Update card active states
+    document.querySelectorAll('.template-card').forEach(card => {
+        card.classList.toggle('active', card.dataset.id === templateId);
+    });
+    // Fetch full preview with this template
+    fetchPreview(templateId);
+}
+
+async function fetchPreview(templateId) {
+    try {
+        const data = getDesignData();
+        if (templateId) data.template_id = templateId;
         const res = await fetch(`${API}/api/v1/design/preview`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -885,7 +1016,7 @@ function closeModal() {
 }
 
 // Initial load
-document.addEventListener('DOMContentLoaded', () => fetchPreview());
+document.addEventListener('DOMContentLoaded', () => fetchAlternatives());
 </script>
 </body>
 </html>

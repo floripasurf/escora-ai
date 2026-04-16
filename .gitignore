@@ -33,3 +33,9 @@ output/
 !tests/output/
 uploads/
 .vercel
+data/*.db
+data/*.db-*
+input/**/*.dxf
+input/**/*.DXF
+input/**/*.pdf
+input/**/*.docx

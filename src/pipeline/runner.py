@@ -385,6 +385,17 @@ def run_pipeline(
                     "is_closed": pl.is_closed,
                 })
 
+        # Colecta textos crus (TEXT/MTEXT) para extração de rótulos de cômodo
+        # e nomes estruturais (L3, QUARTO 1…) próximos a cada painel de laje.
+        all_texts: List[dict] = []
+        for seg in level_segments:
+            for t in seg.texts:
+                all_texts.append({
+                    "text": t.content,
+                    "position": (t.x * scale, t.y * scale),
+                    "layer": t.layer,
+                })
+
         try:
             calculation = run_calculation(
                 elements=all_elements,
@@ -402,7 +413,37 @@ def run_pipeline(
                 density_correction=density_correction,
                 mode=mode,
                 inventory=inventory,
+                text_entities=all_texts,
             )
+            # A1: Resumo agregado por categoria para diagnóstico rápido.
+            # Em projetos TQS com layers numéricos a classificação por keyword
+            # nunca dispara e só geometria recategoriza — esta linha permite
+            # ao usuário detectar se o pipeline perdeu algum beiral/balanço.
+            # INSERIDA ANTES das warnings de cálculo para garantir visibilidade
+            # mesmo quando há centenas de warnings ML/torre.
+            diagnostic_lines: List[str] = []
+            if calculation.slab_results:
+                from collections import Counter as _Counter
+                cat_counts = _Counter(
+                    sr.category for sr in calculation.slab_results
+                )
+                diagnostic_lines.append(
+                    "Painéis: "
+                    f"{cat_counts.get('laje', 0)} lajes · "
+                    f"{cat_counts.get('beiral', 0)} beirais · "
+                    f"{cat_counts.get('platibanda', 0)} platibandas · "
+                    f"{cat_counts.get('balanco', 0)} balanços · "
+                    f"{cat_counts.get('cantilever', 0)} cantilevers"
+                )
+            # A2 em destaque: linhas de eixo e strips descartados vêm de
+            # calculation.warnings e devem aparecer no topo também.
+            for w in list(calculation.warnings):
+                if w.startswith("Painéis descartados") or w.endswith(
+                    "descartadas do cálculo"
+                ):
+                    diagnostic_lines.append(w)
+            # Prepend diagnostics, then append the full calculation warnings
+            warnings[:0] = diagnostic_lines
             warnings.extend(calculation.warnings)
         except Exception as e:
             warnings.append(f"Cálculo falhou: {e}")

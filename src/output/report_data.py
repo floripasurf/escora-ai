@@ -1,11 +1,24 @@
 """Extract and normalize report data from CalculationResult."""
 
 from dataclasses import dataclass, field
-from typing import List, Optional
-from collections import Counter
+from typing import Dict, List, Optional, Tuple
+from collections import Counter, defaultdict
 
 from src.models.calculation_models import CalculationResult
 from src.utils.constants import ESPESSURA_DEFAULT
+from src.utils.labels import CATEGORY_DEFAULT, CATEGORY_LABELS_PT
+
+
+# Aproximação de vigas vazadas (distribution beams) por torre.
+# Razão prática medida em projetos Supplier:
+# - Vigas (beam): 2 trilhos × (n_towers−1) gaps ⇒ ~1.5/torre
+# - Lajes em grid quadrado nx×ny: 2nx(ny−1) ⇒ ~1.3-1.5/torre
+# Valor usado: 2.0 (lado conservador para orçamento de peso).
+VIGAS_VAZADAS_POR_TORRE = 2.0
+
+# Prefixos para classificação de BOM rows como acessórios.
+ACCESSORY_ID_PREFIXES = ("CRZ-", "VD-")
+SHORE_TOWER_ID_PREFIX = "TWR-"
 
 
 @dataclass
@@ -72,6 +85,33 @@ class BomRow:
 
 
 @dataclass
+class VolumeRow:
+    """Linha didática da aba `Volumes` (um painel/elemento por linha)."""
+    category: str            # chave: "laje" | "beiral" | ...
+    category_label: str      # rótulo PT: "Laje", "Beiral", ...
+    element: str             # rótulo completo do painel: "Laje 1 (Quarto 1)"
+    area_m2: float
+    pe_direito_m: float
+    volume_m3: float
+
+
+@dataclass
+class ConsumptionByHeightRow:
+    """Linha agregada de consumo de escoramento por (pé-direito, categoria)."""
+    pe_direito_m: float            # chave do grupo (arredondado 2 casas)
+    area_m2: float                 # Σ áreas dos painéis
+    volume_bruto_m3: float         # Σ (area × pe_direito) do grupo
+    volume_liquido_m3: float       # bruto − vigas − pilares (pro-rata)
+    shores_weight_kg: float        # peso das escoras (telescópicas + torres)
+    accessories_weight_kg: float   # cruzetas + vigas vazadas (pro-rata)
+    total_weight_kg: float         # shores + accessories
+    rate_kg_m3_bruto: float        # total / volume_bruto
+    rate_kg_m3_liquido: float      # total / volume_liquido
+    rate_kg_m2: float              # total / area
+    category_label: str = "Laje"   # rótulo PT da categoria do grupo
+
+
+@dataclass
 class ReportData:
     project_name: str
     date: str
@@ -80,6 +120,10 @@ class ReportData:
     slab_rows: List[SlabRow] = field(default_factory=list)
     bom_rows: List[BomRow] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+    volume_rows: List[VolumeRow] = field(default_factory=list)
+    volume_totals: Dict[str, float] = field(default_factory=dict)
+    consumption_rows: List[ConsumptionByHeightRow] = field(default_factory=list)
+    consumption_totals: Dict[str, float] = field(default_factory=dict)
 
 
 def _format_section(width_m: Optional[float], height_m: Optional[float]) -> str:
@@ -205,6 +249,32 @@ def build_report_data(
     except Exception:
         pass
 
+    # Accessories — vigas vazadas (distribution beams) por modelo VM*
+    # Conta torres com distribution_beam associada × razão prática.
+    bom_rows.extend(_build_distribution_beam_bom_rows(calc))
+
+    # Volume breakdown → linhas da aba Volumes
+    volume_rows: List[VolumeRow] = []
+    for entry in calc.volume_breakdown:
+        volume_rows.append(VolumeRow(
+            category=entry.category,
+            category_label=CATEGORY_LABELS_PT.get(entry.category, entry.category.title()),
+            element=entry.label,
+            area_m2=entry.area_m2,
+            pe_direito_m=entry.pe_direito_m,
+            volume_m3=entry.volume_m3,
+        ))
+
+    volume_totals: Dict[str, float] = {
+        "bruto_m3": calc.slab_volume_gross_m3,
+        "vigas_m3": calc.beam_volume_deducted_m3,
+        "pilares_m3": calc.pillar_volume_deducted_m3,
+        "liquido_m3": calc.total_volume_m3,
+    }
+
+    # Consumo por pé-direito (resumo interno de orçamento)
+    consumption_rows, consumption_totals = _build_consumption_rows(calc, bom_rows)
+
     # Warnings — merge warnings + validation_errors
     all_warnings = list(calc.warnings)
     for err in calc.validation_errors:
@@ -218,4 +288,180 @@ def build_report_data(
         slab_rows=slab_rows,
         bom_rows=bom_rows,
         warnings=all_warnings,
+        volume_rows=volume_rows,
+        volume_totals=volume_totals,
+        consumption_rows=consumption_rows,
+        consumption_totals=consumption_totals,
     )
+
+
+# ----------------------------------------------------------------------------
+# Helpers para consumo por pé-direito e vigas vazadas no BOM
+# ----------------------------------------------------------------------------
+
+def _build_distribution_beam_bom_rows(calc: CalculationResult) -> List[BomRow]:
+    """Agrega vigas vazadas (distribution_beams) em linhas de BOM.
+
+    Conta torres com `distribution_beam` associado e multiplica por
+    `VIGAS_VAZADAS_POR_TORRE` (aproximação de trilhos por torre).
+    Peso por unidade = `max_span_m × weight_per_m_kg`.
+
+    Nota: hoje apenas torres de vigas (beam_results) recebem
+    `distribution_beam` no pipeline. Torres de lajes ficam fora até o
+    pipeline anexar a viga escolhida a elas.
+    """
+    # id_db -> [DistributionBeamEntry, tower_count]
+    db_counts: Dict[str, List] = {}
+
+    def _collect(shore_list):
+        for s in shore_list:
+            db = getattr(s, "distribution_beam", None)
+            if db is None:
+                continue
+            if getattr(s, "support_type", None) is None:
+                continue
+            # Só contamos torres (escoras telescópicas não usam viga vazada)
+            from src.models.shore import SupportType
+            if s.support_type != SupportType.TOWER:
+                continue
+            entry = db_counts.setdefault(db.id, [db, 0])
+            entry[1] += 1
+
+    for br in calc.beam_results:
+        _collect(br.shores)
+    for sr in calc.slab_results:
+        _collect(sr.shores)
+
+    rows: List[BomRow] = []
+    for _db_id, (db, tower_count) in db_counts.items():
+        qty = int(round(tower_count * VIGAS_VAZADAS_POR_TORRE))
+        if qty <= 0:
+            continue
+        weight_unit = round(db.max_span_m * db.weight_per_m_kg, 2)
+        price_unit = round(db.max_span_m * db.price_per_m_brl, 2)
+        rows.append(BomRow(
+            id=db.id,
+            model=db.model,
+            manufacturer=db.manufacturer,
+            quantity=qty,
+            capacity_kn=0.0,
+            height_min_m=0.0,
+            height_max_m=0.0,
+            weight_kg=weight_unit,
+            total_weight_kg=round(weight_unit * qty, 2),
+            price_brl=price_unit,
+            total_price_brl=round(price_unit * qty, 2),
+        ))
+    return rows
+
+
+def _is_accessory_bom_row(row: BomRow) -> bool:
+    """Classifica a linha como acessório (cruzeta ou viga vazada)."""
+    return any(row.id.startswith(p) for p in ACCESSORY_ID_PREFIXES)
+
+
+def _safe_div(num: float, den: float) -> float:
+    if den <= 0:
+        return 0.0
+    return num / den
+
+
+def _build_consumption_rows(
+    calc: CalculationResult,
+    bom_rows: List[BomRow],
+) -> Tuple[List[ConsumptionByHeightRow], Dict[str, float]]:
+    """Agrega consumo (peso) por (pé-direito, categoria).
+
+    Estratégia:
+    1. Agrupa `volume_breakdown` por `(round(pe_direito_m, 2), category_label)`
+       — soma área, volume bruto e peso das escoras das lajes. O rótulo PT
+       vem de `CATEGORY_LABELS_PT` (Laje, Beiral, Balanço, Platibanda, ...).
+    2. Soma peso de escoras das vigas no grupo `(calc.pe_direito_m, "Laje")`
+       — vigas concretas sustentam lajes, então entram na categoria default.
+    3. Volume líquido = bruto − (vigas_global + pilares_global) pro-rata
+       pelo volume bruto de cada grupo.
+    4. Acessórios (cruzetas + vigas vazadas) pro-rata pelo volume bruto.
+    5. Taxas kg/m³ bruto, kg/m³ líquido e kg/m² com guard contra div/0.
+
+    Retorna (rows ordenadas por (pe_direito ASC, category_label ASC), totais).
+    """
+    default_label = CATEGORY_LABELS_PT.get(CATEGORY_DEFAULT, "Laje")
+
+    # 1. Agrupar entries de volume_breakdown por (pé-direito, categoria)
+    groups: Dict[Tuple[float, str], Dict[str, float]] = defaultdict(
+        lambda: {"area_m2": 0.0, "volume_bruto_m3": 0.0, "shores_weight_kg": 0.0}
+    )
+    for entry in calc.volume_breakdown:
+        pe_key = round(entry.pe_direito_m, 2)
+        label = CATEGORY_LABELS_PT.get(entry.category, entry.category.title())
+        g = groups[(pe_key, label)]
+        g["area_m2"] += entry.area_m2
+        g["volume_bruto_m3"] += entry.volume_m3
+        g["shores_weight_kg"] += entry.shores_weight_kg
+
+    # 2. Peso das escoras das vigas → grupo (pe_direito_global, "Laje")
+    beam_shores_kg = sum(
+        getattr(br, "shores_weight_kg", 0.0) for br in calc.beam_results
+    )
+    if beam_shores_kg > 0:
+        pe_key = round(calc.pe_direito_m, 2)
+        groups[(pe_key, default_label)]["shores_weight_kg"] += beam_shores_kg
+
+    # Caso degenerado: nenhum painel e nenhuma viga → retorna vazio
+    if not groups:
+        return [], {}
+
+    total_bruto = sum(g["volume_bruto_m3"] for g in groups.values())
+    deduct_total = calc.beam_volume_deducted_m3 + calc.pillar_volume_deducted_m3
+
+    # Acessórios globais — extraídos do BOM já montado
+    accessories_total_kg = sum(
+        r.total_weight_kg for r in bom_rows if _is_accessory_bom_row(r)
+    )
+
+    # 3 + 4 + 5. Monta linhas, ordenadas por (pe ASC, categoria ASC)
+    rows: List[ConsumptionByHeightRow] = []
+    for key in sorted(groups.keys(), key=lambda k: (k[0], k[1])):
+        pe_key, label = key
+        g = groups[key]
+        bruto = g["volume_bruto_m3"]
+        area = g["area_m2"]
+        shores_kg = g["shores_weight_kg"]
+        share = _safe_div(bruto, total_bruto) if total_bruto > 0 else 0.0
+        liquido = max(bruto - deduct_total * share, 0.0)
+        acc_kg = accessories_total_kg * share
+        total_kg = shores_kg + acc_kg
+        rows.append(ConsumptionByHeightRow(
+            pe_direito_m=pe_key,
+            area_m2=round(area, 2),
+            volume_bruto_m3=round(bruto, 2),
+            volume_liquido_m3=round(liquido, 2),
+            shores_weight_kg=round(shores_kg, 2),
+            accessories_weight_kg=round(acc_kg, 2),
+            total_weight_kg=round(total_kg, 2),
+            rate_kg_m3_bruto=round(_safe_div(total_kg, bruto), 2),
+            rate_kg_m3_liquido=round(_safe_div(total_kg, liquido), 2),
+            rate_kg_m2=round(_safe_div(total_kg, area), 2),
+            category_label=label,
+        ))
+
+    # Totais agregados
+    sum_area = sum(r.area_m2 for r in rows)
+    sum_bruto = sum(r.volume_bruto_m3 for r in rows)
+    sum_liquido = sum(r.volume_liquido_m3 for r in rows)
+    sum_shores = sum(r.shores_weight_kg for r in rows)
+    sum_acc = sum(r.accessories_weight_kg for r in rows)
+    sum_total = sum(r.total_weight_kg for r in rows)
+
+    totals = {
+        "area_m2": round(sum_area, 2),
+        "volume_bruto_m3": round(sum_bruto, 2),
+        "volume_liquido_m3": round(sum_liquido, 2),
+        "shores_kg": round(sum_shores, 2),
+        "accessories_kg": round(sum_acc, 2),
+        "total_kg": round(sum_total, 2),
+        "rate_kg_m3_bruto": round(_safe_div(sum_total, sum_bruto), 2),
+        "rate_kg_m3_liquido": round(_safe_div(sum_total, sum_liquido), 2),
+        "rate_kg_m2": round(_safe_div(sum_total, sum_area), 2),
+    }
+    return rows, totals

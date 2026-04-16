@@ -27,6 +27,7 @@ class RoomType(str, Enum):
     SERVICE = "service"           # área de serviço
     CIRCULATION = "circulation"   # corredor/hall
     GARAGE = "garage"
+    VARANDA = "varanda"            # varanda/deck/porch
 
 
 class BlockSize(str, Enum):

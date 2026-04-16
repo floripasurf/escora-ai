@@ -12,6 +12,7 @@ from api.routes.jobs import router as jobs_router
 from api.routes.auth import router as auth_router
 from api.routes.projects import router as projects_router
 from api.routes.design import router as design_router
+from api.routes.drawing import router as drawing_router
 from api.config import settings
 from api.services import job_service
 
@@ -30,6 +31,7 @@ app.include_router(auth_router)
 app.include_router(jobs_router)
 app.include_router(projects_router)
 app.include_router(design_router)
+app.include_router(drawing_router)
 
 # Serve static frontend
 STATIC_DIR = Path(__file__).parent.parent / "web" / "static"
