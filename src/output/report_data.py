@@ -17,7 +17,22 @@ from src.utils.labels import CATEGORY_DEFAULT, CATEGORY_LABELS_PT
 VIGAS_VAZADAS_POR_TORRE = 2.0
 
 # Prefixos para classificação de BOM rows como acessórios.
-ACCESSORY_ID_PREFIXES = ("CRZ-", "VD-")
+ACCESSORY_ID_PREFIXES = ("CRZ-", "VD-", "TRAV-")
+
+# ID sintético do trilho VM50 canônico usado para travamento (lateral/pilar/fundo).
+# Escolha: VM50-155 é a variante mais comum no catálogo Supplier.
+VM50_BRACING_REFERENCE_ID = "VD-VM50-155"
+VM50_BRACING_BOM_ID = "TRAV-VM50-155"
+VM50_BRACING_BOM_MODEL = "VM50 (travamento: lateral+pilar+fundo)"
+
+# Barras de ancoragem com porca para travamento de pilares (Supplier Q4).
+# Valores de referência — não existem no JSON do catálogo ainda; ajustáveis
+# quando a locadora informar SKU real.
+BARRA_ANCORAGEM_BOM_ID = "TRAV-BARRA-ANC"
+BARRA_ANCORAGEM_MODEL = "Barra de ancoragem c/ porca (travamento pilar)"
+BARRA_ANCORAGEM_MANUFACTURER = "Supplier"
+BARRA_ANCORAGEM_WEIGHT_KG = 1.2
+BARRA_ANCORAGEM_PRICE_BRL = 5.00
 SHORE_TOWER_ID_PREFIX = "TWR-"
 
 
@@ -268,6 +283,10 @@ def build_report_data(
     # Conta torres com distribution_beam associada × razão prática.
     bom_rows.extend(_build_distribution_beam_bom_rows(calc))
 
+    # Accessories — VM50 travamento (lateral viga + pilar + fundo) + barras
+    # de ancoragem. Supplier Q4.
+    bom_rows.extend(_build_vm50_bracing_bom_rows(calc))
+
     # Volume breakdown → linhas da aba Volumes
     volume_rows: List[VolumeRow] = []
     for entry in calc.volume_breakdown:
@@ -368,6 +387,70 @@ def _build_distribution_beam_bom_rows(calc: CalculationResult) -> List[BomRow]:
             price_brl=price_unit,
             total_price_brl=round(price_unit * qty, 2),
         ))
+    return rows
+
+
+def _build_vm50_bracing_bom_rows(calc: CalculationResult) -> List[BomRow]:
+    """BOM de VM50 para travamento (Supplier Q4) + barras de ancoragem.
+
+    Usa `compute_vm50_bracing_bom` para obter contagens por categoria e
+    traduz em duas linhas de BOM:
+      - `TRAV-VM50-155`: total VM50 (lateral viga + pilar + fundo)
+      - `TRAV-BARRA-ANC`: barras de ancoragem (2 por pilar)
+
+    O peso/preço unitário do VM50 é derivado de `VD-VM50-155` no catálogo
+    (max_span_m × weight_per_m_kg / price_per_m_brl). Se o catálogo não
+    expõe VM50-155, a linha é omitida.
+    """
+
+    bom = compute_vm50_bracing_bom(calc.beam_results, calc.pillar_count)
+    rows: List[BomRow] = []
+
+    if bom.total_vm50 > 0:
+        try:
+            _, beams, _ = load_tower_catalog()
+            ref = next(
+                (b for b in beams if b.id == VM50_BRACING_REFERENCE_ID), None
+            )
+        except Exception:
+            ref = None
+
+        if ref is not None:
+            weight_unit = round(ref.max_span_m * ref.weight_per_m_kg, 2)
+            price_unit = round(ref.max_span_m * ref.price_per_m_brl, 2)
+            rows.append(BomRow(
+                id=VM50_BRACING_BOM_ID,
+                model=VM50_BRACING_BOM_MODEL,
+                manufacturer=ref.manufacturer,
+                quantity=bom.total_vm50,
+                capacity_kn=0.0,
+                height_min_m=0.0,
+                height_max_m=0.0,
+                weight_kg=weight_unit,
+                total_weight_kg=round(weight_unit * bom.total_vm50, 2),
+                price_brl=price_unit,
+                total_price_brl=round(price_unit * bom.total_vm50, 2),
+            ))
+
+    if bom.pilar_barras_ancoragem > 0:
+        rows.append(BomRow(
+            id=BARRA_ANCORAGEM_BOM_ID,
+            model=BARRA_ANCORAGEM_MODEL,
+            manufacturer=BARRA_ANCORAGEM_MANUFACTURER,
+            quantity=bom.pilar_barras_ancoragem,
+            capacity_kn=0.0,
+            height_min_m=0.0,
+            height_max_m=0.0,
+            weight_kg=BARRA_ANCORAGEM_WEIGHT_KG,
+            total_weight_kg=round(
+                BARRA_ANCORAGEM_WEIGHT_KG * bom.pilar_barras_ancoragem, 2,
+            ),
+            price_brl=BARRA_ANCORAGEM_PRICE_BRL,
+            total_price_brl=round(
+                BARRA_ANCORAGEM_PRICE_BRL * bom.pilar_barras_ancoragem, 2,
+            ),
+        ))
+
     return rows
 
 

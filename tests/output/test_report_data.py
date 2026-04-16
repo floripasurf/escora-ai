@@ -164,9 +164,10 @@ class TestBuildReportData:
             _beam_result(name="V2", shore_count=3, shore_id="ESC-01"),
         ])
         report = build_report_data(calc, _metadata())
-        assert len(report.bom_rows) == 1
-        assert report.bom_rows[0].quantity == 8
-        assert report.bom_rows[0].total_weight_kg == pytest.approx(8 * 11.0)
+        shore_rows = [r for r in report.bom_rows if r.id.startswith("ESC")]
+        assert len(shore_rows) == 1
+        assert shore_rows[0].quantity == 8
+        assert shore_rows[0].total_weight_kg == pytest.approx(8 * 11.0)
 
     def test_bom_multiple_models(self):
         calc = _calc_result(
@@ -174,8 +175,9 @@ class TestBuildReportData:
             slab_results=[_slab_result(shore_id="ESC-02", shore_count=9)],
         )
         report = build_report_data(calc, _metadata())
-        assert len(report.bom_rows) == 2
-        ids = {r.id for r in report.bom_rows}
+        shore_rows = [r for r in report.bom_rows if r.id.startswith("ESC")]
+        assert len(shore_rows) == 2
+        ids = {r.id for r in shore_rows}
         assert ids == {"ESC-01", "ESC-02"}
 
     def test_warnings_include_validation_errors(self):
