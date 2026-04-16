@@ -221,18 +221,33 @@ def build_report_data(
             total_price_brl=round(shore.price_reference_brl * qty, 2),
         ))
 
-    # Accessories — cruzetas derived from telescopic + tower counts
+    # Accessories — cruzetas split: vigas (0.80 m rule), lajes (0.25 ratio),
+    # torres (4 por torre). See Supplier Q5.
     try:
+            compute_cruzeta_bom,
+            count_cruzetas_laje,
+            count_cruzetas_viga,
+            load_tower_catalog,
+        )
         _, _, accessories = load_tower_catalog()
-        telescopic_counts = {
-            sid: c for sid, (_s, c) in shore_counts.items()
-            if not sid.startswith("TWR-")
-        }
+        # Slab-only telescopic counts for the 0.25 ratio
+        slab_telescopic_counts: Dict[str, int] = {}
+        for sr in calc.slab_results:
+            for s in sr.shores:
+                from src.models.shore import SupportType
+                if getattr(s, "support_type", None) == SupportType.TOWER:
+                    continue
+                sid = s.shore.id
+                slab_telescopic_counts[sid] = slab_telescopic_counts.get(sid, 0) + 1
         tower_count = sum(
             c for sid, (_s, c) in shore_counts.items()
             if sid.startswith("TWR-")
         )
-        for acc, qty in compute_cruzeta_bom(accessories, telescopic_counts, tower_count):
+        beam_cruzetas = count_cruzetas_viga(calc.beam_results)
+        slab_cruzetas = count_cruzetas_laje(slab_telescopic_counts)
+        for acc, qty in compute_cruzeta_bom(
+            accessories, beam_cruzetas, slab_cruzetas, tower_count,
+        ):
             bom_rows.append(BomRow(
                 id=acc.id,
                 model=acc.model,
@@ -275,10 +290,11 @@ def build_report_data(
     # Consumo por pé-direito (resumo interno de orçamento)
     consumption_rows, consumption_totals = _build_consumption_rows(calc, bom_rows)
 
-    # Warnings — merge warnings + validation_errors
+    # Warnings — merge warnings + validation_errors + consumption rate checks
     all_warnings = list(calc.warnings)
     for err in calc.validation_errors:
         all_warnings.append(f"ERRO: {err}")
+    all_warnings.extend(_consumption_rate_warnings(consumption_rows))
 
     return ReportData(
         project_name=metadata.project_name,
@@ -364,6 +380,53 @@ def _safe_div(num: float, den: float) -> float:
     if den <= 0:
         return 0.0
     return num / den
+
+
+# Supplier rule A6 / Q8: taxa kg/m³ esperada 12-16 (faixa usual),
+# 8-20 (faixa aceitável). Fora disso, warning.
+CONSUMPTION_RATE_USUAL_MIN_KG_M3 = 12.0
+CONSUMPTION_RATE_USUAL_MAX_KG_M3 = 16.0
+CONSUMPTION_RATE_ACCEPTABLE_MIN_KG_M3 = 8.0
+CONSUMPTION_RATE_ACCEPTABLE_MAX_KG_M3 = 20.0
+
+
+def _consumption_rate_warnings(
+    rows: List[ConsumptionByHeightRow],
+) -> List[str]:
+    """Validate rate_kg_m3_bruto vs Supplier expected ranges.
+
+    Two levels:
+    - Critical (rate ∉ [8, 20]): likely wrong inputs (pé-direito, espessura).
+    - Soft (rate ∈ [8, 20] but ∉ [12, 16]): outside usual range, review.
+
+    Rates ≤ 0 are skipped (no volume to validate against).
+    """
+    warnings: List[str] = []
+    for r in rows:
+        rate = r.rate_kg_m3_bruto
+        if rate <= 0:
+            continue
+        label = f"{r.category_label} @ pé-direito {r.pe_direito_m:.2f} m"
+        if (
+            rate < CONSUMPTION_RATE_ACCEPTABLE_MIN_KG_M3
+            or rate > CONSUMPTION_RATE_ACCEPTABLE_MAX_KG_M3
+        ):
+            warnings.append(
+                f"{label}: taxa {rate:.1f} kg/m³ fora do esperado "
+                f"({CONSUMPTION_RATE_ACCEPTABLE_MIN_KG_M3:.0f}-"
+                f"{CONSUMPTION_RATE_ACCEPTABLE_MAX_KG_M3:.0f}) "
+                "— verificar inputs (pé-direito, espessura, inventário)"
+            )
+        elif (
+            rate < CONSUMPTION_RATE_USUAL_MIN_KG_M3
+            or rate > CONSUMPTION_RATE_USUAL_MAX_KG_M3
+        ):
+            warnings.append(
+                f"{label}: taxa {rate:.1f} kg/m³ fora da faixa usual "
+                f"({CONSUMPTION_RATE_USUAL_MIN_KG_M3:.0f}-"
+                f"{CONSUMPTION_RATE_USUAL_MAX_KG_M3:.0f} kg/m³)"
+            )
+    return warnings
 
 
 def _build_consumption_rows(

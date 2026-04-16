@@ -334,24 +334,29 @@ def generate_ifc(
 
     # 5b. Accessories — cruzetas as IfcBuildingElementProxy under one assembly
     try:
-            compute_cruzeta_bom, load_tower_catalog,
+            compute_cruzeta_bom,
+            count_cruzetas_laje,
+            count_cruzetas_viga,
+            load_tower_catalog,
         )
         _, _, accessories = load_tower_catalog()
-        telescopic_counts: dict = {}
+        slab_telescopic: dict = {}
         tower_count = 0
         for br in calc.beam_results:
             for s in br.shores:
                 if s.support_type == SupportType.TOWER:
                     tower_count += 1
-                else:
-                    telescopic_counts[s.shore.id] = telescopic_counts.get(s.shore.id, 0) + 1
         for sr in calc.slab_results:
             for s in sr.shores:
                 if s.support_type == SupportType.TOWER:
                     tower_count += 1
                 else:
-                    telescopic_counts[s.shore.id] = telescopic_counts.get(s.shore.id, 0) + 1
-        cruzeta_pairs = compute_cruzeta_bom(accessories, telescopic_counts, tower_count)
+                    slab_telescopic[s.shore.id] = slab_telescopic.get(s.shore.id, 0) + 1
+        beam_cruzetas = count_cruzetas_viga(calc.beam_results)
+        slab_cruzetas = count_cruzetas_laje(slab_telescopic)
+        cruzeta_pairs = compute_cruzeta_bom(
+            accessories, beam_cruzetas, slab_cruzetas, tower_count,
+        )
         accessory_count = 0
         for acc, qty in cruzeta_pairs:
             for i in range(int(qty)):
