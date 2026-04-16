@@ -8,7 +8,7 @@ load + shore calculations.
 import logging
 from typing import List, Dict, Any, Optional
 from collections import defaultdict
-from shapely.geometry import LineString, Point, Polygon
+from shapely.geometry import LineString, Point, Polygon, MultiPoint
 
 from src.models.pipeline_models import ClassifiedElement, ElementType
 from src.models.calculation_models import (
@@ -55,6 +55,12 @@ logger = logging.getLogger(__name__)
 # at pillar face (not centerline), and pillar sections can be 0.20-0.60m wide.
 # A pillar center within 1.0m of the beam axis is structurally supporting it.
 BEAM_PILLAR_PROXIMITY = 1.00
+
+# Orguel rule 16 (manual): viga externa / beiral / perimetral.
+# A viga é considerada perimetral quando seu centróide está fora do casco
+# convexo dos pilares por mais do que este threshold. Calibrado inicialmente
+# em 0.5 m (plano pre-orguel-adaptation-2026-04-16); ajustar empíricamente.
+PERIMETER_BEAM_HULL_DISTANCE_M = 0.5
 
 # Beam endpoint proximity for cantilever detection (m)
 # Pillar within this distance of beam endpoint = beam is supported there.
@@ -122,6 +128,125 @@ def _contra_flecha_warnings(beam_length_m: float, beam_name: str) -> list:
             f"contra-flecha recomendada: ≥2.0 cm (vão grande, consultar projetista)"
         )
     return warnings
+
+
+def _pillar_hull(pillars: List[ClassifiedElement]):
+    """Return the convex hull polygon of pillar centers, or None if <3 pillars.
+
+    Used to detect perimeter (external) beams — a beam whose centroid lies
+    more than PERIMETER_BEAM_HULL_DISTANCE_M beyond this hull is considered
+    external (regra Orguel 16).
+    """
+    pts = []
+    for p in pillars:
+        if p.element_type != ElementType.PILLAR or not p.geometry:
+            continue
+        pts.append(Point(p.geometry[0]))
+    if len(pts) < 3:
+        return None
+    try:
+        return MultiPoint(pts).convex_hull
+    except Exception:
+        return None
+
+
+def _is_perimeter_beam(beam: ClassifiedElement, hull) -> bool:
+    """True when the beam centroid is outside the pillar convex hull by >0.5m."""
+    if hull is None or len(beam.geometry) < 2:
+        return False
+    start_pt = beam.geometry[0]
+    end_pt = beam.geometry[1]
+    cx = (start_pt[0] + end_pt[0]) / 2.0
+    cy = (start_pt[1] + end_pt[1]) / 2.0
+    centroid = Point(cx, cy)
+    try:
+        if hull.contains(centroid):
+            return False
+        return centroid.distance(hull) > PERIMETER_BEAM_HULL_DISTANCE_M
+    except Exception:
+        return False
+
+
+# Orguel Q3/A4: toda interseção de viga sem pilar deve ter escora/torre.
+# Tolerância (m) para considerar que existe um pilar na interseção: se um
+# pilar está a ≤ BEAM_INTERSECTION_PILLAR_TOLERANCE do ponto de cruzamento
+# das vigas, não é necessário forçar uma escora adicional.
+BEAM_INTERSECTION_PILLAR_TOLERANCE_M = 0.70
+
+
+def _beam_intersections_without_pillar(
+    beam: ClassifiedElement,
+    other_beams: List[ClassifiedElement],
+    pillars: List[ClassifiedElement],
+) -> List[float]:
+    """Return positions (m ao longo da viga) onde outra viga cruza sem pilar.
+
+    Regra Orguel Q3: em toda interseção de viga sem pilar deve haver escora.
+    Esta função localiza pontos de cruzamento beam×other_beam e filtra os que
+    já estão sustentados por algum pilar (dentro de
+    BEAM_INTERSECTION_PILLAR_TOLERANCE_M).
+    """
+    if len(beam.geometry) < 2:
+        return []
+    start_pt = beam.geometry[0]
+    end_pt = beam.geometry[1]
+    beam_line = LineString([start_pt, end_pt])
+    if beam_line.length <= 0:
+        return []
+
+    pillar_points = [
+        Point(p.geometry[0])
+        for p in pillars
+        if p.element_type == ElementType.PILLAR and p.geometry
+    ]
+
+    positions: List[float] = []
+    for other in other_beams:
+        if other is beam or len(other.geometry) < 2:
+            continue
+        other_line = LineString([other.geometry[0], other.geometry[1]])
+        try:
+            inter = beam_line.intersection(other_line)
+        except Exception:
+            continue
+        if inter.is_empty:
+            continue
+
+        # Flatten possible multi-point intersections
+        raw_points = []
+        geom_type = getattr(inter, "geom_type", "")
+        if geom_type == "Point":
+            raw_points.append(inter)
+        elif geom_type == "MultiPoint":
+            raw_points.extend(list(inter.geoms))
+        else:
+            # LineString intersections (colinear beams) — use midpoint
+            try:
+                raw_points.append(inter.centroid)
+            except Exception:
+                continue
+
+        for ip in raw_points:
+            # Skip if a pillar is already near this intersection
+            if any(
+                ip.distance(pp) <= BEAM_INTERSECTION_PILLAR_TOLERANCE_M
+                for pp in pillar_points
+            ):
+                continue
+            pos = beam_line.project(ip)
+            # Skip endpoints (they are beam-to-beam joins, handled by endpoint
+            # support / cantilever logic)
+            if pos < 0.10 or pos > beam_line.length - 0.10:
+                continue
+            positions.append(round(pos, 4))
+
+    # Deduplicate nearby positions (beams crossing at the same point)
+    positions.sort()
+    deduped: List[float] = []
+    for p in positions:
+        if not deduped or p - deduped[-1] > 0.25:
+            deduped.append(p)
+    return deduped
 
 
 def associate_beams_pillars(
@@ -350,6 +475,7 @@ def run_calculation(
     # === BEAM SHORING ===
     beam_associations = associate_beams_pillars(valid_beams, pillars)
     beam_results: List[BeamShoringResult] = []
+    pillar_hull = _pillar_hull(pillars)
 
     for assoc in beam_associations:
         beam = assoc["beam"]
@@ -390,8 +516,10 @@ def run_calculation(
 
         load_per_shore_estimate = total_linear_load * 1.0
 
+        beam_is_perimeter = _is_perimeter_beam(beam, pillar_hull)
+
         # Decide: telescopic shore or tower or mixed?
-        support_type, tower_fraction, decision_reasons = decide_support_type(
+        support_type, tower_fraction, decision_reasons, decision_rule = decide_support_type(
             required_height_m=shore_height,
             load_per_point_kn=load_per_shore_estimate,
             slab_thickness_m=thickness,
@@ -401,6 +529,9 @@ def run_calculation(
             shore_catalog=catalog,
             mode=mode,
             inventory=inventory,
+            is_perimeter=beam_is_perimeter,
+            beam_width_m=beam_width,
+            beam_height_m=beam_height,
         )
 
 
@@ -491,9 +622,11 @@ def run_calculation(
         if support_type in (SupportType.TOWER, SupportType.MIXED) and tower_catalog:
             selected_tower = select_tower(tower_catalog, shore_height, load_per_shore_estimate, mode=mode, inventory=inventory)
             if selected_tower:
+                rule_suffix = f" [{decision_rule}]" if decision_rule else ""
                 warnings.append(
                     f"Viga {beam.name or 'sem nome'} — torre {selected_tower.model} "
-                    f"({selected_tower.manufacturer}): {'; '.join(decision_reasons)}"
+                    f"({selected_tower.manufacturer}): "
+                    f"{'; '.join(decision_reasons)}{rule_suffix}"
                 )
                 # Select distribution beam if available
                 if dist_beam_catalog:
@@ -545,6 +678,11 @@ def run_calculation(
         if density_correction > 0:
             beam_max_spacing = beam_max_spacing / density_correction
 
+        # Orguel Q3/A4: força escora em cada interseção viga×viga sem pilar.
+        intersection_positions = _beam_intersections_without_pillar(
+            beam, valid_beams, pillars,
+        )
+
         shores, n_shores, spacing = distribute_beam_shores(
             beam_length_m=beam_length,
             beam_width_m=beam_width,
@@ -558,6 +696,7 @@ def run_calculation(
             support_positions=assoc["support_positions"],
             is_cantilever_start=assoc["is_cantilever_start"],
             is_cantilever_end=assoc["is_cantilever_end"],
+            forced_positions=intersection_positions,
         )
 
         # === MIXED BEAM SUPPORT ===
@@ -605,6 +744,8 @@ def run_calculation(
             selected_shore=selected_shore,
             shore_height_m=shore_height,
             shores_weight_kg=round(sum(s.shore.weight_kg for s in shores), 2),
+            is_perimeter=beam_is_perimeter,
+            decision_rule=decision_rule,
         ))
 
         # Contra-flecha recommendation for spans > 2m
@@ -1005,7 +1146,7 @@ def run_calculation(
         load_per_shore_estimate = total_load / estimated_shores
 
         # Decide: telescopic shore, tower, or mixed?
-        slab_support_type, slab_tower_fraction, slab_decision_reasons = decide_support_type(
+        slab_support_type, slab_tower_fraction, slab_decision_reasons, slab_decision_rule = decide_support_type(
             required_height_m=slab_shore_height,
             load_per_point_kn=load_per_shore_estimate,
             slab_thickness_m=thickness,
@@ -1023,9 +1164,10 @@ def run_calculation(
         if slab_support_type in (SupportType.TOWER, SupportType.MIXED) and tower_catalog:
             slab_tower = select_tower(tower_catalog, slab_shore_height, load_per_shore_estimate, mode=mode, inventory=inventory)
             if slab_tower:
+                slab_rule_suffix = f" [{slab_decision_rule}]" if slab_decision_rule else ""
                 warnings.append(
                     f"Laje (área {slab.area_m2:.1f}m²) — torre {slab_tower.model}: "
-                    f"{'; '.join(slab_decision_reasons)}"
+                    f"{'; '.join(slab_decision_reasons)}{slab_rule_suffix}"
                 )
                 from src.models.shore import ShoreCatalogEntry as _SCE
                 use_tower_entry = _SCE(
@@ -1085,6 +1227,7 @@ def run_calculation(
                 structural_name=panel_structural_name,
                 room_hint=panel_room_hint,
                 shores_weight_kg=0.0,
+                decision_rule=slab_decision_rule,
             ))
             continue
 
@@ -1182,6 +1325,7 @@ def run_calculation(
                             structural_name=panel_structural_name,
                             room_hint=panel_room_hint,
                             shores_weight_kg=round(sum(s.shore.weight_kg for s in positioned), 2),
+                            decision_rule=slab_decision_rule,
                         ))
                         nervura_panel_count += 1
                         continue
@@ -1246,6 +1390,7 @@ def run_calculation(
             structural_name=panel_structural_name,
             room_hint=panel_room_hint,
             shores_weight_kg=round(sum(s.shore.weight_kg for s in shores), 2),
+            decision_rule=slab_decision_rule,
         ))
         solid_panel_count += 1
 

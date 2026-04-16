@@ -19,6 +19,8 @@ class BeamShoringResult(BaseModel):
     selected_shore: ShoreCatalogEntry
     shore_height_m: float = Field(description="Actual shore height used (m)")
     shores_weight_kg: float = Field(default=0.0, description="Soma do peso das escoras desta viga (kg)")
+    is_perimeter: bool = Field(default=False, description="Viga externa (centroide além do casco convexo dos pilares por >0.5m)")
+    decision_rule: str = Field(default="", description="Slug estável da regra de decisão aplicada (ex.: 'rule-16b-viga-media')")
 
 
 class SlabShoringResult(BaseModel):
@@ -46,6 +48,7 @@ class SlabShoringResult(BaseModel):
     room_hint: Optional[str] = Field(default=None, description="Texto de cômodo extraído do DXF próximo ao polígono, se houver")
     structural_name: Optional[str] = Field(default=None, description="Nome estrutural extraído do DXF (ex.: 'L3')")
     shores_weight_kg: float = Field(default=0.0, description="Soma do peso das escoras desta laje (kg)")
+    decision_rule: str = Field(default="", description="Slug estável da regra de decisão aplicada (ex.: 'rule-4-laje-espessa')")
 
 
 class VolumeBreakdownEntry(BaseModel):

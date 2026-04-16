@@ -165,7 +165,7 @@ class TestInventoryMode:
 
         # Heavy slab that would normally trigger MIXED (Rule 4, ≥20cm)
         # but no towers in inventory → falls back to TELESCOPIC
-        support, fraction, reasons = decide_support_type(
+        support, fraction, reasons, _rule = decide_support_type(
             required_height_m=3.0,
             load_per_point_kn=10.0,
             slab_thickness_m=0.25,
@@ -260,7 +260,7 @@ class TestDerating:
         from src.models.shore import SupportType
 
         # 4.4 m, 12 kN/point → no shore can take 12 × 1.4 = 16.8 kN at 4.4m
-        support, fraction, reasons = decide_support_type(
+        support, fraction, reasons, _rule = decide_support_type(
             required_height_m=4.4,
             load_per_point_kn=12.0,
             slab_thickness_m=0.12,
@@ -272,7 +272,7 @@ class TestDerating:
         assert any("derateada" in r for r in reasons)
 
         # 2.8 m, 8 kN → well within ESC310/ESC450 capacity → telescopic
-        support, fraction, reasons = decide_support_type(
+        support, fraction, reasons, _rule = decide_support_type(
             required_height_m=2.8,
             load_per_point_kn=8.0,
             slab_thickness_m=0.12,
@@ -288,7 +288,7 @@ class TestDerating:
 
         # Short beam, light load, thin slab (12cm < 15cm threshold):
         # No mixed support triggered → pure telescopic.
-        support, fraction, _ = decide_support_type(
+        support, fraction, _, _rule = decide_support_type(
             required_height_m=2.6,
             load_per_point_kn=6.0,
             slab_thickness_m=0.12,
@@ -304,7 +304,7 @@ class TestDerating:
         from src.models.shore import SupportType
 
         # Beam with thick slab (≥15cm) → MIXED ~35% towers
-        support, fraction, reasons = decide_support_type(
+        support, fraction, reasons, _rule = decide_support_type(
             required_height_m=2.8,
             load_per_point_kn=8.0,
             slab_thickness_m=0.18,
@@ -321,7 +321,7 @@ class TestDerating:
         from src.models.shore import SupportType
 
         # Thick slab ≥20cm → MIXED ~18% towers (not pure TOWER)
-        support, fraction, reasons = decide_support_type(
+        support, fraction, reasons, _rule = decide_support_type(
             required_height_m=2.8,
             load_per_point_kn=8.0,
             slab_thickness_m=0.22,
@@ -338,7 +338,7 @@ class TestDerating:
         from src.models.shore import SupportType
 
         # Large slab ≥40m² with thin slab → MIXED ~15% towers
-        support, fraction, reasons = decide_support_type(
+        support, fraction, reasons, _rule = decide_support_type(
             required_height_m=2.8,
             load_per_point_kn=5.0,
             slab_thickness_m=0.12,
@@ -355,7 +355,7 @@ class TestDerating:
         from src.models.shore import SupportType
 
         # Height > 4.5m → still pure TOWER (physical limit)
-        support, fraction, reasons = decide_support_type(
+        support, fraction, reasons, _rule = decide_support_type(
             required_height_m=5.0,
             load_per_point_kn=8.0,
             slab_thickness_m=0.12,

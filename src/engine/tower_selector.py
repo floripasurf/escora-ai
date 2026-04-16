@@ -33,7 +33,18 @@ logger = logging.getLogger(__name__)
 # Decision thresholds
 MAX_TELESCOPIC_HEIGHT_M = 4.5       # ESC450 max height
 CIMBRAMENTO_HEIGHT_M = 12.0         # Above this → heavy cimbramento
-CIMBRAMENTO_SPAN_M = 15.0           # Above this → heavy cimbramento
+# Orguel rule 16 (manual): viga interna > 10 m exige somente torres.
+# (Era 15 m antes da calibração com locadora — 2026-04-16.)
+CIMBRAMENTO_SPAN_M = 10.0
+# Intermediate band 6-10 m: prefer 1 central tower + telescopic shores at ends.
+BEAM_INTERMEDIATE_SPAN_MIN_M = 6.0
+BEAM_INTERMEDIATE_SPAN_MAX_M = 10.0
+# Tower fraction for 6-10 m vigas: low so that only ~1 central tower is placed.
+BEAM_INTERMEDIATE_TOWER_FRACTION = 0.20
+# Rule 16 (viga externa / beiral) — se dentro desses limites, escoras apenas.
+PERIMETER_BEAM_MAX_WIDTH_M = 0.30
+PERIMETER_BEAM_MAX_HEIGHT_M = 0.60
+PERIMETER_BEAM_MAX_LENGTH_M = 3.0
 HEAVY_SLAB_THICKNESS_M = 0.30       # Above this → tower with dist. beam
 
 # Orguel-calibrated slab tower triggers (from 12-project analysis 2026-04-07)
@@ -85,24 +96,30 @@ def decide_support_type(
     shore_catalog: Optional[List[ShoreCatalogEntry]] = None,
     mode: Literal["price", "inventory"] = "price",
     inventory: Optional[InventoryAvailability] = None,
-) -> Tuple[SupportType, float, List[str]]:
+    is_perimeter: bool = False,
+    beam_width_m: float = 0.0,
+    beam_height_m: float = 0.0,
+) -> Tuple[SupportType, float, List[str], str]:
     """Decide between telescopic shore, tower, or mixed support.
 
     Mixed support (MIXED) replicates real Orguel practice where beams use
     29-44% towers at critical points and slabs use 13-22% towers scattered
     in a wider grid, with telescopic shores filling the rest.
 
-    Physics-based escalation (NBR 15696 + Euler derating):
-    - Height > 4.5m → 100% tower (ESC450 physical limit)
-    - Load exceeds all derated shores → 100% tower
-    - Large span > 15m → 100% tower (cimbramento)
+    Physics-based escalation (NBR 15696 + Orguel manual):
+    - Height > 4.5m → 100% tower (ESC450 physical limit) [rule-1-altura]
+    - Load exceeds all derated shores → 100% tower [rule-1b-carga]
+    - Perimeter beam, width≤0.30 h<0.60 L≤3.0 → telescopic only [rule-16-externa]
+    - Large internal beam span > 10m → 100% tower [rule-16c-viga-grande]
+    - Beam span 6-10m → MIXED with ~1 central tower [rule-16b-viga-media]
     - Thick slab ≥ 20cm → MIXED ~18% tower (Orguel measured: 13-22%)
     - Large slab ≥ 40m² → MIXED ~15% tower
     - Beam with thick slab or moderate span → MIXED ~35% tower at intersections
     - Otherwise → 100% telescopic
 
-    Returns (support_type, tower_fraction, reasons):
+    Returns (support_type, tower_fraction, reasons, decision_rule):
       tower_fraction: 0.0 = all telescopic, 1.0 = all tower, 0 < x < 1 = mixed
+      decision_rule: stable short slug identifying which rule fired
     """
     reasons: List[str] = []
 
@@ -120,7 +137,7 @@ def decide_support_type(
             f"Altura {required_height_m:.1f}m > {MAX_TELESCOPIC_HEIGHT_M}m "
             f"(limite ESC450)"
         )
-        return SupportType.TOWER, 1.0, reasons
+        return SupportType.TOWER, 1.0, reasons, "rule-1-altura"
 
     # Rule 1b: Load-based derating check.
     if shore_catalog and load_per_point_kn > 0:
@@ -137,13 +154,28 @@ def decide_support_type(
                 f"capacidade derateada máxima {best_cap_kn:.1f} kN "
                 f"para altura {required_height_m:.2f} m"
             )
-            return SupportType.TOWER, 1.0, reasons
+            return SupportType.TOWER, 1.0, reasons, "rule-1b-carga"
 
     if inventory_no_towers:
         reasons.append(
             f"Sem torres em estoque ({inventory.locadora}) — usando escora telescópica"
         )
-        return SupportType.TELESCOPIC, 0.0, reasons
+        return SupportType.TELESCOPIC, 0.0, reasons, "rule-sem-estoque-torre"
+
+    # Rule 16 externa: viga perimetral pequena usa só escora+cruzeta.
+    if (
+        element_type == "beam"
+        and is_perimeter
+        and 0 < beam_width_m <= PERIMETER_BEAM_MAX_WIDTH_M
+        and 0 < beam_height_m < PERIMETER_BEAM_MAX_HEIGHT_M
+        and 0 < span_m <= PERIMETER_BEAM_MAX_LENGTH_M
+    ):
+        reasons.append(
+            f"Viga externa pequena (b={beam_width_m*100:.0f}cm, "
+            f"h={beam_height_m*100:.0f}cm, L={span_m:.1f}m): escora+cruzeta apenas "
+            f"(regra 16-externa)"
+        )
+        return SupportType.TELESCOPIC, 0.0, reasons, "rule-16-externa"
 
     # Rule 2: Large span (cimbramento) → 100% tower
     if span_m > CIMBRAMENTO_SPAN_M:
@@ -151,12 +183,24 @@ def decide_support_type(
             f"Vão {span_m:.1f}m > {CIMBRAMENTO_SPAN_M}m "
             f"(requer cimbramento com torres)"
         )
-        return SupportType.TOWER, 1.0, reasons
+        return SupportType.TOWER, 1.0, reasons, "rule-16c-viga-grande"
 
     # --- MIXED SUPPORT RULES (Orguel-calibrated) ---
     # Real Orguel projects show BOTH towers and telescopic on the same element.
     # Beams: 29-44% towers (at pillar intersections), rest telescopic.
     # Slabs: 13-22% towers (wider grid), rest telescopic.
+
+    # Rule 16b: Viga interna 6-10 m → 1 torre central + escoras
+    if (
+        element_type == "beam"
+        and BEAM_INTERMEDIATE_SPAN_MIN_M < span_m <= BEAM_INTERMEDIATE_SPAN_MAX_M
+    ):
+        fraction = BEAM_INTERMEDIATE_TOWER_FRACTION
+        reasons.append(
+            f"Viga interna vão {span_m:.1f}m (6-10m): ~1 torre central + "
+            f"escoras nas extremidades (regra 16b)"
+        )
+        return SupportType.MIXED, fraction, reasons, "rule-16b-viga-media"
 
     # Rule 3: Beam with moderate load or span → mixed ~35% towers
     if element_type == "beam":
@@ -167,7 +211,7 @@ def decide_support_type(
                 f"Viga mista: {fraction:.0%} torres em pontos críticos + "
                 f"escoras telescópicas (padrão Orguel medido: 29-44%)"
             )
-            return SupportType.MIXED, fraction, reasons
+            return SupportType.MIXED, fraction, reasons, "rule-5-viga-mista"
 
     # Rule 4: Heavy/thick slab (≥20cm) → mixed ~18% towers
     if slab_thickness_m >= SLAB_TOWER_THICKNESS_M:
@@ -176,7 +220,7 @@ def decide_support_type(
             f"Laje {slab_thickness_m*100:.0f}cm ≥ {SLAB_TOWER_THICKNESS_M*100:.0f}cm — "
             f"misto {fraction:.0%} torres + escoras (Orguel medido: 13-22%)"
         )
-        return SupportType.MIXED, fraction, reasons
+        return SupportType.MIXED, fraction, reasons, "rule-4-laje-espessa"
 
     # Rule 5: Large slab panel → mixed ~15% towers
     if slab_area_m2 >= SLAB_TOWER_AREA_M2:
@@ -185,7 +229,7 @@ def decide_support_type(
             f"Painel de laje {slab_area_m2:.0f}m² ≥ {SLAB_TOWER_AREA_M2:.0f}m² — "
             f"misto {fraction:.0%} torres em grid largo (Orguel medido: 13-22%)"
         )
-        return SupportType.MIXED, fraction, reasons
+        return SupportType.MIXED, fraction, reasons, "rule-5-laje-grande"
 
     # Rule 6: Ribbed slab ≥ 25cm → mixed 20% towers
     if slab_type == "ribbed" and slab_thickness_m > 0.25:
@@ -194,14 +238,14 @@ def decide_support_type(
             f"Laje nervurada h={slab_thickness_m*100:.0f}cm — "
             f"misto {fraction:.0%} torres (peso de forma elevado)"
         )
-        return SupportType.MIXED, fraction, reasons
+        return SupportType.MIXED, fraction, reasons, "rule-6-nervurada"
 
     # Default: telescopic shore (ESC310 or ESC450 by height)
     reasons.append(
         f"Escora telescópica adequada "
         f"(h={required_height_m:.1f}m, laje {slab_thickness_m*100:.0f}cm)"
     )
-    return SupportType.TELESCOPIC, 0.0, reasons
+    return SupportType.TELESCOPIC, 0.0, reasons, "rule-default-telescopic"
 
 
 def select_tower(

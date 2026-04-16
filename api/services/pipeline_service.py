@@ -232,6 +232,7 @@ def _generate_bom_csv(calc, output_path: str, report_data=None):
             "Secao (cm)": f"{round((b.section_width_m or 0)*100)}x{round((b.section_height_m or 0)*100)}" if b.section_height_m else "—",
             "Qtd Escoras": br.shore_count,
             "Espacamento (m)": round(br.spacing_m, 2),
+            "Regra": br.decision_rule or "—",
         })
 
     # Slab shores
@@ -243,6 +244,7 @@ def _generate_bom_csv(calc, output_path: str, report_data=None):
             "Secao (cm)": f"e={round(sr.thickness_m*100)}cm",
             "Qtd Escoras": len(sr.shores),
             "Espacamento (m)": f"{round(sr.spacing_x_m, 2)}x{round(sr.spacing_y_m, 2)}",
+            "Regra": sr.decision_rule or "—",
         })
 
     # Summary row
@@ -255,6 +257,7 @@ def _generate_bom_csv(calc, output_path: str, report_data=None):
         "Secao (cm)": "",
         "Qtd Escoras": total_beam + total_slab,
         "Espacamento (m)": "",
+        "Regra": "",
     })
 
     # Accessories — cruzetas
@@ -295,9 +298,10 @@ def _generate_bom_csv(calc, output_path: str, report_data=None):
                     "Secao (cm)": "",
                     "Qtd Escoras": r.quantity,
                     "Espacamento (m)": "",
+                    "Regra": "",
                 })
 
-    fieldnames = ["Tipo", "Elemento", "Comprimento (m)", "Secao (cm)", "Qtd Escoras", "Espacamento (m)"]
+    fieldnames = ["Tipo", "Elemento", "Comprimento (m)", "Secao (cm)", "Qtd Escoras", "Espacamento (m)", "Regra"]
     with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter=";")
         writer.writeheader()

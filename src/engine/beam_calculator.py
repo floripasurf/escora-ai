@@ -162,12 +162,19 @@ def distribute_beam_shores(
     support_positions: List[float] = None,
     is_cantilever_start: bool = False,
     is_cantilever_end: bool = False,
+    forced_positions: Optional[List[float]] = None,
 ) -> Tuple[List[PositionedShore], int, float]:
     """
     Distribui escoras ao longo de uma viga conforme NBR 6118/15696.
 
     Multi-span aware: splits beam at support positions and distributes
     shores independently per span, then merges results.
+
+    Args:
+        forced_positions: posições (m ao longo da viga) onde é obrigatório
+            existir uma escora — usadas para garantir escora em interseções
+            de viga sem pilar (regra Orguel Q3/A4). Se já houver escora
+            próxima (< ESPACAMENTO_MIN), a posição é descartada.
 
     Retorna: (shores, n_shores, spacing_efetivo)
     """
@@ -188,6 +195,17 @@ def distribute_beam_shores(
             span_start, span_end, cant_s, cant_e, max_spacing,
         )
         all_positions.extend(span_positions)
+
+    # Merge forced positions (e.g. beam intersections without pillar).
+    # Only injected if not already within ESPACAMENTO_MIN of an existing shore.
+    if forced_positions:
+        for fp in forced_positions:
+            fp_clamped = max(0.0, min(beam_length_m, fp))
+            if all_positions and min(
+                abs(fp_clamped - p) for p in all_positions
+            ) < ESPACAMENTO_MIN:
+                continue
+            all_positions.append(fp_clamped)
 
     # Deduplicate positions that are too close (from adjacent spans)
     if all_positions:

@@ -540,6 +540,17 @@
             overflow-y: auto;
         }
         .warnings div { padding: 3px 0; }
+        .warnings .rule-tag {
+            display: inline-block;
+            margin-left: 6px;
+            padding: 0 6px;
+            font-size: 0.70rem;
+            font-family: ui-monospace, SFMono-Regular, monospace;
+            color: var(--fg-dim);
+            background: rgba(148, 163, 184, 0.12);
+            border-radius: 3px;
+            cursor: help;
+        }
 
         /* ---------- Revision result ---------- */
         .revision-result {
@@ -2133,7 +2144,19 @@
                         }
                     }
                     if (warnLines.length > 0) {
-                        const warns = warnLines.map(w => `<div>${esc(w)}</div>`).join('');
+                        // Extract [rule-xxx] slugs → styled tags with tooltip (Orguel E1)
+                        const renderWarn = (w) => {
+                            const m = /\s*\[(rule-[a-z0-9-]+)\]\s*$/.exec(w);
+                            if (!m) return `<div>${esc(w)}</div>`;
+                            const base = w.slice(0, m.index);
+                            const tag = esc(m[1]);
+                            return (
+                                `<div>${esc(base)}`
+                                + `<span class="rule-tag" title="Regra aplicada: ${tag}">${tag}</span>`
+                                + `</div>`
+                            );
+                        };
+                        const warns = warnLines.map(renderWarn).join('');
                         content += `<div class="warnings">${warns}</div>`;
                     }
 
