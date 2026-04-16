@@ -508,34 +508,68 @@ def _generate_output_dxf(
             slab_vm_layer = _vm_layer_for(dist_beam, "Laje")
             _ensure_layer(doc, slab_vm_layer)
 
-        # Group slab shores into rows by Y coordinate (to draw rails)
-        if slab_vm_layer and len(sr.shores) >= 2:
+        # Group slab TOWER shores into rows by Y; rails conectam apenas
+        # torres consecutivas e saltam pilares (exclusion zones). A viga
+        # de distribuição (VM) física só existe de torre a torre — nunca
+        # sobre o pilar —, então o desenho deve refletir isso.
+        if slab_vm_layer and len(slab_tower_shores) >= 2:
             rows: dict = {}
-            for s in sr.shores:
+            for s in slab_tower_shores:
                 key = round(s.y / 0.5) * 0.5  # bin by 0.5m
                 rows.setdefault(key, []).append(s)
+
+            def _pair_crosses_pillar(x0, x1, y):
+                for ex in sr.exclusions or []:
+                    if y < ex.min_y or y > ex.max_y:
+                        continue
+                    lo, hi = min(x0, x1), max(x0, x1)
+                    if hi >= ex.min_x and lo <= ex.max_x:
+                        return True
+                return False
+
             for key, row_shores in rows.items():
                 if len(row_shores) < 2:
                     continue
                 row_shores.sort(key=lambda s: s.x)
-                x0 = _dx(row_shores[0].x)
-                x1 = _dx(row_shores[-1].x)
                 y = _dx(key)
-                # Two parallel lines (a thin rectangle along the row)
-                msp.add_line(
-                    (x0, y - SLAB_RAIL_HALF), (x1, y - SLAB_RAIL_HALF),
-                    dxfattribs={"layer": slab_vm_layer},
-                )
-                msp.add_line(
-                    (x0, y + SLAB_RAIL_HALF), (x1, y + SLAB_RAIL_HALF),
-                    dxfattribs={"layer": slab_vm_layer},
-                )
+                # Segment by consecutive tower pairs. Skip the segment if
+                # it would cross a pillar exclusion or span a gap > 1.8×
+                # the average spacing (indicative of a pillar between).
+                avg_gap = (row_shores[-1].x - row_shores[0].x) / max(
+                    len(row_shores) - 1, 1)
+                max_gap = max(avg_gap * 1.8, 2.5)
+                for i in range(len(row_shores) - 1):
+                    a, b = row_shores[i], row_shores[i + 1]
+                    if abs(b.x - a.x) > max_gap:
+                        continue
+                    if _pair_crosses_pillar(a.x, b.x, a.y):
+                        continue
+                    xa, xb = _dx(a.x), _dx(b.x)
+                    msp.add_line(
+                        (xa, y - SLAB_RAIL_HALF), (xb, y - SLAB_RAIL_HALF),
+                        dxfattribs={"layer": slab_vm_layer},
+                    )
+                    msp.add_line(
+                        (xa, y + SLAB_RAIL_HALF), (xb, y + SLAB_RAIL_HALF),
+                        dxfattribs={"layer": slab_vm_layer},
+                    )
 
         # Draw VM50 travamento perpendicular to slab rows (vertical connectors)
-        # This creates the Supplier-style grid connecting shore rows
+        # This creates the Supplier-style grid connecting shore rows. Conectores
+        # que cruzariam a exclusão de pilar são omitidos.
         if len(sr.shores) >= 4:
             vm50_slab_layer = "VM50_Laje"
             _ensure_layer(doc, vm50_slab_layer, 6)
+
+            def _col_crosses_pillar(x, y0, y1):
+                for ex in sr.exclusions or []:
+                    if x < ex.min_x or x > ex.max_x:
+                        continue
+                    lo, hi = min(y0, y1), max(y0, y1)
+                    if hi >= ex.min_y and lo <= ex.max_y:
+                        return True
+                return False
+
             # Group by X column (vertical travamento connecting horizontal rows)
             cols: dict = {}
             for s in sr.shores:
@@ -547,6 +581,8 @@ def _generate_output_dxf(
                 col_shores.sort(key=lambda s: s.y)
                 for ci in range(len(col_shores) - 1):
                     s1, s2 = col_shores[ci], col_shores[ci + 1]
+                    if _col_crosses_pillar(s1.x, s1.y, s2.y):
+                        continue
                     msp.add_line(
                         (_dx(s1.x), _dx(s1.y)), (_dx(s2.x), _dx(s2.y)),
                         dxfattribs={"layer": vm50_slab_layer},
