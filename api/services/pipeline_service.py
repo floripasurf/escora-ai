@@ -185,12 +185,16 @@ def regenerate_from_revision(
 
 
 def _count_shores_by_id(calc):
-    """Return ({telescopic_id: count}, tower_count) from a CalculationResult.
+    """Return (beam_telescopic, slab_telescopic, tower_count) from CalculationResult.
 
-    Single source of truth for both BOM CSV and report_data accessory rules.
+    Split between beams and slabs is required because cruzetas follow
+    different rules per locadora Q5:
+    - Lajes: 0.25 ratio per telescopic shore
+    - Vigas: ceil(length / 0.80 m) — driven by beam geometry, not shore count
     """
     from src.models.shore import SupportType
-    telescopic_counts: dict = {}
+    beam_telescopic: dict = {}
+    slab_telescopic: dict = {}
     tower_count = 0
     for br in calc.beam_results:
         for s in br.shores:
@@ -198,15 +202,15 @@ def _count_shores_by_id(calc):
                 tower_count += 1
             else:
                 sid = s.shore.id
-                telescopic_counts[sid] = telescopic_counts.get(sid, 0) + 1
+                beam_telescopic[sid] = beam_telescopic.get(sid, 0) + 1
     for sr in calc.slab_results:
         for s in sr.shores:
             if getattr(s, "support_type", None) == SupportType.TOWER:
                 tower_count += 1
             else:
                 sid = s.shore.id
-                telescopic_counts[sid] = telescopic_counts.get(sid, 0) + 1
-    return telescopic_counts, tower_count
+                slab_telescopic[sid] = slab_telescopic.get(sid, 0) + 1
+    return beam_telescopic, slab_telescopic, tower_count
 
 
 def _generate_bom_csv(calc, output_path: str, report_data=None):
@@ -255,10 +259,19 @@ def _generate_bom_csv(calc, output_path: str, report_data=None):
 
     # Accessories — cruzetas
     try:
-        from src.engine.tower_selector import compute_cruzeta_bom, load_tower_catalog
+        from src.engine.tower_selector import (
+            compute_cruzeta_bom,
+            count_cruzetas_laje,
+            count_cruzetas_viga,
+            load_tower_catalog,
+        )
         _, _, accessories = load_tower_catalog()
-        telescopic_counts, tower_count = _count_shores_by_id(calc)
-        for acc, qty in compute_cruzeta_bom(accessories, telescopic_counts, tower_count):
+        _, slab_telescopic, tower_count = _count_shores_by_id(calc)
+        beam_cruzetas = count_cruzetas_viga(calc.beam_results)
+        slab_cruzetas = count_cruzetas_laje(slab_telescopic)
+        for acc, qty in compute_cruzeta_bom(
+            accessories, beam_cruzetas, slab_cruzetas, tower_count,
+        ):
             rows.append({
                 "Tipo": "Acessório",
                 "Elemento": acc.model,

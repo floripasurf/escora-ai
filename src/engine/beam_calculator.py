@@ -1,7 +1,7 @@
 """Cálculo de escoramento para vigas conforme NBR 15696:2009 e NBR 6120:2019."""
 
 import math
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 from src.models.shore import ShoreCatalogEntry, PositionedShore
 from src.utils.constants import (
     GAMMA_CONCRETO, Q_SOBRECARGA_DEFAULT, Q_FORMA_DEFAULT, GAMMA_F,
@@ -204,10 +204,27 @@ def distribute_beam_shores(
     # Calculate load per shore based on total count
     n_effective = len(all_positions)
     load_per_shore = total_load / n_effective
-    utilization = load_per_shore / shore.load_capacity_kn
+
+    # Rule 14 (Orguel manual, NBR 6120 — continuous beam on 3 supports):
+    # central support reaction = 10/8·q·L vs 1.0·q·L in biapoiado analysis.
+    # Practical effect: shore closest to the central apoio must be dimensioned
+    # for 25% more load. Applied ONLY for exactly 3 supports (confirmed scope).
+    central_support_x: Optional[float] = None
+    if support_positions and len(support_positions) == 3:
+        sorted_sp = sorted(
+            max(0.0, min(beam_length_m, sp)) for sp in support_positions
+        )
+        central_support_x = sorted_sp[1]
 
     shores: List[PositionedShore] = []
-    for pos in all_positions:
+    central_shore_idx: Optional[int] = None
+    if central_support_x is not None:
+        central_shore_idx = min(
+            range(len(all_positions)),
+            key=lambda i: abs(all_positions[i] - central_support_x),
+        )
+
+    for i, pos in enumerate(all_positions):
         if direction == "x":
             x = start_x + pos
             y = start_y
@@ -215,12 +232,18 @@ def distribute_beam_shores(
             x = start_x
             y = start_y + pos
 
+        # Rule 14 amplification for the shore nearest the central apoio
+        shore_load = load_per_shore
+        if i == central_shore_idx:
+            shore_load = load_per_shore * 10.0 / 8.0
+        utilization = shore_load / shore.load_capacity_kn
+
         shores.append(
             PositionedShore(
                 x=round(x, 4),
                 y=round(y, 4),
                 shore=shore,
-                load_applied_kn=round(load_per_shore, 2),
+                load_applied_kn=round(shore_load, 2),
                 utilization_ratio=round(utilization, 4),
             )
         )

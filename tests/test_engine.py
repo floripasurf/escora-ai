@@ -391,10 +391,12 @@ class TestCruzetaBom:
         ]
 
     def test_compute_cruzeta_bom_telescopic_only(self):
-        from src.engine.tower_selector import compute_cruzeta_bom
+        from src.engine.tower_selector import compute_cruzeta_bom, count_cruzetas_laje
+        slab_cruzetas = count_cruzetas_laje({"ESC310": 100, "ESC450": 40})
         result = compute_cruzeta_bom(
             self._accs(),
-            telescopic_counts={"ESC310": 100, "ESC450": 40},
+            beam_cruzeta_counts={},
+            slab_cruzeta_counts=slab_cruzetas,
             tower_count=0,
         )
         by_id = {acc.id: qty for acc, qty in result}
@@ -406,7 +408,8 @@ class TestCruzetaBom:
         from src.engine.tower_selector import compute_cruzeta_bom
         result = compute_cruzeta_bom(
             self._accs(),
-            telescopic_counts={"ESC310": 0},
+            beam_cruzeta_counts={},
+            slab_cruzeta_counts={"ESC310": 0},
             tower_count=5,
         )
         by_id = {acc.id: qty for acc, qty in result}

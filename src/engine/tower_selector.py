@@ -338,23 +338,61 @@ def calculate_tower_grid(
     return nx, ny, spacing_x, spacing_y
 
 
-# Cruzetas-per-shore ratio measured from Orguel SJC stock:
+# Cruzetas-per-shore ratio measured from Orguel SJC stock (lajes only):
 # (371 + 5735) cruzetas / ~24,500 ESC units in active rotation ≈ 0.25
 ORGUEL_CRUZETA_RATIO_TELESCOPIC = 0.25
+# Orguel rule (Q5, manual): viga — 1 conjunto escora+cruzeta a cada 0.80 m
+CRUZETA_VIGA_SPACING_M = 0.80
 CRUZETAS_PER_TOWER_FACE = 1
 TOWER_FACES = 4
 
 
+def count_cruzetas_viga(beam_results) -> Dict[str, int]:
+    """Cruzetas for beams: 1 per CRUZETA_VIGA_SPACING_M of beam length.
+
+    Locadora rule (Q5): "Em vigas, o conjunto escora+cruzeta é distribuído
+    a cada 80 cm sob a viga" — so for a 6m beam we need ceil(6/0.80) = 8
+    cruzetas, NOT the 0.25 ratio (which applies only to lajes).
+
+    Tower-supported beams are excluded — towers already carry 4 cruzetas/tower.
+    """
+    out: Dict[str, int] = {}
+    for br in beam_results:
+        selected = getattr(br, "selected_shore", None)
+        if selected is None:
+            continue
+        sid = selected.id
+        if sid.startswith("TWR-"):
+            continue
+        length_m = getattr(getattr(br, "beam", None), "length_m", 0.0) or 0.0
+        if length_m <= 0:
+            continue
+        out[sid] = out.get(sid, 0) + math.ceil(length_m / CRUZETA_VIGA_SPACING_M)
+    return out
+
+
+def count_cruzetas_laje(slab_telescopic_counts: Dict[str, int]) -> Dict[str, int]:
+    """Cruzetas for slabs: apply Orguel-calibrated 25% ratio."""
+    return {
+        sid: round(n * ORGUEL_CRUZETA_RATIO_TELESCOPIC)
+        for sid, n in slab_telescopic_counts.items()
+    }
+
+
 def compute_cruzeta_bom(
     accessories: List[AccessoryCatalogEntry],
-    telescopic_counts: Dict[str, int],
+    beam_cruzeta_counts: Dict[str, int],
+    slab_cruzeta_counts: Dict[str, int],
     tower_count: int,
 ) -> List[Tuple[AccessoryCatalogEntry, int]]:
     """Return (accessory, qty) pairs ready for the BOM.
 
     Args:
         accessories: full accessory catalog (filters internally to cruzetas).
-        telescopic_counts: {shore_id: count} for telescopic shores only.
+        beam_cruzeta_counts: {shore_id: cruzeta_qty} already computed via
+            `count_cruzetas_viga` (0.80 m rule per beam length).
+        slab_cruzeta_counts: {shore_id: cruzeta_qty} already computed via
+            `count_cruzetas_laje` (0.25 ratio per telescopic shore).
         tower_count: total number of towers in the project.
     """
     out: List[Tuple[AccessoryCatalogEntry, int]] = []
@@ -362,9 +400,9 @@ def compute_cruzeta_bom(
         if acc.category != "cruzeta":
             continue
         qty = 0
-        for shore_id, n in telescopic_counts.items():
-            if shore_id in acc.associated_model_ids:
-                qty += round(n * ORGUEL_CRUZETA_RATIO_TELESCOPIC)
+        for sid in acc.associated_model_ids:
+            qty += beam_cruzeta_counts.get(sid, 0)
+            qty += slab_cruzeta_counts.get(sid, 0)
         if any(t.startswith("TWR-") for t in acc.associated_model_ids):
             qty += tower_count * TOWER_FACES * CRUZETAS_PER_TOWER_FACE
         if qty > 0:
