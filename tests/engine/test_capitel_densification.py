@@ -115,6 +115,61 @@ class TestCapitelDensification:
             assert d > 0.30  # folga mínima aceitável
 
 
+class TestAxisAlignment:
+    def test_shores_aligned_on_cardinal_and_diagonal_offsets(self):
+        """Capitel shores ficam em offsets cartesianos (±d, 0), (0, ±d),
+        (±d, ±d) — alinhados aos eixos X/Y do plano, permitindo
+        travamento VM50 vertical em colunas."""
+        polygon = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
+        cx, cy = 5.0, 5.0
+        extra = capitel_densification_shores(
+            polygon=polygon,
+            shore_entry=_shore_entry(),
+            pillar_positions=[(cx, cy)],
+            existing_shores=[],
+            max_spacing=1.30,
+        )
+        # Com max_spacing=1.30, densified_spacing=0.91.
+        # Offsets esperados: (±0.91, 0), (0, ±0.91), (±0.91, ±0.91)
+        d = 1.30 * 0.70  # 0.91
+        expected_offsets = {
+            (round(-d, 4), 0.0), (round(d, 4), 0.0),
+            (0.0, round(-d, 4)), (0.0, round(d, 4)),
+            (round(-d, 4), round(-d, 4)), (round(-d, 4), round(d, 4)),
+            (round(d, 4), round(-d, 4)), (round(d, 4), round(d, 4)),
+        }
+        observed_offsets = {
+            (round(s.x - cx, 4), round(s.y - cy, 4)) for s in extra
+        }
+        assert observed_offsets == expected_offsets, (
+            f"Offsets observados: {sorted(observed_offsets)}\n"
+            f"Esperados:         {sorted(expected_offsets)}"
+        )
+
+    def test_shores_form_travaveis_columns(self):
+        """Escoras de capitel compartilham valores de X (colunas) para
+        permitir travamento VM50 vertical."""
+        polygon = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
+        extra = capitel_densification_shores(
+            polygon=polygon,
+            shore_entry=_shore_entry(),
+            pillar_positions=[(5.0, 5.0)],
+            existing_shores=[],
+            max_spacing=1.30,
+        )
+        # Agrupa por coluna X — deve haver pelo menos 3 colunas, cada
+        # uma com ≥2 escoras (condição p/ VM50 travamento vertical).
+        from collections import defaultdict
+        cols = defaultdict(list)
+        for s in extra:
+            cols[round(s.x, 4)].append(s)
+        travaveis = [x for x, shores in cols.items() if len(shores) >= 2]
+        assert len(travaveis) >= 3, (
+            f"Só {len(travaveis)} colunas travaveis; esperado ≥3. "
+            f"Colunas: {dict((k, len(v)) for k, v in cols.items())}"
+        )
+
+
 class TestIntegrationSpacingReduction:
     def test_spacing_reduction_generates_denser_shores(self):
         """Mais escoras extras quando max_spacing é pequeno (grid denso)."""

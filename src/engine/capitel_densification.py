@@ -8,6 +8,15 @@ como uma densificação local ao redor de cada pilar:
 - **Anel externo**: 1.50 m (CAPITEL_OUTER_RADIUS_M)
 - **Espaçamento**: 30% menor que o grid padrão (CAPITEL_SPACING_FACTOR=0.70)
 
+**Alinhamento axial (bug fix 2026-04-16)**: as escoras de capitel são
+geradas numa grade **cartesiana alinhada aos eixos X/Y** do plano, não
+em anel angular. Isso garante que:
+
+  - As escoras fiquem em colunas/fileiras travaveis com VM50 (travamento
+    vertical desenhado por bins de coluna X).
+  - O padrão visual case com o grid principal (Q9: "VMs apoiadas de
+    torre a torre, vão quebrado pelas escoras").
+
 O helper aqui devolve apenas as escoras **extras** a serem adicionadas;
 o grid regular é calculado à parte por `distribute_shores`. Escoras já
 existentes são respeitadas (não duplicamos).
@@ -48,6 +57,32 @@ def _is_clear(
     return True
 
 
+def _axis_aligned_offsets(densified_spacing: float) -> List[Tuple[float, float]]:
+    """Gera offsets (dx, dy) cartesianos dentro do anel de capitel.
+
+    Itera multiplicadores inteiros i, j ∈ [-k, k] em torno de (0, 0);
+    só retém pontos no anel [DISTANCIA_PILAR_MIN, CAPITEL_OUTER_RADIUS_M].
+    Produz padrão típico de 8 pontos com spacing=0.91m: 4 cardinais +
+    4 diagonais, todos alinhados ao eixo X/Y (±1·d, 0), (0, ±1·d),
+    (±1·d, ±1·d).
+    """
+    max_k = max(1, int(math.ceil(CAPITEL_OUTER_RADIUS_M / densified_spacing)))
+    offsets: List[Tuple[float, float]] = []
+    for i in range(-max_k, max_k + 1):
+        for j in range(-max_k, max_k + 1):
+            if i == 0 and j == 0:
+                continue
+            dx = i * densified_spacing
+            dy = j * densified_spacing
+            r = math.hypot(dx, dy)
+            if r < DISTANCIA_PILAR_MIN - 1e-6:
+                continue
+            if r > CAPITEL_OUTER_RADIUS_M + 1e-6:
+                continue
+            offsets.append((dx, dy))
+    return offsets
+
+
 def capitel_densification_shores(
     polygon: Polygon,
     shore_entry: ShoreCatalogEntry,
@@ -58,9 +93,10 @@ def capitel_densification_shores(
     """Gera escoras extras em zonas de capitel ao redor de cada pilar.
 
     Para cada pilar cujo entorno intercepta o polígono, distribui escoras
-    em pelo menos um anel (até 2) entre `DISTANCIA_PILAR_MIN` e
-    `CAPITEL_OUTER_RADIUS_M`, com espaçamento angular calibrado para
-    `max_spacing × CAPITEL_SPACING_FACTOR` na circunferência externa.
+    numa grade **cartesiana alinhada aos eixos** dentro do anel de capitel
+    [DISTANCIA_PILAR_MIN, CAPITEL_OUTER_RADIUS_M]. Com max_spacing≈1.30m,
+    isso gera 4 cardinais em 0.91m + 4 diagonais em 1.29m por pilar —
+    alinhadas em colunas/fileiras para permitir travamento VM50 vertical.
 
     Args:
         polygon: polígono da laje (Shapely Polygon).
@@ -73,11 +109,7 @@ def capitel_densification_shores(
         return []
 
     densified_spacing = max(0.50, max_spacing * CAPITEL_SPACING_FACTOR)
-    # Raios dos anéis — pelo menos o externo; se couber outro, usa 2.
-    rings = [CAPITEL_OUTER_RADIUS_M]
-    mid = (DISTANCIA_PILAR_MIN + CAPITEL_OUTER_RADIUS_M) / 2.0
-    if mid - DISTANCIA_PILAR_MIN >= densified_spacing / 2:
-        rings.insert(0, mid)
+    offsets = _axis_aligned_offsets(densified_spacing)
 
     extra: List[PositionedShore] = []
     for cx, cy in pillar_positions:
@@ -86,22 +118,17 @@ def capitel_densification_shores(
         if not polygon.intersects(probe):
             continue
 
-        for radius in rings:
-            # 8 azimuths — suficiente para cobrir o anel em grids 1-1.3m
-            circumference = 2 * math.pi * radius
-            n_pts = max(4, int(math.ceil(circumference / densified_spacing)))
-            for k in range(n_pts):
-                theta = 2 * math.pi * k / n_pts
-                x = cx + radius * math.cos(theta)
-                y = cy + radius * math.sin(theta)
-                if not _is_clear(x, y, polygon, existing_shores, extra):
-                    continue
-                extra.append(PositionedShore(
-                    x=round(x, 4),
-                    y=round(y, 4),
-                    shore=shore_entry,
-                    load_applied_kn=0.0,
-                    utilization_ratio=0.0,
-                ))
+        for dx, dy in offsets:
+            x = cx + dx
+            y = cy + dy
+            if not _is_clear(x, y, polygon, existing_shores, extra):
+                continue
+            extra.append(PositionedShore(
+                x=round(x, 4),
+                y=round(y, 4),
+                shore=shore_entry,
+                load_applied_kn=0.0,
+                utilization_ratio=0.0,
+            ))
 
     return extra
