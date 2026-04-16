@@ -3,6 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-L6H7L60GYB"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-L6H7L60GYB');
+    </script>
+
     <title>estrutura.app — Orçamentos de escoramento com IA</title>
     <meta name="description" content="Projetos de escoramento em segundos com inteligência artificial. DXF, BIM/IFC, romaneio, memória de cálculo e relatório técnico.">
 
@@ -507,42 +517,6 @@
             margin-top: 7px;
         }
         .metric:last-child .metric-value { color: var(--accent); }
-
-        /* ---------- Beams table ---------- */
-        .beams-toggle {
-            display: inline-block;
-            font-family: var(--mono);
-            font-size: 0.72rem;
-            color: var(--fg-dim);
-            cursor: pointer;
-            margin-top: 0.9rem;
-            padding: 4px 8px;
-            border-radius: var(--radius-sm);
-            transition: color 0.15s, background 0.15s;
-        }
-        .beams-toggle:hover { color: var(--accent); background: var(--accent-soft); }
-
-        .beams-table {
-            width: 100%;
-            font-family: var(--mono);
-            font-size: 0.78rem;
-            margin-top: 0.8rem;
-            border-collapse: collapse;
-        }
-        .beams-table th {
-            text-align: left;
-            color: var(--fg-mute);
-            padding: 8px 10px;
-            border-bottom: 1px solid var(--line);
-            font-weight: 500;
-            font-size: 0.68rem;
-        }
-        .beams-table td {
-            padding: 7px 10px;
-            color: var(--fg);
-            border-bottom: 1px solid var(--line-soft);
-            font-variant-numeric: tabular-nums;
-        }
 
         /* ---------- Actions ---------- */
         .actions {
@@ -2065,11 +2039,6 @@
             }
         }
 
-        function toggleBeams(jobId) {
-            const el = document.getElementById(`beams-${jobId}`);
-            el.style.display = el.style.display === 'none' ? 'block' : 'none';
-        }
-
         function renderJobs() {
             const container = document.getElementById('jobsList');
             const jobList = Object.values(jobs).sort((a, b) =>
@@ -2130,37 +2099,13 @@
                         </div>
                     `;
 
-                    if (job.beams && job.beams.length > 0) {
-                        const beamRows = job.beams.slice(0, 15).map(b =>
-                            `<tr>
-                                <td>${esc(b.name || '?')}</td>
-                                <td>${esc(b.length_m)} m</td>
-                                <td>${esc(b.width_m)}\u00D7${esc(b.height_m || '?')}</td>
-                                <td>${esc(b.shore_count)}</td>
-                                <td>${esc(b.spacing_m)} m</td>
-                            </tr>`
-                        ).join('');
-
-                        content += `
-                            <span class="beams-toggle" onclick="toggleBeams('${job.id}')">
-                                Ver detalhes das vigas
-                            </span>
-                            <div id="beams-${job.id}" style="display:none">
-                                <table class="beams-table">
-                                    <tr><th>Viga</th><th>Comprimento</th><th>Seção</th><th>Escoras</th><th>Espac.</th></tr>
-                                    ${beamRows}
-                                </table>
-                                ${job.beams.length > 15 ? `<div style="font-family:var(--mono);color:var(--fg-mute);font-size:0.7rem;margin-top:6px">+ ${job.beams.length - 15} vigas</div>` : ''}
-                            </div>
-                        `;
-                    }
-
                     const stem = stemOf(job.filename);
                     content += `
                         <div class="actions">
                             <a href="#" onclick="downloadFile('/jobs/${job.id}/download','${stem}_escoras.dxf');return false" class="btn btn-primary">\u2193 DXF</a>
                             ${job.has_dwg ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/dwg','${stem}_escoras.dwg');return false" class="btn btn-primary">\u2193 DWG</a>` : ''}
                             <a href="#" onclick="downloadFile('/jobs/${job.id}/download/csv','${stem}_BOM.csv');return false" class="btn btn-accent">\u2193 BOM CSV</a>
+                            ${job.has_consumption_csv ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/consumo','${stem}_consumo.csv');return false" class="btn btn-accent">\u2193 Consumo</a>` : ''}
                             ${job.has_relatorio ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/pdf/relatorio','${stem}_relatorio.pdf');return false" class="btn btn-pdf">\u2193 Relatório</a>` : ''}
                             ${job.has_memoria_calculo ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/pdf/memoria_calculo','${stem}_memoria_calculo.pdf');return false" class="btn btn-pdf">\u2193 Memória</a>` : ''}
                             ${job.has_orcamento ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/pdf/orcamento','${stem}_orcamento.pdf');return false" class="btn btn-pdf">\u2193 Orçamento</a>` : ''}
@@ -2171,8 +2116,24 @@
                         </div>
                     `;
 
+                    const warnLines = [];
                     if (job.warnings && job.warnings.length > 0) {
-                        const warns = job.warnings.slice(0, 8).map(w => `<div>${esc(w)}</div>`).join('');
+                        warnLines.push(...job.warnings);
+                    }
+                    if (job.consumption_summary && job.consumption_summary.length > 0) {
+                        const fmtNum = (n, d = 2) => Number(n).toLocaleString('pt-BR', {
+                            minimumFractionDigits: d, maximumFractionDigits: d,
+                        });
+                        for (const r of job.consumption_summary) {
+                            const label = r.category_label || 'Laje';
+                            warnLines.push(
+                                `P\u00e9 direito (m): ${fmtNum(r.pe_direito_m)} (${label})`
+                                + ` - Taxa de consumo (Kg/m\u00b3): ${fmtNum(r.rate_kg_m3_bruto)}`
+                            );
+                        }
+                    }
+                    if (warnLines.length > 0) {
+                        const warns = warnLines.map(w => `<div>${esc(w)}</div>`).join('');
                         content += `<div class="warnings">${warns}</div>`;
                     }
 

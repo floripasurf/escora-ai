@@ -7,11 +7,17 @@ load + shore calculations.
 
 import logging
 from typing import List, Dict, Any, Optional
-from shapely.geometry import LineString, Point
+from collections import defaultdict
+from shapely.geometry import LineString, Point, Polygon
 
 from src.models.pipeline_models import ClassifiedElement, ElementType
 from src.models.calculation_models import (
     BeamShoringResult, SlabShoringResult, CalculationResult,
+    VolumeBreakdownEntry,
+)
+from src.utils.labels import (
+    CATEGORY_DEFAULT, CATEGORY_LABELS_PT,
+    classify_layer, extract_room_hint, extract_structural_name,
 )
 from src.models.slab import Slab
 from src.engine.slab_builder import (
@@ -241,6 +247,7 @@ def run_calculation(
     density_correction: float = 1.0,
     mode: str = "price",
     inventory: Optional[Any] = None,
+    text_entities: Optional[List[Dict[str, Any]]] = None,
 ) -> CalculationResult:
     """Run the full calculation pipeline.
 
@@ -597,6 +604,7 @@ def run_calculation(
             spacing_m=spacing,
             selected_shore=selected_shore,
             shore_height_m=shore_height,
+            shores_weight_kg=round(sum(s.shore.weight_kg for s in shores), 2),
         ))
 
         # Contra-flecha recommendation for spans > 2m
@@ -750,25 +758,233 @@ def run_calculation(
     nervura_panel_count = 0
     solid_panel_count = 0
 
-    # Constants for filtering out thin-strip "slabs" (platibandas, cornijas,
-    # ornamental outlines) that real shoring plans never shore as slabs.
-    THIN_STRIP_MIN_DIM_M = 1.2   # narrow side smaller than this → strip
+    # Constants for filtering out thin-strip "slabs" (cornijas, ornamental
+    # outlines) that real shoring plans never shore. Platibandas, beirais,
+    # balanços e marquises LEGÍTIMAS são preservadas: bypass via layer keyword
+    # (CATEGORY_LAYER_KEYWORDS) ou heurística de anel perimetral.
+    THIN_STRIP_MIN_DIM_M = 0.5   # narrow side smaller than this → strip
     THIN_STRIP_RATIO = 5.0       # long/short aspect ratio above this → strip
+    # Heurística platibanda: polígono fino suficiente cujo centróide fica
+    # próximo da borda de uma laje muito maior → é anel perimetral (platibanda).
+    PLATIBANDA_GEOM_SHORT_MAX_M = 0.5
+    PLATIBANDA_GEOM_RATIO_MIN = 3.0
+    PLATIBANDA_BOUNDARY_BUFFER_M = 0.30
+    PLATIBANDA_LARGER_SLAB_FACTOR = 5.0
     rejected_strip = 0
 
+    def _detect_platibanda_geometry(poly, all_polygons) -> bool:
+        """Detecta platibandas (muretas perimetrais) por geometria.
+
+        Retorna True quando o polígono é fino (lado curto ≤ 0.5m, ratio ≥ 3)
+        E seu centróide cai a no máximo 0.30m da borda de alguma outra laje
+        pelo menos 5× maior. Padrão típico de mureta seguindo perímetro.
+        """
+        try:
+            minx_, miny_, maxx_, maxy_ = poly.bounds
+            w_ = maxx_ - minx_
+            h_ = maxy_ - miny_
+            short_ = min(w_, h_)
+            long_ = max(w_, h_)
+            if short_ <= 0:
+                return False
+            ratio_ = long_ / short_
+            if short_ > PLATIBANDA_GEOM_SHORT_MAX_M:
+                return False
+            if ratio_ < PLATIBANDA_GEOM_RATIO_MIN:
+                return False
+            # Usa ponto representativo (sempre dentro da casca) em vez de centróide
+            rep = poly.representative_point()
+            for other in all_polygons:
+                if other is poly:
+                    continue
+                if other.area < poly.area * PLATIBANDA_LARGER_SLAB_FACTOR:
+                    continue
+                try:
+                    buffered_boundary = other.boundary.buffer(PLATIBANDA_BOUNDARY_BUFFER_M)
+                    if buffered_boundary.contains(rep):
+                        return True
+                except Exception:
+                    continue
+            return False
+        except Exception:
+            return False
+
+    def _classify_panel(
+        poly, layer_name: str, all_polys, cantilever_flag: bool,
+    ) -> str:
+        """Determina a categoria do painel com a seguinte prioridade:
+        1) Layer keyword (platibanda, beiral, marquise, balanço, cantilever)
+        2) Heurística geométrica de anel perimetral → platibanda
+        3) Flag de cantilever detectada previamente → cantilever
+        4) Default → laje
+        """
+        cat = classify_layer(layer_name)
+        if cat:
+            return cat
+        if _detect_platibanda_geometry(poly, all_polys):
+            return "platibanda"
+        if cantilever_flag:
+            return "cantilever"
+        return CATEGORY_DEFAULT
+
+    # Prepara buffers de textos uma única vez (best-effort).
+    # Cada item: dict com 'text' e 'position' (x,y).
+    _panel_texts: List[Dict[str, Any]] = []
+    if text_entities:
+        for te in text_entities:
+            if not isinstance(te, dict):
+                continue
+            content = te.get("text") or ""
+            pos = te.get("position")
+            if not content or not pos:
+                continue
+            try:
+                _panel_texts.append({
+                    "text": str(content),
+                    "x": float(pos[0]),
+                    "y": float(pos[1]),
+                })
+            except Exception:
+                continue
+
+    TEXT_BUFFER_M = 0.5
+    TEXT_EDGE_MAX_M = 0.5  # desempate: só manter room_hint se a fronteira estiver perto
+
+    def _texts_in_polygon(poly) -> List[Dict[str, Any]]:
+        """Retorna textos dentro do polígono OU dentro de buffer TEXT_BUFFER_M.
+
+        Para desempate entre polígonos sobrepostos, limita-se no consumidor:
+        o polígono de menor área vence para cada texto.
+        """
+        if not _panel_texts:
+            return []
+        try:
+            buffered = poly.buffer(TEXT_BUFFER_M)
+        except Exception:
+            buffered = poly
+        matched = []
+        for t in _panel_texts:
+            try:
+                p = Point(t["x"], t["y"])
+                if buffered.contains(p):
+                    matched.append(t)
+            except Exception:
+                continue
+        return matched
+
+    def _find_text_inside_polygon(poly, all_polys):
+        """Procura nome estrutural (L3) e cômodo (Quarto 1) em textos próximos.
+
+        Critério de desempate quando o texto pode cair em múltiplos polígonos
+        (sobreposição em planta arquitetônica): o polígono com MENOR área vence.
+        """
+        matches = _texts_in_polygon(poly)
+        structural_name: Optional[str] = None
+        room_hint: Optional[str] = None
+        for t in matches:
+            # Desempate: só aceitar o texto para este polígono se for o menor
+            # polígono que o contém. Isso mantém o vínculo no painel mais
+            # específico quando há sobreposição.
+            own_area = poly.area
+            p = Point(t["x"], t["y"])
+            is_most_specific = True
+            for other in all_polys:
+                if other is poly:
+                    continue
+                try:
+                    if other.area >= own_area:
+                        continue
+                    other_buf = other.buffer(TEXT_BUFFER_M)
+                    if other_buf.contains(p):
+                        # Outro polígono menor também cobre esse texto
+                        is_most_specific = False
+                        break
+                except Exception:
+                    continue
+            if not is_most_specific:
+                continue
+
+            if structural_name is None:
+                sn = extract_structural_name(t["text"])
+                if sn:
+                    structural_name = sn
+            if room_hint is None:
+                rh = extract_room_hint(t["text"])
+                if rh:
+                    # Só manter se o texto estiver dentro do polígono ou ≤ 0.5m
+                    # da fronteira do polígono mais próximo (critério do plano).
+                    try:
+                        dist_to_boundary = poly.boundary.distance(p)
+                        # Se o ponto está dentro do polígono, distance == 0
+                        inside = poly.contains(p)
+                        if inside or dist_to_boundary <= TEXT_EDGE_MAX_M:
+                            room_hint = rh
+                    except Exception:
+                        room_hint = rh
+        return structural_name, room_hint
+
+    def _layer_for_polygon(poly) -> str:
+        """Best-effort: retorna o layer DXF da polyline/hatch de origem.
+
+        A associação por índice é frágil (slab_polygons vem de múltiplas fontes
+        e é deduplicado). Estratégia: procurar a polyline/hatch cuja geometria
+        sobrepõe significativamente este polígono — ganha o layer com maior
+        overlap relativo à área do painel.
+        """
+        best_layer = ""
+        best_score = 0.0
+        sources = []
+        if slab_polylines:
+            sources.extend(slab_polylines)
+        if slab_hatches:
+            sources.extend(slab_hatches)
+        for raw in sources:
+            if not isinstance(raw, dict):
+                continue
+            pts = raw.get("points") or []
+            if len(pts) < 3:
+                continue
+            try:
+                cand = Polygon(pts)
+                if not cand.is_valid or cand.is_empty:
+                    continue
+                inter = poly.intersection(cand).area
+                if inter <= 0 or poly.area <= 0:
+                    continue
+                score = inter / poly.area
+                if score > best_score:
+                    best_score = score
+                    best_layer = raw.get("layer", "") or ""
+            except Exception:
+                continue
+        return best_layer
+
     for i, polygon in enumerate(slab_polygons):
-        # Reject thin strip "slabs" — these are platibandas/cornijas
+        is_cantilever = cantilever_flags[i] if i < len(cantilever_flags) else False
+        panel_layer = _layer_for_polygon(polygon)
+        panel_category = _classify_panel(
+            polygon, panel_layer, slab_polygons, is_cantilever,
+        )
+        panel_structural_name, panel_room_hint = _find_text_inside_polygon(
+            polygon, slab_polygons,
+        )
+
+        # Reject thin strip "slabs" — estes são cornijas/molduras ornamentais.
+        # Platibandas/beirais/balanços/marquises/cantilevers estão protegidos
+        # pela categorização: só categoria "laje" (default) é rejeitada.
         minx, miny, maxx, maxy = polygon.bounds
         w = maxx - minx
         h = maxy - miny
         short = min(w, h)
         long = max(w, h)
         ratio = long / short if short > 0 else float("inf")
-        if short < THIN_STRIP_MIN_DIM_M and ratio > THIN_STRIP_RATIO:
+        if (
+            panel_category == CATEGORY_DEFAULT
+            and short < THIN_STRIP_MIN_DIM_M
+            and ratio > THIN_STRIP_RATIO
+        ):
             rejected_strip += 1
             continue
-
-        is_cantilever = cantilever_flags[i] if i < len(cantilever_flags) else False
 
         slab = Slab.from_polygon(
             polygon=polygon,
@@ -865,6 +1081,10 @@ def run_calculation(
                 total_load_kn=total_load,
                 shores=[],
                 exclusions=all_exclusions,
+                category=panel_category,
+                structural_name=panel_structural_name,
+                room_hint=panel_room_hint,
+                shores_weight_kg=0.0,
             ))
             continue
 
@@ -958,6 +1178,10 @@ def run_calculation(
                             spacing_y_m=round((polygon.bounds[3] - polygon.bounds[1]) / max(len(h_ribs), 1), 2),
                             selected_shore=selected_shore,
                             exclusions=all_exclusions,
+                            category=panel_category,
+                            structural_name=panel_structural_name,
+                            room_hint=panel_room_hint,
+                            shores_weight_kg=round(sum(s.shore.weight_kg for s in positioned), 2),
                         ))
                         nervura_panel_count += 1
                         continue
@@ -1018,6 +1242,10 @@ def run_calculation(
             spacing_y_m=sy,
             selected_shore=selected_shore,
             exclusions=all_exclusions,
+            category=panel_category,
+            structural_name=panel_structural_name,
+            room_hint=panel_room_hint,
+            shores_weight_kg=round(sum(s.shore.weight_kg for s in shores), 2),
         ))
         solid_panel_count += 1
 
@@ -1031,8 +1259,7 @@ def run_calculation(
         )
     if rejected_strip > 0:
         warnings.append(
-            f"{rejected_strip} polígono(s) de faixa fina (platibanda/cornija) "
-            f"descartado(s) do cálculo de laje"
+            f"Painéis descartados (cornijas/molduras finas): {rejected_strip}"
         )
 
     # === SLAB-BEAM SHORE PROXIMITY FILTER ===
@@ -1150,5 +1377,80 @@ def run_calculation(
     calc_result.total_shores = all_shores_count
     calc_result.total_load_kn = round(all_load, 2)
     calc_result.is_valid = len(validation_errors) == 0
+
+    # === VOLUME ESCORADO ===
+    # V_escorado = Σ A_laje × pé-direito − Σ V_vigas − Σ V_pilares
+    # Inclui cantilevers/beirais (todos os painéis de laje entram no bruto).
+    # Exclui vigas (penduram abaixo da laje) e pilares (atravessam o pé-direito).
+    for sr in slab_results:
+        sr.volume_m3 = round(sr.area_m2 * pe_direito_m, 3)
+
+    slab_area_total = sum(sr.area_m2 for sr in slab_results)
+    slab_volume_gross = slab_area_total * pe_direito_m
+
+    beam_volume_deducted = sum(
+        (br.beam.length_m or 0.0)
+        * (br.beam.section_width_m or 0.0)
+        * (br.beam.section_height_m or 0.0)
+        for br in beam_results
+    )
+
+    pillar_volume_deducted = sum(
+        (p.section_width_m or 0.0)
+        * (p.section_height_m or 0.0)
+        * pe_direito_m
+        for p in pillars
+        if p.element_type == ElementType.PILLAR
+    )
+
+    total_volume = max(
+        0.0,
+        slab_volume_gross - beam_volume_deducted - pillar_volume_deducted,
+    )
+
+    calc_result.slab_volume_gross_m3 = round(slab_volume_gross, 3)
+    calc_result.beam_volume_deducted_m3 = round(beam_volume_deducted, 3)
+    calc_result.pillar_volume_deducted_m3 = round(pillar_volume_deducted, 3)
+    calc_result.total_volume_m3 = round(total_volume, 3)
+
+    # === AUTO-NUMERAÇÃO + BREAKDOWN DE VOLUME ===
+    # Ordena por (categoria ASC, área DESC) e atribui índice 1-based por
+    # categoria. Monta rótulo final conforme prioridade:
+    #   structural_name > room_hint+categoria > categoria+index.
+    counters: Dict[str, int] = defaultdict(int)
+    for sr in sorted(slab_results, key=lambda s: (s.category, -s.area_m2)):
+        counters[sr.category] += 1
+        sr.category_index = counters[sr.category]
+        base = CATEGORY_LABELS_PT.get(sr.category, sr.category.title())
+        if sr.structural_name:
+            sr.label = f"{base} {sr.structural_name}"
+        elif sr.room_hint and sr.category == CATEGORY_DEFAULT:
+            sr.label = f"{base} {sr.category_index} ({sr.room_hint})"
+        else:
+            sr.label = f"{base} {sr.category_index}"
+
+    # Popular volume_breakdown mantendo ordem de slab_results
+    breakdown: List[VolumeBreakdownEntry] = []
+    for sr in slab_results:
+        try:
+            rep = sr.polygon.representative_point()
+            cx, cy = float(rep.x), float(rep.y)
+        except Exception:
+            try:
+                c = sr.polygon.centroid
+                cx, cy = float(c.x), float(c.y)
+            except Exception:
+                cx, cy = 0.0, 0.0
+        breakdown.append(VolumeBreakdownEntry(
+            category=sr.category,
+            label=sr.label,
+            area_m2=round(sr.area_m2, 3),
+            pe_direito_m=round(pe_direito_m, 3),
+            volume_m3=round(sr.volume_m3, 3),
+            centroid_x=round(cx, 3),
+            centroid_y=round(cy, 3),
+            shores_weight_kg=round(sr.shores_weight_kg, 2),
+        ))
+    calc_result.volume_breakdown = breakdown
 
     return calc_result

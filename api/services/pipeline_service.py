@@ -13,6 +13,7 @@ from src.models.pipeline_models import ElementType
 from src.output.report_data import build_report_data, ReportMetadata
 from src.output.pdf_generator import generate_pdf, generate_memoria_calculo, generate_orcamento
 from src.output.ifc_generator import generate_ifc
+from src.output.csv_generator import write_consumption_csv
 from api.config import settings
 
 logger = logging.getLogger(__name__)
@@ -51,29 +52,19 @@ def process_dxf(
     stem_base = Path(input_path).stem
     output_dxf = str(output_dir / f"{stem_base}_escoras{output_suffix}.dxf")
 
-    _generate_output_dxf(input_path, calc, output_dxf, scale=result.scale)
+    # Build report data upfront — DXF, CSVs e PDFs compartilham.
+    metadata = ReportMetadata(
+        project_name=stem_base,
+        date=date.today().strftime("%d/%m/%Y"),
+        scale=result.scale,
+        dxf_filename=Path(input_path).name,
+    )
+    report_data = build_report_data(calc, metadata)
 
-    # Build results summary
-    beam_results = []
-    for br in calc.beam_results:
-        b = br.beam
-        beam_results.append({
-            "name": b.name,
-            "length_m": round(b.length_m or 0, 2),
-            "width_m": round(b.section_width_m or 0, 2),
-            "height_m": round(b.section_height_m, 2) if b.section_height_m else None,
-            "shore_count": br.shore_count,
-            "spacing_m": round(br.spacing_m, 2),
-        })
-
-    slab_results = []
-    for sr in calc.slab_results:
-        slab_results.append({
-            "area_m2": round(sr.area_m2, 1),
-            "thickness_m": round(sr.thickness_m, 2),
-            "shore_count": len(sr.shores),
-            "grid": f"{sr.grid_nx}x{sr.grid_ny}",
-        })
+    _generate_output_dxf(
+        input_path, calc, output_dxf, scale=result.scale,
+        report_data=report_data,
+    )
 
     total_beam_shores = sum(br.shore_count for br in calc.beam_results)
     total_slab_shores = sum(len(sr.shores) for sr in calc.slab_results)
@@ -99,7 +90,34 @@ def process_dxf(
 
     # Generate BOM CSV
     csv_path = str(output_dir / f"{stem_base}_BOM{output_suffix}.csv")
-    _generate_bom_csv(calc, csv_path)
+    _generate_bom_csv(calc, csv_path, report_data=report_data)
+
+    # Generate consumption CSV (consumo por pé-direito — orçamento interno)
+    consumption_csv_path: Optional[str] = None
+    try:
+        consumption_csv_candidate = str(
+            output_dir / f"{stem_base}_consumo{output_suffix}.csv"
+        )
+        write_consumption_csv(report_data, consumption_csv_candidate)
+        consumption_csv_path = consumption_csv_candidate
+        logger.info(f"Generated consumption CSV: {consumption_csv_path}")
+    except Exception as e:
+        logger.warning(f"Consumption CSV generation failed (non-fatal): {e}")
+
+    # Resumo compacto do consumo ((pé-direito, categoria) × taxa kg/m³ bruto)
+    # — usado pela UI pra exibir validação rápida sem parsear o CSV.
+    consumption_summary = [
+        {
+            "pe_direito_m": round(r.pe_direito_m, 2),
+            "rate_kg_m3_bruto": round(r.rate_kg_m3_bruto, 2),
+            "rate_kg_m3_liquido": round(r.rate_kg_m3_liquido, 2),
+            "area_m2": round(r.area_m2, 2),
+            "volume_bruto_m3": round(r.volume_bruto_m3, 2),
+            "total_kg": round(r.total_weight_kg, 2),
+            "category_label": r.category_label,
+        }
+        for r in (report_data.consumption_rows or [])
+    ]
 
     # Generate IFC (BIM export)
     ifc_path: Optional[str] = None
@@ -115,14 +133,6 @@ def process_dxf(
     stem = stem_base
     pdf_paths = {}
     try:
-        metadata = ReportMetadata(
-            project_name=stem,
-            date=date.today().strftime("%d/%m/%Y"),
-            scale=result.scale,
-            dxf_filename=Path(input_path).name,
-        )
-        report_data = build_report_data(calc, metadata)
-
         pdf_report = str(output_dir / f"{stem}_relatorio{output_suffix}.pdf")
         generate_pdf(report_data, pdf_report)
         pdf_paths["relatorio"] = pdf_report
@@ -144,12 +154,12 @@ def process_dxf(
         "pillar_count": pillar_count,
         "slab_count": len(calc.slab_results),
         "total_shores": total_beam_shores + total_slab_shores,
-        "beams": beam_results,
-        "slabs": slab_results,
-        "warnings": result.warnings[:20],  # Limit warnings
+        "warnings": result.warnings[:60],  # Limit warnings (diagnostics first)
         "output_dxf_path": output_dxf,
         "dwg_path": dwg_path,
         "csv_path": csv_path,
+        "consumption_csv_path": consumption_csv_path,
+        "consumption_summary": consumption_summary,
         "ifc_path": ifc_path,
         **pdf_paths,
     }
@@ -199,8 +209,13 @@ def _count_shores_by_id(calc):
     return telescopic_counts, tower_count
 
 
-def _generate_bom_csv(calc, output_path: str):
-    """Generate Bill of Materials CSV from calculation results."""
+def _generate_bom_csv(calc, output_path: str, report_data=None):
+    """Generate Bill of Materials CSV from calculation results.
+
+    When `report_data` is provided, vigas vazadas (distribution beams) BOM
+    rows são incluídas como acessórios — mantendo paridade com a aba BOM
+    do Excel/PDF.
+    """
     rows = []
 
     # Beam shores
@@ -255,6 +270,20 @@ def _generate_bom_csv(calc, output_path: str):
     except Exception as exc:
         logger.warning(f"Cruzeta BOM rows skipped: {exc}")
 
+    # Accessories — vigas vazadas (distribution beams VD-*) já agregadas
+    # em report_data.bom_rows; reusar a contagem evita duplicar lógica.
+    if report_data is not None:
+        for r in report_data.bom_rows:
+            if r.id.startswith("VD-"):
+                rows.append({
+                    "Tipo": "Acessório",
+                    "Elemento": r.model,
+                    "Comprimento (m)": "",
+                    "Secao (cm)": "",
+                    "Qtd Escoras": r.quantity,
+                    "Espacamento (m)": "",
+                })
+
     fieldnames = ["Tipo", "Elemento", "Comprimento (m)", "Secao (cm)", "Qtd Escoras", "Espacamento (m)"]
     with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter=";")
@@ -262,7 +291,13 @@ def _generate_bom_csv(calc, output_path: str):
         writer.writerows(rows)
 
 
-def _generate_output_dxf(input_path: str, calc, output_path: str, scale: float = 1.0):
+def _generate_output_dxf(
+    input_path: str,
+    calc,
+    output_path: str,
+    scale: float = 1.0,
+    report_data=None,
+):
     """Overlay shores onto the original DXF using Orguel layer naming.
 
     Symbology (Orguel convention):
@@ -544,5 +579,28 @@ def _generate_output_dxf(input_path: str, calc, output_path: str, scale: float =
             height=SHORE_LABEL_HEIGHT * 0.8,
             dxfattribs={"layer": "INFO_ESCORAS"},
         ).set_placement((lx + 3.9, ly - 0.05))
+
+    # Bloco CONSUMO POR PÉ-DIREITO — orçamento interno na layer VOLUMES.
+    if report_data is not None and getattr(report_data, "consumption_rows", None):
+        try:
+            from src.generator.dxf_writer import _write_consumption_block
+            _ensure_layer(doc, "VOLUMES", 7)
+            # Bbox de TODAS as escoras (vigas + lajes) para posicionamento.
+            xs: list = []
+            ys: list = []
+            for br in calc.beam_results:
+                for s in br.shores:
+                    xs.append(_dx(s.x))
+                    ys.append(_dx(s.y))
+            for sr in calc.slab_results:
+                for s in sr.shores:
+                    xs.append(_dx(s.x))
+                    ys.append(_dx(s.y))
+            if xs and ys:
+                origin_x = min(xs)
+                origin_y = min(ys) - 1.0 * inv_scale
+                _write_consumption_block(msp, report_data, origin_x, origin_y)
+        except Exception as e:
+            logger.debug(f"DXF consumption block skipped: {e}")
 
     doc.saveas(output_path)

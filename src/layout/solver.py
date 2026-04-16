@@ -45,25 +45,64 @@ def solve_layout(input: ProjectInput) -> FloorPlan:
     """
     module = get_module(input.block_size.value)
 
-    # 1. Generate layout via shape grammar (falls back to fixed templates)
-    template = generate_layout(
-        bedrooms=input.bedrooms,
-        target_area_m2=input.target_area_m2,
-        layout_type=input.layout_type.value,
-        has_garage=input.has_garage,
-        bathrooms=getattr(input, 'bathrooms', 1),
-    )
+    # 1. Try repertoire first, fallback to shape grammar
+    template = None
+    forced_id = getattr(input, '_forced_template_id', None)
+    try:
+        if forced_id:
+            from src.layout.repertoire import get_all_templates
+            from src.layout.repertoire.adapter import adapt_template
+            from src.layout.repertoire.compat import to_legacy_template
+            all_t = get_all_templates()
+            match = next((t for t in all_t if t.id == forced_id), None)
+            if match:
+                adapted = adapt_template(
+                    match,
+                    target_area_m2=input.target_area_m2,
+                    lot_width_m=input.lot_width_m,
+                    lot_depth_m=input.lot_depth_m,
+                )
+                template = to_legacy_template(adapted)
+                logger.info(f"Repertório (forçado): {template['id']}")
+        else:
+            from src.layout.repertoire import select_and_adapt
+            template = select_and_adapt(input)
+            if template:
+                logger.info(f"Repertório: {template['id']}")
+    except Exception as e:
+        logger.debug(f"Repertoire unavailable: {e}")
+
+    if template is None:
+        template = generate_layout(
+            bedrooms=input.bedrooms,
+            target_area_m2=input.target_area_m2,
+            layout_type=input.layout_type.value,
+            has_garage=input.has_garage,
+            bathrooms=getattr(input, 'bathrooms', 1),
+        )
     logger.info(f"Template selecionado: {template['id']}")
 
     # 2. Calculate building footprint (snap to module)
-    # Building must fit in lot with setbacks (~1.5m each side typical MCMV)
-    max_width = input.lot_width_m - 3.0  # 1.5m afastamento lateral cada lado
-    max_depth = input.lot_depth_m - 5.0  # 3m frontal + 2m fundos
+    # Use lot_placement from repertoire template if available
+    lot_placement = template.get("lot_placement", {})
+    setback_side = lot_placement.get("setback_side_m", 1.5)
+    setback_front = lot_placement.get("setback_front_m", 3.0)
+    setback_back = lot_placement.get("setback_back_m", 2.0)
+    coverage_max = lot_placement.get("building_coverage_max", 0.65)
 
-    # Target dimensions from area
-    aspect_ratio = 0.7  # typical MCMV depth/width
-    target_width = (input.target_area_m2 / aspect_ratio) ** 0.5
-    target_depth = input.target_area_m2 / target_width
+    max_width = input.lot_width_m - 2 * setback_side
+    max_depth = input.lot_depth_m - setback_front - setback_back
+
+    # Target dimensions — prefer template's preferred dimensions if available
+    pref_w = template.get("preferred_width_m")
+    pref_d = template.get("preferred_depth_m")
+    if pref_w and pref_d:
+        target_width = pref_w
+        target_depth = pref_d
+    else:
+        aspect_ratio = 0.7  # typical MCMV depth/width
+        target_width = (input.target_area_m2 / aspect_ratio) ** 0.5
+        target_depth = input.target_area_m2 / target_width
 
     # Constrain to lot
     building_width = min(target_width, max_width)
@@ -72,6 +111,13 @@ def solve_layout(input: ProjectInput) -> FloorPlan:
     # Snap to module
     building_width = snap_to_module(building_width, module)
     building_depth = snap_to_module(building_depth, module)
+
+    # Enforce building coverage maximum
+    max_built_area = input.lot_width_m * input.lot_depth_m * coverage_max
+    if building_width * building_depth > max_built_area:
+        scale = (max_built_area / (building_width * building_depth)) ** 0.5
+        building_width = snap_to_module(building_width * scale, module)
+        building_depth = snap_to_module(building_depth * scale, module)
 
     # Ensure minimum area (adjust depth if needed)
     actual_area = building_width * building_depth

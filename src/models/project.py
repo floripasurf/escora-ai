@@ -19,6 +19,10 @@ class ShoringResult(BaseModel):
     spacing_x_m: float = Field(description="Espaçamento efetivo X (m)")
     spacing_y_m: float = Field(description="Espaçamento efetivo Y (m)")
     load_per_shore_kn: float = Field(description="Carga por escora (kN)")
+    pe_direito_m: float = Field(default=0.0, description="Pé-direito usado (m)")
+    volume_m3: float = Field(default=0.0, description="Volume escorado bruto (m³)")
+    category: str = Field(default="laje", description="Categoria didática (laje, beiral, platibanda...)")
+    label: str = Field(default="", description="Rótulo exibido no DXF/planilha")
 
 
 class Project(BaseModel):

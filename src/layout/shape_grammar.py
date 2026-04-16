@@ -1,7 +1,5 @@
 """Shape grammar — geração procedural de plantas baseada em fluxo de circulação.
 
-Princípios extraídos de plantas residenciais reais:
-
 REGRAS FUNDAMENTAIS:
 1. Cada quarto tem acesso INDEPENDENTE à área social (nunca por outro quarto)
 2. Cada quarto tem acesso fácil a um banheiro (via corredor)
@@ -12,23 +10,34 @@ REGRAS FUNDAMENTAIS:
 
 MODELO DE LAYOUT (rua embaixo):
 
-  +--------+------+--------+------+
-  |Quarto 1|Banh. |Quarto 2|Serv. |   ← zona íntima (quartos + wet)
-  +--------+------+--------+------+
-  |        Corredor (hall)         |   ← faixa fina, LARGURA TOTAL
-  +--------------------------------+
-  |                                |
-  |        Sala/Cozinha            |   ← zona social (frente/rua)
-  +--------------------------------+
+  +--------+--------+------+
+  |        |        |Banh. |
+  |Quarto 1|Quarto 2|------|  ← zona íntima
+  |        |        |Serv. |
+  +--------+--------+------+
+  |     Corredor (hall)    |  ← faixa fina, LARGURA TOTAL
+  +------------------------+
+  |                        |
+  |     Sala/Cozinha       |  ← zona social (frente/rua)
+  +------------------------+
 
-- O corredor é uma faixa contínua de largura total → TODOS os quartos,
-  banheiro e serviço são adjacentes a ele → acesso garantido.
-- Banheiro fica ENTRE os quartos na zona íntima → próximo de todos.
-- Serviço fica no canto da zona íntima → cluster molhado com banheiro.
-- Corredor mínimo: ~0.90m de profundidade real (NBR 15575).
+Com cozinha separada:
+  +------+------+-----+------+
+  |      |      |     |Banh. |
+  | Q1   | Q2   | Coz |------|
+  |      |      |     |Serv. |
+  +------+------+-----+------+
+  |      Corredor (hall)      |
+  +---------------------------+
+  |        Sala               |
+  +---------------------------+
+
+Wet core: banheiro(s) + serviço empilhados verticalmente.
+Cozinha separada: coluna própria (não empilhada no wet core).
 """
 
 import logging
+import math
 from typing import Dict, List, Any, Tuple
 
 from src.utils.masonry_constants import (
@@ -38,6 +47,19 @@ from src.utils.masonry_constants import (
 
 logger = logging.getLogger(__name__)
 
+# NBR 15575 — minimum absolute dimensions (meters)
+_MIN_DIM = {
+    "bedroom": 2.40, "living": 2.40, "kitchen": 1.80,
+    "bathroom": 1.50, "service": 1.50, "circulation": 0.90,
+    "garage": 3.00,
+}
+_MIN_AREA = {
+    "bedroom": 8.0, "living": 12.0, "kitchen": 4.0,
+    "bathroom": 2.4, "service": 2.5, "circulation": 1.5,
+    "garage": 12.0,
+}
+_CORRIDOR_M = 0.90
+
 
 def generate_layout(
     bedrooms: int,
@@ -46,11 +68,7 @@ def generate_layout(
     has_garage: bool = False,
     bathrooms: int = 1,
 ) -> Dict[str, Any]:
-    """Gera layout com corredor full-width e circulação correta.
-
-    Returns:
-        Template-compatible dict para o solver.
-    """
+    """Gera layout com corredor full-width e circulação correta."""
     try:
         return _generate(bedrooms, target_area_m2, layout_type, has_garage, bathrooms)
     except Exception as e:
@@ -64,161 +82,191 @@ def _generate(
     has_garage: bool, bathrooms: int,
 ) -> Dict[str, Any]:
 
-    # ==================================================================
-    # 1. PROPORÇÕES DAS 3 FAIXAS (Y relativo 0→1, rua = 0)
-    # ==================================================================
-    # Corredor: faixa fina, MÍNIMA. ~0.90-1.20m real.
-    # Em edifício de 8-10m: 0.10 relativo ≈ 0.80-1.00m.
-    # Toda área poupada no corredor vai para quartos e sala.
-
-    # Corredor: faixa ultra-fina. Profundidade real mín ~0.90m (NBR 15575).
-    # Usamos valor fixo ANTES de normalizar, para que não cresça com o edifício.
-    # Depois de normalizar, o solver snappa ao módulo (mín 0.90m real).
-    corridor_h = 0.08  # será ~0.90m em edifício de 10m, ~0.65m em 8m (snap to 0.75)
-
-    if bedrooms == 1:
-        social_h = 0.50
-        intimate_h = 0.42
-    elif bedrooms == 2:
-        social_h = 0.42
-        intimate_h = 0.50
-    else:
-        social_h = 0.38
-        intimate_h = 0.54
-
-    if layout_type == "separate_kitchen":
-        social_h -= 0.03
-        intimate_h += 0.03
-
-    # Normalizar (social + corridor + intimate = 1.0)
-    total = social_h + corridor_h + intimate_h
-    social_h /= total
-    corridor_h /= total
-    intimate_h /= total
-
-    # Y bounds
-    y_social = (0.0, social_h)
-    y_corr = (social_h, social_h + corridor_h)
-    y_intim = (social_h + corridor_h, 1.0)
-
-    rooms = []
-
-    # ==================================================================
-    # 2. FAIXA SOCIAL (frente/rua)
-    # ==================================================================
-    if has_garage:
-        garage_w = 0.40  # ~3.0m em edifício de 7.5m (mín NBR garage = 3.0m)
-        if layout_type == "separate_kitchen":
-            rooms.append(_r("Sala", "living", 0.0, y_social[0],
-                            1.0 - garage_w, social_h))
-        else:
-            rooms.append(_r("Sala/Cozinha", "living", 0.0, y_social[0],
-                            1.0 - garage_w, social_h))
-        rooms.append(_r("Garagem", "garage", 1.0 - garage_w, y_social[0],
-                        garage_w, social_h))
-    else:
-        name = "Sala" if layout_type == "separate_kitchen" else "Sala/Cozinha"
-        rooms.append(_r(name, "living", 0.0, y_social[0], 1.0, social_h))
-
-    # ==================================================================
-    # 3. FAIXA CORREDOR — largura total, um único cômodo
-    # ==================================================================
-    rooms.append(_r("Circulação", "circulation",
-                    0.0, y_corr[0], 1.0, corridor_h))
-
-    # ==================================================================
-    # 4. FAIXA ÍNTIMA — quartos + wet core
-    # ==================================================================
-    # Layout: [Quarto1] [Quarto2] ... [Wet Core]
-    #
-    # Quartos ficam lado a lado, cada um com a LARGURA TOTAL da faixa íntima.
-    # Áreas molhadas (banheiro, serviço, cozinha) ficam empilhadas
-    # verticalmente em uma única coluna ("wet core") à direita.
-    #
-    # Isso garante que quartos tenham largura suficiente (>2.4m)
-    # mesmo quando há muitos cômodos molhados.
-    #
-    # +--------+--------+------+
-    # |        |        |Banh.1|
-    # |Quarto 1|Quarto 2|------|  ← wet core (empilhado vertical)
-    # |        |        |Serv. |
-    # +--------+--------+------+
-
-    # Montar listas separadas
-    bedroom_items = []
-    wet_items = []
+    # Build room lists for intimate zone
+    # "columns": full-height rooms (bedrooms, kitchen if separate)
+    # "wet_stack": stacked vertically in one column (bathrooms, service)
+    columns = []  # list of {"name", "type", "min_w"}
+    wet_stack = []
 
     for i in range(bedrooms):
         label = f"Quarto {i + 1}" if bedrooms > 1 else "Quarto"
-        bedroom_items.append({"name": label, "type": "bedroom"})
+        columns.append({"name": label, "type": "bedroom",
+                        "min_w": _MIN_DIM["bedroom"]})
+
+    if layout_type == "separate_kitchen":
+        columns.append({"name": "Cozinha", "type": "kitchen",
+                        "min_w": _MIN_DIM["kitchen"], "is_wet": True})
 
     for i in range(bathrooms):
         label = f"Banheiro {i + 1}" if bathrooms > 1 else "Banheiro"
-        wet_items.append({"name": label, "type": "bathroom",
-                          "is_wet": True, "min_area": 2.4})
+        wet_stack.append({"name": label, "type": "bathroom",
+                          "is_wet": True, "min_area": _MIN_AREA["bathroom"]})
+    wet_stack.append({"name": "Serviço", "type": "service",
+                      "is_wet": True, "min_area": _MIN_AREA["service"]})
 
-    wet_items.append({"name": "Serviço", "type": "service",
-                      "is_wet": True, "min_area": 2.5})
+    # ==================================================================
+    # 1. SOLVE DIMENSIONS
+    # ==================================================================
+    # Princípio: PREFER NARROW (maximize depth → more social area).
+    # Edifício estreito = quartos e sala mais profundos = melhores proporções.
+    # Só alarga além do min_width quando necessário para caber a garagem.
 
-    if layout_type == "separate_kitchen":
-        wet_items.append({"name": "Cozinha", "type": "kitchen",
-                          "is_wet": True, "min_area": 4.0})
+    wet_w_base = max(_MIN_DIM.get(w["type"], 1.5) for w in wet_stack)
 
-    # Wet core width: proporcional ao que as áreas molhadas precisam.
-    # Em casas reais, o bloco molhado ocupa ~25-35% da largura.
-    # Cálculo: soma_áreas_wet / (intimate_h_real * building_depth)
-    # Aproximação: cada wet item precisa de ~2.5-4m² → coluna ~1.5-2.0m
-    # Em termos relativos: 0.22 para 1-2 wet, 0.28 para 3+, 0.32 para 4+
-    n_wet = len(wet_items)
-    if n_wet <= 2:
-        wet_core_w = 0.22
-    elif n_wet <= 3:
-        wet_core_w = 0.28
+    # For 1Q without separate kitchen: widen wet core so bedroom isn't oversized
+    # (1 bedroom takes all remaining width → needs counterbalance)
+    if bedrooms == 1 and len(columns) == 1:
+        wet_w = max(wet_w_base, 2.0)
     else:
-        wet_core_w = 0.32
+        wet_w = wet_w_base
 
-    # Quartos dividem o espaço restante igualmente
-    bedroom_zone_w = 1.0 - wet_core_w
-    n_bed = len(bedroom_items)
-    bed_w = bedroom_zone_w / n_bed if n_bed > 0 else bedroom_zone_w
+    wet_heights = [max(_MIN_DIM.get(w["type"], 1.5), w["min_area"] / wet_w)
+                   for w in wet_stack]
+    total_wet_h = sum(wet_heights)
 
-    # Colocar quartos
+    # Minimum width: columns at min dimension + wet core
+    total_col_min_w = sum(c["min_w"] for c in columns)
+    min_width = total_col_min_w + wet_w
+
+    # Garage constraint on min width
+    if has_garage:
+        min_width = max(min_width, _MIN_DIM["garage"] + _MIN_DIM["living"])
+        min_width = max(min_width, _MIN_AREA["garage"] / 4.0 + _MIN_DIM["living"])
+
+    # Target social depth: proportional to area, NOT bare minimum.
+    # In real houses, social area (sala/cozinha) is the largest room.
+    # Target: ~35% of total area for social zone.
+    social_target = max(3.0, min(4.5, target_area_m2 * 0.065))
+    social_min = _MIN_DIM["living"]  # absolute minimum 2.4m
+
+    if has_garage:
+        # Garage needs min area → constrains social depth
+        garage_frac = 0.40
+        rest_h = _CORRIDOR_M + total_wet_h
+        width_from_garage = (target_area_m2 - _MIN_AREA["garage"] / garage_frac) / rest_h
+        width = max(min_width, width_from_garage)
+
+        # Ensure garage is at least 3.0m wide
+        if width * garage_frac < _MIN_DIM["garage"]:
+            width = target_area_m2 / ((_MIN_AREA["garage"] / _MIN_DIM["garage"]) + rest_h)
+            width = max(min_width, width)
+            garage_frac = max(0.40, _MIN_DIM["garage"] / width)
+
+        garage_frac = min(garage_frac, 0.48)
+        depth = target_area_m2 / width
+        garage_w = width * garage_frac
+        garage_min_d = _MIN_AREA["garage"] / garage_w
+        social_min = max(social_min, garage_min_d)
+        social_target = max(social_target, social_min)
+    else:
+        # No garage: START NARROW → maximize depth → better proportions
+        # Use social_target instead of social_min for initial depth calc
+        ideal_depth = social_target + _CORRIDOR_M + total_wet_h
+        width = max(min_width, target_area_m2 / ideal_depth)
+        depth = target_area_m2 / width
+
+    # Check bedroom area constraint
+    non_bed_col_w = sum(c["min_w"] for c in columns if c["type"] != "bedroom")
+    bed_w = (width - wet_w - non_bed_col_w) / bedrooms
+    min_intimate_for_beds = _MIN_AREA["bedroom"] / bed_w if bed_w > 0 else 999.0
+
+    intimate_d = max(total_wet_h, min_intimate_for_beds)
+    social_d = depth - _CORRIDOR_M - intimate_d
+
+    # Clamp social to minimum
+    if social_d < social_min:
+        social_d = social_min
+        intimate_d = depth - _CORRIDOR_M - social_d
+        if intimate_d < total_wet_h * 0.70:
+            logger.warning(f"Tight fit for {bedrooms}Q {target_area_m2}m². "
+                           f"Consider larger area.")
+
+    # Redistribute excess intimate area to social for balanced proportions.
+    # Rule: social depth should be >= bedroom depth (sala is the main room).
+    # If intimate is deeper than needed, transfer excess to social.
+    min_intimate = max(total_wet_h, min_intimate_for_beds)
+    if intimate_d > min_intimate + 0.2:
+        excess = intimate_d - min_intimate
+        # Transfer 70% of excess to social (keep 30% for bedroom comfort)
+        transfer = excess * 0.70
+        social_d += transfer
+        intimate_d -= transfer
+
+    # Widen wet core if there's surplus width beyond bedroom minimums
+    actual_bed_w = (width - wet_w - non_bed_col_w) / bedrooms
+    if actual_bed_w > _MIN_DIM["bedroom"] + 1.0 and wet_w < 2.0:
+        # Bedroom has >1m surplus → give some to wet core
+        extra = min((actual_bed_w - _MIN_DIM["bedroom"] - 0.5) * bedrooms * 0.3, 0.5)
+        if extra > 0:
+            wet_w += extra
+
+    # ==================================================================
+    # 2. CONVERT TO RELATIVE (0→1) and place rooms
+    # ==================================================================
+    social_h = social_d / depth
+    corridor_h = _CORRIDOR_M / depth
+    intimate_h = intimate_d / depth
+
+    rooms = []
+
+    # --- Social zone ---
+    if has_garage:
+        garage_w_rel = round(min(max(0.40, _MIN_DIM["garage"] / width), 0.48), 4)
+        living_name = "Sala" if layout_type == "separate_kitchen" else "Sala/Cozinha"
+        rooms.append(_r(living_name, "living", 0.0, 0.0,
+                        round(1.0 - garage_w_rel, 4), round(social_h, 4)))
+        rooms.append(_r("Garagem", "garage",
+                        round(1.0 - garage_w_rel, 4), 0.0,
+                        garage_w_rel, round(social_h, 4)))
+    else:
+        name = "Sala" if layout_type == "separate_kitchen" else "Sala/Cozinha"
+        rooms.append(_r(name, "living", 0.0, 0.0, 1.0, round(social_h, 4)))
+
+    # --- Corridor ---
+    corr_y = round(social_h, 4)
+    rooms.append(_r("Circulação", "circulation",
+                    0.0, corr_y, 1.0, round(corridor_h, 4)))
+
+    # --- Intimate zone: columns + wet core ---
+    intim_y = round(social_h + corridor_h, 4)
+    intim_h_rel = round(intimate_h, 4)
+    wet_w_rel = round(wet_w / width, 4)
+
+    # Distribute column widths proportionally to min_w
+    col_zone_w = 1.0 - wet_w_rel
+    col_total_min = sum(c["min_w"] for c in columns)
+
     x = 0.0
-    for i, bed in enumerate(bedroom_items):
-        if i == n_bed - 1:
-            w = round(bedroom_zone_w - x, 4)
+    for i, col in enumerate(columns):
+        frac = col["min_w"] / col_total_min
+        if i == len(columns) - 1:
+            w = round(col_zone_w - x, 4)
         else:
-            w = round(bed_w, 4)
-        rooms.append(_r(bed["name"], "bedroom",
-                        x, y_intim[0], w, intimate_h))
+            w = round(col_zone_w * frac, 4)
+        rooms.append(_r(col["name"], col["type"],
+                        x, intim_y, w, intim_h_rel,
+                        is_wet=col.get("is_wet", False)))
         x = round(x + w, 4)
 
-    # Colocar wet core — itens empilhados verticalmente na coluna direita
-    wet_x = round(1.0 - wet_core_w, 4)
-    wet_total_w = wet_core_w
-
-    # Distribuir altura proporcional à área mínima de cada wet item
-    total_min = sum(it["min_area"] for it in wet_items)
-    wet_y = y_intim[0]
-    for i, wit in enumerate(wet_items):
-        frac = wit["min_area"] / total_min
-        if i == len(wet_items) - 1:
-            h = round(y_intim[0] + intimate_h - wet_y, 4)
+    # Wet core stacked vertically
+    wet_x = round(1.0 - wet_w_rel, 4)
+    total_wh = sum(wet_heights)
+    wy = intim_y
+    for i, wit in enumerate(wet_stack):
+        frac = wet_heights[i] / total_wh
+        if i == len(wet_stack) - 1:
+            h = round(1.0 - wy, 4)
         else:
-            h = round(intimate_h * frac, 4)
+            h = round(intim_h_rel * frac, 4)
         rooms.append(_r(wit["name"], wit["type"],
-                        wet_x, wet_y, wet_total_w, h,
-                        is_wet=True))
-        wet_y = round(wet_y + h, 4)
+                        wet_x, round(wy, 4), wet_w_rel, h, is_wet=True))
+        wy += h
 
     # ==================================================================
-    # 5. Validações
+    # 3. Validate + template
     # ==================================================================
-    _validate(rooms, y_corr, y_intim)
+    _validate(rooms, (corr_y, round(corr_y + corridor_h, 4)))
 
-    # ==================================================================
-    # 6. Montar template
-    # ==================================================================
     garage_tag = "_gar" if has_garage else ""
     kitchen_tag = "sep" if layout_type == "separate_kitchen" else "int"
     tid = f"grammar_{bedrooms}q_{int(target_area_m2)}m2_{kitchen_tag}{garage_tag}"
@@ -228,6 +276,9 @@ def _generate(
         "description": f"{bedrooms} quartos, ~{target_area_m2:.0f}m² (generated)",
         "target_area_m2": target_area_m2,
         "bedrooms": bedrooms,
+        "min_width_m": round(min_width, 2),
+        "preferred_width_m": round(width, 2),
+        "preferred_depth_m": round(depth, 2),
         "rooms": [
             {"name": r["name"], "type": r["type"],
              "rel_x": r["rel_x"], "rel_y": r["rel_y"],
@@ -248,7 +299,7 @@ def _generate(
         }
 
     logger.info(f"Shape grammar: {tid} — {len(rooms)} rooms, "
-                f"corridor {corridor_h:.0%} depth")
+                f"building {width:.1f}x{depth:.1f}m")
     return template
 
 
@@ -263,34 +314,20 @@ def _r(name, rtype, x, y, w, h, is_wet=False):
             "is_wet": is_wet}
 
 
-def _validate(rooms, y_corr, y_intim):
+def _validate(rooms, y_corr):
     """Valida topologia de circulação."""
     corr_top = round(y_corr[1], 3)
-    corr_bot = round(y_corr[0], 3)
 
-    bedrooms = [r for r in rooms if r["type"] == "bedroom"]
-    baths = [r for r in rooms if r["type"] == "bathroom"]
-
-    # Todos os quartos devem estar na faixa íntima (acima do corredor)
-    for b in bedrooms:
+    for b in [r for r in rooms if r["type"] == "bedroom"]:
         b_bot = round(b["rel_y"], 3)
         if abs(b_bot - corr_top) > 0.02:
             logger.warning(f"{b['name']} não adjacente ao corredor "
                            f"(y={b_bot}, corredor top={corr_top})")
 
-    # Banheiros devem estar na faixa íntima (acima do corredor)
-    for b in baths:
-        b_bot = round(b["rel_y"], 3)
-        if abs(b_bot - corr_top) > 0.02:
-            logger.warning(f"{b['name']} não adjacente ao corredor")
-
-    # Corredor deve ser full-width
-    corr = [r for r in rooms if r["type"] == "circulation"]
-    for c in corr:
+    for c in [r for r in rooms if r["type"] == "circulation"]:
         if c["rel_w"] < 0.95:
             logger.warning(f"Corredor width {c['rel_w']:.2f} < full width")
 
-    # Checar bounds
     for r in rooms:
         end_x = r["rel_x"] + r["rel_w"]
         end_y = r["rel_y"] + r["rel_h"]

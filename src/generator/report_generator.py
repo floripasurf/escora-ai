@@ -35,6 +35,8 @@ def print_report(results: List[ShoringResult], console: Console | None = None) -
         slab_table.add_row("Área", f"{slab.area_m2:.2f} m²")
         slab_table.add_row("Perímetro", f"{slab.perimeter_m:.2f} m")
         slab_table.add_row("Espessura", f"{slab.thickness_m*100:.0f} cm")
+        if result.volume_m3 > 0:
+            slab_table.add_row("Volume escorado", f"{result.volume_m3:.2f} m³")
         console.print(slab_table)
         console.print()
 
@@ -82,11 +84,51 @@ def print_report(results: List[ShoringResult], console: Console | None = None) -
     total_weight = sum(
         len(r.shores) * r.selected_shore.weight_kg for r in results
     )
+    total_volume = sum(r.volume_m3 for r in results)
+    summary_lines = [
+        f"[bold]Total: {total_shores} escoras | "
+        f"Peso total: {total_weight:.1f} kg[/bold]"
+    ]
+    if total_volume > 0:
+        summary_lines.append(f"[bold]Volume total: {total_volume:.2f} m³[/bold]")
     console.print(
         Panel(
-            f"[bold]Total: {total_shores} escoras | "
-            f"Peso total: {total_weight:.1f} kg[/bold]",
+            "\n".join(summary_lines),
             border_style="green",
         )
     )
+    console.print()
+
+
+def print_calculation_summary(
+    calc_result,
+    console: Console | None = None,
+) -> None:
+    """Imprime bloco resumo de volume do pipeline completo (com deduções)."""
+    if console is None:
+        console = Console()
+
+    if calc_result.slab_volume_gross_m3 <= 0:
+        return
+
+    table = Table(title="Volume Escorado", show_header=False)
+    table.add_column("Componente", style="cyan")
+    table.add_column("Valor", style="white")
+    table.add_row(
+        "Volume bruto (lajes × pé-direito)",
+        f"{calc_result.slab_volume_gross_m3:.2f} m³",
+    )
+    table.add_row(
+        "(−) Vigas",
+        f"{calc_result.beam_volume_deducted_m3:.2f} m³",
+    )
+    table.add_row(
+        "(−) Pilares",
+        f"{calc_result.pillar_volume_deducted_m3:.2f} m³",
+    )
+    table.add_row(
+        "Volume líquido",
+        f"[bold]{calc_result.total_volume_m3:.2f} m³[/bold]",
+    )
+    console.print(table)
     console.print()

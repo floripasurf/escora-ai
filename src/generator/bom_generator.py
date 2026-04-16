@@ -29,11 +29,16 @@ def generate_bom(results: List[ShoringResult]) -> List[Dict[str, any]]:
                 }
             bom[model_id]["quantidade"] += 1
 
+    # Volume escorado total do projeto (replicado em cada linha para
+    # que ferramentas de orçamento possam consumir o CSV sem parser extra).
+    volume_total_m3 = round(sum(r.volume_m3 for r in results), 2)
+
     # Calcular totais
     rows = []
     for entry in bom.values():
         entry["peso_total_kg"] = entry["quantidade"] * entry["peso_unitario_kg"]
         entry["preco_total_brl"] = entry["quantidade"] * entry["preco_unitario_brl"]
+        entry["volume_m3_projeto"] = volume_total_m3
         rows.append(entry)
 
     return rows
@@ -55,6 +60,7 @@ def write_bom_csv(results: List[ShoringResult], output_path: str) -> str:
         "peso_total_kg",
         "preco_unitario_brl",
         "preco_total_brl",
+        "volume_m3_projeto",
     ]
 
     with open(output_path, "w", newline="", encoding="utf-8") as f:

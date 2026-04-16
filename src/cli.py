@@ -16,6 +16,8 @@ from src.engine.validator import validate_result
 from src.generator.dxf_writer import generate_output_dxf
 from src.generator.report_generator import print_report
 from src.generator.bom_generator import write_bom_csv
+from src.output.csv_generator import write_consumption_csv
+from src.output.report_data import ConsumptionByHeightRow, ReportData, SummaryData
 from src.models.slab import Slab
 from src.models.project import ShoringResult
 from src.utils.constants import (
@@ -30,6 +32,80 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 console = Console()
+
+
+def _build_cli_consumption_report(results: list) -> ReportData:
+    """Constrói um `ReportData` mínimo (apenas consumption_rows) a partir
+    de `ShoringResult`s simples do CLI — sem acessórios, sem deduções de
+    vigas/pilares (cobertura limitada do CLI vs API).
+    """
+    groups: dict = {}
+    for r in results:
+        key = round(r.pe_direito_m or 0.0, 2)
+        g = groups.setdefault(
+            key,
+            {"area_m2": 0.0, "volume_m3": 0.0, "shores_kg": 0.0},
+        )
+        g["area_m2"] += r.slab.area_m2
+        g["volume_m3"] += r.volume_m3 or (r.slab.area_m2 * (r.pe_direito_m or 0.0))
+        weight_unit = getattr(r.selected_shore, "weight_kg", 0.0) or 0.0
+        g["shores_kg"] += weight_unit * len(r.shores)
+
+    rows: list[ConsumptionByHeightRow] = []
+    for pe_key in sorted(groups.keys()):
+        g = groups[pe_key]
+        bruto = g["volume_m3"]
+        area = g["area_m2"]
+        shores_kg = g["shores_kg"]
+        liquido = bruto  # CLI não tem deduções de vigas/pilares
+        rows.append(ConsumptionByHeightRow(
+            pe_direito_m=pe_key,
+            area_m2=round(area, 2),
+            volume_bruto_m3=round(bruto, 2),
+            volume_liquido_m3=round(liquido, 2),
+            shores_weight_kg=round(shores_kg, 2),
+            accessories_weight_kg=0.0,
+            total_weight_kg=round(shores_kg, 2),
+            rate_kg_m3_bruto=round(shores_kg / bruto, 2) if bruto > 0 else 0.0,
+            rate_kg_m3_liquido=round(shores_kg / liquido, 2) if liquido > 0 else 0.0,
+            rate_kg_m2=round(shores_kg / area, 2) if area > 0 else 0.0,
+            category_label="Laje",
+        ))
+
+    sum_area = sum(r.area_m2 for r in rows)
+    sum_bruto = sum(r.volume_bruto_m3 for r in rows)
+    sum_liquido = sum(r.volume_liquido_m3 for r in rows)
+    sum_shores = sum(r.shores_weight_kg for r in rows)
+    totals = {
+        "area_m2": round(sum_area, 2),
+        "volume_bruto_m3": round(sum_bruto, 2),
+        "volume_liquido_m3": round(sum_liquido, 2),
+        "shores_kg": round(sum_shores, 2),
+        "accessories_kg": 0.0,
+        "total_kg": round(sum_shores, 2),
+        "rate_kg_m3_bruto": round(sum_shores / sum_bruto, 2) if sum_bruto > 0 else 0.0,
+        "rate_kg_m3_liquido": round(sum_shores / sum_liquido, 2) if sum_liquido > 0 else 0.0,
+        "rate_kg_m2": round(sum_shores / sum_area, 2) if sum_area > 0 else 0.0,
+    }
+
+    summary = SummaryData(
+        total_shores=sum(len(r.shores) for r in results),
+        total_load_kn=sum(r.total_load_kn for r in results),
+        pe_direito_m=results[0].pe_direito_m if results else 0.0,
+        pe_direito_is_default=False,
+        slab_thickness_m=results[0].slab.thickness_m if results else 0.0,
+        thickness_is_default=False,
+        beam_count=0,
+        slab_count=len(results),
+        is_valid=True,
+    )
+    return ReportData(
+        project_name="cli",
+        date="",
+        summary=summary,
+        consumption_rows=rows,
+        consumption_totals=totals,
+    )
 
 
 @app.command()
@@ -47,6 +123,7 @@ def calcular(
         ALTURA_DEFAULT, "--altura", help="Altura do pé-direito (m)"
     ),
     bom: Optional[str] = typer.Option(None, "--bom", help="Caminho para CSV da lista de materiais"),
+    consumo: Optional[str] = typer.Option(None, "--consumo", help="Caminho para CSV de consumo por pé-direito (orçamento interno)"),
     layer: Optional[str] = typer.Option(None, "--layer", help="Layer específico da laje (ignora detecção automática)"),
     espessura: Optional[float] = typer.Option(None, "--espessura", help="Espessura da laje em cm (override da detecção automática)"),
     area_min: float = typer.Option(1.0, "--area-min", help="Área mínima de polígono para considerar como laje (m²)"),
@@ -161,6 +238,10 @@ def calcular(
                     spacing_x_m=round(sx, 4),
                     spacing_y_m=round(sy, 4),
                     load_per_shore_kn=round(load_per_shore, 2),
+                    pe_direito_m=altura,
+                    volume_m3=round(slab.area_m2 * altura, 2),
+                    category="laje",
+                    label=f"Laje {len(results) + 1}",
                 )
             )
 
@@ -184,6 +265,13 @@ def calcular(
 
     write_bom_csv(results, bom)
     console.print(f"[green]Lista de materiais:[/green] {bom}")
+
+    # 8. Consumo por pé-direito (opcional). Por padrão, gera ao lado do BOM.
+    if consumo is None:
+        consumo = str(Path(bom).with_name(Path(bom).stem + "_consumo.csv"))
+    consumption_report = _build_cli_consumption_report(results)
+    write_consumption_csv(consumption_report, consumo)
+    console.print(f"[green]Consumo por pé-direito:[/green] {consumo}")
 
     console.print(
         f"\n[bold green]Concluído! {sum(len(r.shores) for r in results)} "
@@ -335,6 +423,10 @@ def manual(
         spacing_x_m=round(sx, 4),
         spacing_y_m=round(sy, 4),
         load_per_shore_kn=round(load_per_shore, 2),
+        pe_direito_m=altura,
+        volume_m3=round(slab.area_m2 * altura, 2),
+        category="laje",
+        label="Laje 1",
     )
 
     print_report([result], console)
@@ -350,6 +442,140 @@ def manual(
     console.print(
         f"\n[bold green]Concluído! {len(shores)} escoras posicionadas.[/bold green]\n"
     )
+
+
+@app.command()
+def inspecionar(
+    arquivo: str = typer.Argument(help="Arquivo DXF a inspecionar"),
+):
+    """Lista polígonos candidatos a laje com bounds, área e categoria proposta.
+
+    Diagnóstico para DXFs onde a classificação de beiral/platibanda/balanço
+    não dispara por layer keyword (ex.: arquivos TQS com layers numéricos).
+    Reutiliza o mesmo pipeline de extração do estágio de cálculo (hatches +
+    polylines fechados) e aplica as heurísticas geométricas de categoria.
+    """
+    from src.pipeline.stage_parse import parse_dxf
+    from src.pipeline.runner import _detect_coordinate_scale
+    from src.engine.slab_builder import derive_slabs_from_boundaries
+    from src.utils.labels import classify_layer, CATEGORY_DEFAULT, CATEGORY_LABELS_PT
+
+    input_path = Path(arquivo)
+    if not input_path.exists():
+        console.print(f"[red]Erro: arquivo não encontrado: {arquivo}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"\n[bold]Inspecionando:[/bold] {arquivo}")
+    parse = parse_dxf(str(input_path))
+    scale = _detect_coordinate_scale(parse)
+    console.print(f"[green]Escala detectada:[/green] {scale}")
+
+    all_hatches = [
+        {
+            "points": [(x * scale, y * scale) for x, y in h.points],
+            "layer": h.layer,
+            "pattern_name": h.pattern_name,
+            "is_solid": h.is_solid,
+            "area": h.area * scale * scale,
+        }
+        for h in parse.hatches
+    ]
+    all_polylines = [
+        {
+            "points": [(x * scale, y * scale) for x, y in pl.points],
+            "layer": pl.layer,
+            "is_closed": pl.is_closed,
+        }
+        for pl in parse.polylines
+    ]
+
+    polygons = derive_slabs_from_boundaries(all_hatches, all_polylines, scale=1.0)
+
+    if not polygons:
+        console.print("[yellow]Nenhum polígono candidato a laje encontrado.[/yellow]")
+        return
+
+    def _propose_category(poly, layer_name: str, all_polys) -> str:
+        cat = classify_layer(layer_name)
+        if cat:
+            return cat
+        try:
+            minx_, miny_, maxx_, maxy_ = poly.bounds
+            w_ = maxx_ - minx_
+            h_ = maxy_ - miny_
+            short_ = min(w_, h_)
+            long_ = max(w_, h_)
+            if short_ > 0:
+                ratio_ = long_ / short_
+                if short_ <= 0.5 and ratio_ >= 3.0:
+                    rep = poly.representative_point()
+                    for other in all_polys:
+                        if other is poly:
+                            continue
+                        if other.area < poly.area * 5.0:
+                            continue
+                        try:
+                            if other.boundary.buffer(0.30).contains(rep):
+                                return "platibanda"
+                        except Exception:
+                            continue
+        except Exception:
+            pass
+        return CATEGORY_DEFAULT
+
+    def _layer_for(poly) -> str:
+        best_layer = ""
+        best_score = 0.0
+        for raw in list(all_polylines) + list(all_hatches):
+            pts = raw.get("points") or []
+            if len(pts) < 3:
+                continue
+            try:
+                from shapely.geometry import Polygon as _P
+                cand = _P(pts)
+                if not cand.is_valid or cand.is_empty:
+                    continue
+                inter = poly.intersection(cand).area
+                if inter <= 0 or poly.area <= 0:
+                    continue
+                score = inter / poly.area
+                if score > best_score:
+                    best_score = score
+                    best_layer = raw.get("layer", "") or ""
+            except Exception:
+                continue
+        return best_layer
+
+    table = Table(title=f"Polígonos candidatos ({len(polygons)})")
+    table.add_column("#", style="cyan", justify="right")
+    table.add_column("Layer", style="white")
+    table.add_column("Área (m²)", justify="right")
+    table.add_column("Bounds (min_x, min_y, max_x, max_y)", style="white")
+    table.add_column("Lado curto (m)", justify="right")
+    table.add_column("Ratio", justify="right")
+    table.add_column("Categoria proposta", style="green")
+
+    for i, poly in enumerate(polygons, start=1):
+        minx, miny, maxx, maxy = poly.bounds
+        w = maxx - minx
+        h = maxy - miny
+        short = min(w, h)
+        long = max(w, h)
+        ratio = long / short if short > 0 else float("inf")
+        layer = _layer_for(poly)
+        category = _propose_category(poly, layer, polygons)
+        table.add_row(
+            str(i),
+            layer or "—",
+            f"{poly.area:.2f}",
+            f"({minx:.2f}, {miny:.2f}, {maxx:.2f}, {maxy:.2f})",
+            f"{short:.2f}",
+            f"{ratio:.2f}",
+            CATEGORY_LABELS_PT.get(category, category),
+        )
+
+    console.print(table)
+    console.print()
 
 
 if __name__ == "__main__":

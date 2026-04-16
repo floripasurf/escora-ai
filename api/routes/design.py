@@ -1,13 +1,14 @@
 """Design preview endpoint — synchronous layout generation for real-time editing."""
 
 import logging
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from src.models.masonry import DesignInput, SiteAnalysis
 from src.layout.solver import solve_layout_interactive
+from src.utils.masonry_constants import MIN_ROOM_AREAS, MIN_ROOM_DIMENSION
 from api.services.project_pipeline_service import _build_preview
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,61 @@ class DesignPreviewRequest(BaseModel):
     roof_material: str = Field(default="ceramic")
     slab_type: str = Field(default="pre_moldada")
     finish_level: str = Field(default="basic")
+    # Template selection
+    template_id: Optional[str] = Field(default=None)
+
+
+@router.post("/alternatives")
+async def design_alternatives(request: DesignPreviewRequest):
+    """Return multiple layout alternatives for the user to choose from.
+
+    Returns compact previews (mini SVG data) for 3-6 templates,
+    ranked by compatibility with the user's input.
+    """
+    try:
+        from src.layout.repertoire import select_top_templates
+
+        alternatives = select_top_templates(
+            bedrooms=request.bedrooms,
+            target_area=request.target_area_m2,
+            has_garage=request.has_garage,
+            layout_type=request.layout_type,
+            lot_width=request.lot_width_m,
+            lot_depth=request.lot_depth_m,
+            max_results=6,
+        )
+
+        results = []
+        for tmpl in alternatives:
+            # Build mini room summary from template rooms
+            rooms_summary = []
+            for r in tmpl.get("rooms", []):
+                w = r["rel_w"] * tmpl.get("preferred_width_m", 8)
+                h = r["rel_h"] * tmpl.get("preferred_depth_m", 8)
+                rooms_summary.append({
+                    "name": r["name"],
+                    "type": r["type"],
+                    "area_m2": round(w * h, 1),
+                })
+
+            results.append({
+                "id": tmpl["id"],
+                "name": tmpl.get("_template_name", tmpl["id"]),
+                "typology": tmpl.get("_typology", "rectangle"),
+                "tags": tmpl.get("_tags", []),
+                "score": tmpl.get("_score", 0),
+                "area_range": tmpl.get("_area_range", [0, 0]),
+                "preferred_width_m": tmpl.get("preferred_width_m", 0),
+                "preferred_depth_m": tmpl.get("preferred_depth_m", 0),
+                "rooms": rooms_summary,
+                "zones": tmpl.get("zones", []),
+            })
+
+        return {"alternatives": results, "count": len(results)}
+
+    except Exception as e:
+        logger.exception("Alternatives generation failed")
+        raise HTTPException(500, f"Erro ao gerar alternativas: {str(e)}")
 
 
 @router.post("/preview")
@@ -56,8 +112,14 @@ async def design_preview(request: DesignPreviewRequest):
     for SVG/3D rendering without generating any files.
     """
     try:
-        # Convert to DesignInput
-        design_input = DesignInput(**request.model_dump())
+        # Convert to DesignInput (exclude template_id from DesignInput)
+        dump = request.model_dump()
+        template_id = dump.pop("template_id", None)
+        design_input = DesignInput(**dump)
+
+        # If a specific template was requested, force it
+        if template_id:
+            design_input._forced_template_id = template_id
 
         # Solve layout (fast, synchronous)
         floor_plan = solve_layout_interactive(design_input)
@@ -115,6 +177,41 @@ async def design_preview(request: DesignPreviewRequest):
                     "x1": gb["x1"] + 3.0, "y1": gb["y1"],
                     "direction": "east",
                 }
+
+        # Validate room dimensions and emit alerts
+        alerts = []
+        for room in floor_plan.rooms:
+            rtype = room.type.value
+            area = room.area_m2
+            xs = [p[0] for p in room.polygon]
+            ys = [p[1] for p in room.polygon]
+            w = max(xs) - min(xs)
+            h = max(ys) - min(ys)
+            min_side = min(w, h)
+
+            min_area = MIN_ROOM_AREAS.get(rtype)
+            min_dim = MIN_ROOM_DIMENSION.get(rtype)
+
+            if min_area and area < min_area * 0.95:
+                alerts.append({
+                    "type": "area",
+                    "room": room.name,
+                    "message": f"{room.name}: {area:.1f}m² abaixo do mínimo de {min_area:.1f}m²",
+                })
+            if min_dim and min_side < min_dim * 0.95:
+                alerts.append({
+                    "type": "dimension",
+                    "room": room.name,
+                    "message": f"{room.name}: dimensão {min_side:.2f}m abaixo do mínimo de {min_dim:.1f}m",
+                })
+
+        if alerts:
+            preview["alerts"] = alerts
+            preview["alert_summary"] = (
+                f"As dimensões do terreno ({request.lot_width_m}×{request.lot_depth_m}m) "
+                f"são insuficientes para {request.bedrooms} quarto(s) com conforto. "
+                f"Considere reduzir quartos ou aumentar o terreno."
+            )
 
         return preview
 

@@ -204,6 +204,7 @@ async def get_status(
         "has_relatorio": bool(results.get("relatorio")),
         "has_memoria_calculo": bool(results.get("memoria_calculo")),
         "has_orcamento": bool(results.get("orcamento")),
+        "has_consumption_csv": bool(results.get("consumption_csv_path")),
         "has_revision": job.get("revision_path") is not None,
         "has_validated": job.get("validated_dxf_path") is not None,
         "optimization_mode": job.get("optimization_mode"),
@@ -217,10 +218,9 @@ async def get_status(
             "pillar_count": results.get("pillar_count"),
             "slab_count": results.get("slab_count"),
             "total_shores": results.get("total_shores"),
-            "beams": results.get("beams"),
-            "slabs": results.get("slabs"),
             "warnings": results.get("warnings"),
             "has_dwg": job.get("dwg_path") is not None,
+            "consumption_summary": results.get("consumption_summary"),
         })
 
     revision = job.get("revision_data")
@@ -297,6 +297,31 @@ async def download_csv(
     filename = Path(job["filename"]).stem + "_BOM.csv"
     return FileResponse(
         csv_path,
+        media_type="text/csv",
+        filename=filename,
+    )
+
+
+@router.get("/{job_id}/download/consumo")
+async def download_consumo(
+    job_id: str,
+    branch: Branch = Depends(get_current_branch),
+):
+    """Download the consumption-by-ceiling-height CSV (validation summary)."""
+    job = job_service.get_job(job_id, branch_id=branch.id)
+    if not job:
+        raise HTTPException(404, "Job nao encontrado")
+    if job["status"] != "done":
+        raise HTTPException(400, "Processamento ainda nao concluido")
+
+    results = job.get("results_data") or {}
+    consumo_path = results.get("consumption_csv_path")
+    if not consumo_path or not Path(consumo_path).exists():
+        raise HTTPException(404, "CSV de consumo nao encontrado")
+
+    filename = Path(job["filename"]).stem + "_consumo.csv"
+    return FileResponse(
+        consumo_path,
         media_type="text/csv",
         filename=filename,
     )

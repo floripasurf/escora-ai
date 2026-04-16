@@ -34,8 +34,6 @@ def test_regenerate_from_revision_writes_validated_files(tmp_path: Path):
             "pillar_count": 0,
             "slab_count": 0,
             "total_shores": 5,
-            "beams": [],
-            "slabs": [],
             "warnings": [],
             "output_dxf_path": f"/out/{stem}_escoras{output_suffix}.dxf",
             "csv_path": f"/out/{stem}_BOM{output_suffix}.csv",
@@ -212,3 +210,166 @@ def test_dxf_tower_marker_double_square(empty_input_dxf, tmp_path):
     ]
     # 4 towers × 2 squares (outer + inner) = 8 closed polylines
     assert len(tower_polylines) == 8
+
+
+# ---------------------------------------------------------------------------
+# BOM CSV: vigas vazadas (VD-*) são adicionadas quando report_data vem
+# ---------------------------------------------------------------------------
+
+def test_bom_csv_includes_vigas_vazadas_rows(tmp_path):
+    """_generate_bom_csv deve adicionar linhas de acessório para VD-* do ReportData."""
+    from api.services.pipeline_service import _generate_bom_csv
+    from src.output.report_data import BomRow, ReportData, SummaryData
+    import csv
+
+    calc = _calc([_telescopic_beam_result()])
+
+    # ReportData com 1 linha VD-* e 1 linha normal (não-VD)
+    report = ReportData(
+        project_name="x", date="2026-04-10",
+        summary=SummaryData(
+            total_shores=5, total_load_kn=100.0, pe_direito_m=2.8,
+            pe_direito_is_default=False, slab_thickness_m=0.12,
+            thickness_is_default=False, beam_count=1, slab_count=0,
+            is_valid=True,
+        ),
+        bom_rows=[
+            BomRow(id="VD-VM80-3M", model="VM80 3m", manufacturer="Orguel",
+                   quantity=8, capacity_kn=0.0, height_min_m=0.0,
+                   height_max_m=0.0, weight_kg=24.0, total_weight_kg=192.0,
+                   price_brl=180.0, total_price_brl=1440.0),
+            BomRow(id="ESC310", model="ESC310", manufacturer="Mecanor",
+                   quantity=5, capacity_kn=20.0, height_min_m=2.0,
+                   height_max_m=3.1, weight_kg=15.0, total_weight_kg=75.0,
+                   price_brl=80.0, total_price_brl=400.0),
+        ],
+    )
+
+    out = str(tmp_path / "bom.csv")
+    _generate_bom_csv(calc, out, report_data=report)
+
+    with open(out, encoding="utf-8-sig") as f:
+        rows = list(csv.DictReader(f, delimiter=";"))
+
+    vd_rows = [r for r in rows if r["Elemento"] == "VM80 3m"]
+    assert len(vd_rows) == 1
+    assert vd_rows[0]["Tipo"] == "Acessório"
+    assert vd_rows[0]["Qtd Escoras"] == "8"
+
+    # VD-only logic: ESC310 (non-VD) não é duplicada via report_data path
+    acc_rows_from_report = [
+        r for r in rows
+        if r["Tipo"] == "Acessório" and r["Elemento"] == "ESC310"
+    ]
+    assert acc_rows_from_report == []
+
+
+def test_bom_csv_without_report_data_still_works(tmp_path):
+    """Backward compat — chamar sem report_data não deve quebrar."""
+    from api.services.pipeline_service import _generate_bom_csv
+
+    calc = _calc([_telescopic_beam_result()])
+    out = str(tmp_path / "bom.csv")
+    _generate_bom_csv(calc, out)  # sem report_data kwarg
+    assert Path(out).exists()
+
+
+# ---------------------------------------------------------------------------
+# process_dxf retorna consumption_csv_path
+# ---------------------------------------------------------------------------
+
+def test_regenerate_preserves_consumption_csv_path(tmp_path: Path):
+    """regenerate_from_revision deve repassar consumption_csv_path."""
+    def fake_process_dxf(input_path, job_id, mode="price",
+                         inventory_name=None, output_suffix="",
+                         branch_id=None):
+        stem = Path(input_path).stem
+        return {
+            "beam_count": 0, "pillar_count": 0, "slab_count": 0,
+            "total_shores": 0, "warnings": [],
+            "output_dxf_path": f"/out/{stem}_escoras{output_suffix}.dxf",
+            "csv_path": f"/out/{stem}_BOM{output_suffix}.csv",
+            "consumption_csv_path": f"/out/{stem}_consumo{output_suffix}.csv",
+            "ifc_path": None,
+        }
+
+    with patch.object(pipeline_service, "process_dxf", side_effect=fake_process_dxf):
+        result = pipeline_service.regenerate_from_revision(
+            original_input_path="/in/p.dxf",
+            revised_input_path="/in/p_rev.dxf",
+            job_id="j1",
+        )
+    assert "consumption_csv_path" in result
+    assert result["consumption_csv_path"].endswith("_validated.csv")
+
+
+def test_process_dxf_propagates_category_label_and_drops_beams_slabs():
+    """consumption_summary deve trazer category_label; beams/slabs não devem
+    mais ser retornados (ADR — breaking change confirmado pelo usuário)."""
+    from unittest.mock import MagicMock
+    from api.services.pipeline_service import process_dxf
+    from src.output.report_data import (
+        ConsumptionByHeightRow, ReportData, SummaryData,
+    )
+
+    def fake_run_pipeline(input_path, mode=None, inventory_name=None, branch_id=None):
+        calc = CalculationResult(
+            beam_results=[], slab_results=[],
+            total_shores=0, total_load_kn=0.0,
+            pe_direito_m=2.80, pe_direito_is_default=False,
+            is_valid=True,
+        )
+        result = MagicMock()
+        result.calculation = calc
+        result.scale = 1.0
+        result.warnings = []
+        result.levels = []
+        return result
+
+    def fake_build_report_data(calc, metadata):
+        summary = SummaryData(
+            total_shores=0, total_load_kn=0.0, pe_direito_m=2.80,
+            pe_direito_is_default=False, slab_thickness_m=0.12,
+            thickness_is_default=False, beam_count=0, slab_count=0,
+            is_valid=True,
+        )
+        rows = [
+            ConsumptionByHeightRow(
+                pe_direito_m=2.80, area_m2=10.0, volume_bruto_m3=28.0,
+                volume_liquido_m3=28.0, shores_weight_kg=100.0,
+                accessories_weight_kg=0.0, total_weight_kg=100.0,
+                rate_kg_m3_bruto=3.57, rate_kg_m3_liquido=3.57,
+                rate_kg_m2=10.0, category_label="Beiral",
+            ),
+            ConsumptionByHeightRow(
+                pe_direito_m=2.80, area_m2=80.0, volume_bruto_m3=224.0,
+                volume_liquido_m3=224.0, shores_weight_kg=900.0,
+                accessories_weight_kg=0.0, total_weight_kg=900.0,
+                rate_kg_m3_bruto=4.02, rate_kg_m3_liquido=4.02,
+                rate_kg_m2=11.25, category_label="Laje",
+            ),
+        ]
+        return ReportData(
+            project_name="x", date="2026-04-16", summary=summary,
+            consumption_rows=rows,
+        )
+
+    with patch.object(pipeline_service, "run_pipeline", side_effect=fake_run_pipeline), \
+         patch.object(pipeline_service, "build_report_data", side_effect=fake_build_report_data), \
+         patch.object(pipeline_service, "_generate_output_dxf"), \
+         patch.object(pipeline_service, "_generate_bom_csv"), \
+         patch.object(pipeline_service, "write_consumption_csv"), \
+         patch.object(pipeline_service, "generate_ifc"), \
+         patch.object(pipeline_service, "generate_pdf"), \
+         patch.object(pipeline_service, "generate_memoria_calculo"), \
+         patch.object(pipeline_service, "generate_orcamento"):
+        result = process_dxf(
+            input_path="/in/x.dxf", job_id="j-cat",
+        )
+
+    assert "beams" not in result
+    assert "slabs" not in result
+    summary = result["consumption_summary"]
+    assert len(summary) == 2
+    assert summary[0]["category_label"] == "Beiral"
+    assert summary[1]["category_label"] == "Laje"

@@ -43,24 +43,26 @@ MEIO_BLOCO_19 = (0.19, 0.19, 0.19)
 
 # Dict: room_type -> area_minima_m2
 MIN_ROOM_AREAS = {
-    "bedroom": 8.00,
+    "bedroom": 9.00,   # 3×3m mínimo
     "living": 12.00,
     "kitchen": 4.00,
-    "bathroom": 2.40,
+    "bathroom": 2.25,   # 1.5×1.5m mínimo funcional
     "service": 2.50,   # área de serviço
     "circulation": 1.50,
     "garage": 12.00,
+    "varanda": 2.00,
 }
 
 # Dimensão mínima de qualquer lado do cômodo (m) — NBR 15575
 MIN_ROOM_DIMENSION = {
-    "bedroom": 2.40,
+    "bedroom": 3.00,   # quarto mínimo 3×3m
     "living": 2.40,
     "kitchen": 1.80,
-    "bathroom": 1.50,
+    "bathroom": 1.20,  # mínimo funcional (ideal 1.5m)
     "service": 1.50,
     "circulation": 0.90,
     "garage": 2.50,
+    "varanda": 1.00,
 }
 
 # Area maxima por tipo de comodo (m²) — evita comodos desproporcionais

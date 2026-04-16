@@ -18,6 +18,7 @@ class BeamShoringResult(BaseModel):
     spacing_m: float
     selected_shore: ShoreCatalogEntry
     shore_height_m: float = Field(description="Actual shore height used (m)")
+    shores_weight_kg: float = Field(default=0.0, description="Soma do peso das escoras desta viga (kg)")
 
 
 class SlabShoringResult(BaseModel):
@@ -37,6 +38,26 @@ class SlabShoringResult(BaseModel):
     spacing_y_m: float = 0.0
     selected_shore: Optional[ShoreCatalogEntry] = None
     exclusions: List[Any] = Field(default_factory=list, description="PillarExclusion zones applied")
+    volume_m3: float = Field(default=0.0, description="Volume escorado bruto do painel (m³)")
+    # Categorização didática e rotulagem
+    category: str = Field(default="laje", description="Categoria do painel: laje | beiral | balanco | platibanda | marquise | cantilever")
+    category_index: int = Field(default=0, description="Número sequencial dentro da categoria (1-based)")
+    label: str = Field(default="", description="Rótulo final exibido (ex.: 'Laje L3', 'Beiral 1')")
+    room_hint: Optional[str] = Field(default=None, description="Texto de cômodo extraído do DXF próximo ao polígono, se houver")
+    structural_name: Optional[str] = Field(default=None, description="Nome estrutural extraído do DXF (ex.: 'L3')")
+    shores_weight_kg: float = Field(default=0.0, description="Soma do peso das escoras desta laje (kg)")
+
+
+class VolumeBreakdownEntry(BaseModel):
+    """Linha de breakdown de volume escorado por elemento (painel)."""
+    category: str = Field(description="Categoria do painel (laje, beiral, etc.)")
+    label: str = Field(description="Rótulo didático (ex.: 'Beiral 1')")
+    area_m2: float
+    pe_direito_m: float
+    volume_m3: float
+    centroid_x: float
+    centroid_y: float
+    shores_weight_kg: float = Field(default=0.0, description="Peso das escoras atribuído a este painel (kg)")
 
 
 class CalculationResult(BaseModel):
@@ -51,3 +72,11 @@ class CalculationResult(BaseModel):
     warnings: List[str] = Field(default_factory=list)
     validation_errors: List[str] = Field(default_factory=list)
     is_valid: bool = True
+    total_volume_m3: float = Field(default=0.0, description="Volume escorado líquido (m³)")
+    slab_volume_gross_m3: float = Field(default=0.0, description="Volume bruto de laje × pé-direito (m³)")
+    beam_volume_deducted_m3: float = Field(default=0.0, description="Volume deduzido de vigas (m³)")
+    pillar_volume_deducted_m3: float = Field(default=0.0, description="Volume deduzido de pilares (m³)")
+    volume_breakdown: List[VolumeBreakdownEntry] = Field(
+        default_factory=list,
+        description="Breakdown de volume por painel (laje, beiral, platibanda...)",
+    )
