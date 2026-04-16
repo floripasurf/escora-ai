@@ -304,11 +304,17 @@ def select_distribution_beam(
     1. Max span ≥ required span
     2. Moment capacity ≥ M_max = q*L²/8
     3. Minimum cost per meter
+
+    Orguel B1: `available=False` entries (ALU14/ALU20/H20) são ofertas
+    técnicas. Modo preço: entram normalmente; modo inventário: são
+    sempre filtradas (locadora só sugere o que tem em estoque).
     """
     m_required = load_kn_m * span_m ** 2 / 8.0  # Simply supported beam
 
+    candidates = beams if mode == "price" else [b for b in beams if b.available]
+
     compatible = [
-        b for b in beams
+        b for b in candidates
         if b.max_span_m >= span_m
         and b.moment_capacity_knm >= m_required
     ]
@@ -316,7 +322,7 @@ def select_distribution_beam(
     if not compatible:
         # Fallback: select by moment capacity only
         compatible = [
-            b for b in beams
+            b for b in candidates
             if b.moment_capacity_knm >= m_required
         ]
 

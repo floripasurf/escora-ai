@@ -1342,6 +1342,27 @@ def run_calculation(
             exclusions=all_exclusions,
         )
 
+        # === CAPITEL DENSIFICATION (Orguel Q6) ===
+        # Laje lisa (não nervurada, não em balanço): densificar grid ao redor
+        # de cada pilar no anel 0.70-1.50m, com espaçamento 30% menor.
+        if not is_cantilever:
+            from src.engine.capitel_densification import (
+                capitel_densification_shores,
+            )
+            pillar_xy = [
+                (p.geometry[0][0], p.geometry[0][1])
+                for p in pillars
+                if p.element_type == ElementType.PILLAR and p.geometry
+            ]
+            extra_shores = capitel_densification_shores(
+                polygon=polygon,
+                shore_entry=selected_shore,
+                pillar_positions=pillar_xy,
+                existing_shores=shores,
+                max_spacing=max_spacing,
+            )
+            shores.extend(extra_shores)
+
         # === MIXED SLAB SUPPORT ===
         # Swap a fraction of shores to tower entries at evenly spaced positions
         # within the grid, matching Orguel practice of scattered towers on slabs.
@@ -1557,6 +1578,9 @@ def run_calculation(
     calc_result.beam_volume_deducted_m3 = round(beam_volume_deducted, 3)
     calc_result.pillar_volume_deducted_m3 = round(pillar_volume_deducted, 3)
     calc_result.total_volume_m3 = round(total_volume, 3)
+    calc_result.pillar_count = sum(
+        1 for p in pillars if p.element_type == ElementType.PILLAR
+    )
 
     # === AUTO-NUMERAÇÃO + BREAKDOWN DE VOLUME ===
     # Ordena por (categoria ASC, área DESC) e atribui índice 1-based por

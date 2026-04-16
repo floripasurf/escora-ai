@@ -97,6 +97,10 @@ class DistributionBeamEntry(BaseModel):
     weight_per_m_kg: float
     price_per_m_brl: float
     notes: str = ""
+    # Disponibilidade padrão da locadora. Se False, só é ofertada no modo
+    # "preço" como alternativa técnica, nunca sugerida no modo "estoque"
+    # (ADR Orguel B1 — ALU14/ALU20/H20 entram como opções técnicas).
+    available: bool = True
 
 
 class AccessoryCatalogEntry(BaseModel):

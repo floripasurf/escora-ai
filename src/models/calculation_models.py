@@ -79,6 +79,7 @@ class CalculationResult(BaseModel):
     slab_volume_gross_m3: float = Field(default=0.0, description="Volume bruto de laje × pé-direito (m³)")
     beam_volume_deducted_m3: float = Field(default=0.0, description="Volume deduzido de vigas (m³)")
     pillar_volume_deducted_m3: float = Field(default=0.0, description="Volume deduzido de pilares (m³)")
+    pillar_count: int = Field(default=0, description="Número de pilares detectados (para BOM de travamento VM50)")
     volume_breakdown: List[VolumeBreakdownEntry] = Field(
         default_factory=list,
         description="Breakdown de volume por painel (laje, beiral, platibanda...)",
