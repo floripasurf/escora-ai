@@ -46,6 +46,11 @@ def calculate_total_load(
     return (self_weight + formwork_weight + live_load) * gamma_f
 
 
+# Piso mínimo de carga (kN/m²) antes da majoração — NBR 15696:2009, manual p.31.
+# "p = e×γ + SC; se p < 4.0 → adotar p = 4.0 kN/m²"
+CARGA_PISO_MINIMO_KN_M2 = 4.0
+
+
 def calculate_linear_load(
     thickness_m: float,
     q_sobrecarga: float = Q_SOBRECARGA_DEFAULT,
@@ -54,6 +59,10 @@ def calculate_linear_load(
 ) -> float:
     """
     Carga linear por m² (kN/m²) — usada para calcular espaçamento.
-    q = (e × γ_concreto + q_forma + q_sobrecarga) × γ_f
+    q = max(e × γ_concreto + q_forma + q_sobrecarga, 4.0) × γ_f
+
+    NBR 15696 (manual p.31): piso mínimo de 4.0 kN/m² antes da majoração.
     """
-    return (thickness_m * GAMMA_CONCRETO + q_forma + q_sobrecarga) * gamma_f
+    p_char = thickness_m * GAMMA_CONCRETO + q_forma + q_sobrecarga
+    p_char = max(p_char, CARGA_PISO_MINIMO_KN_M2)
+    return p_char * gamma_f

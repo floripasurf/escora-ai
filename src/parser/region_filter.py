@@ -28,9 +28,17 @@ DETAIL_KEYWORDS = [
     "CARIMBO", "TÍTULO", "TITULO",
     "ESCALA", "NOTAS", "OBSERVAÇÕES",
     "LEGENDA", "QUADRO",
+    "PLANTA", "ESC ",
+    "A-A", "B-B", "C-C", "D-D", "E-E",
 ]
 
-DETAIL_EXCLUSION_RADIUS = 3.0  # meters
+DETAIL_EXCLUSION_RADIUS = 8.0  # meters (detail views can span 5-10m)
+
+# Layer name patterns that indicate detail/section views (not main plan)
+DETAIL_LAYER_KEYWORDS = [
+    "detalhe", "corte", "secao", "seção", "vista",
+    "elevacao", "elevação", "carimbo",
+]
 REGION_MARGIN = 1.0  # meters of margin around main plan
 
 
@@ -88,7 +96,7 @@ def _find_gap_splits(values: List[float], total_range: float) -> List[float]:
     """
     if len(values) < 2:
         return []
-    threshold = max(5.0, 0.10 * total_range)
+    threshold = max(3.0, 0.03 * total_range)
     sorted_vals = sorted(values)
     splits = []
     for i in range(len(sorted_vals) - 1):
@@ -194,7 +202,7 @@ def filter_main_plan(
     # Only activate filtering if main region clearly dominates (>60% of entities).
     # If entities are spread across regions, it's likely a single-zone file with
     # internal gaps (courtyards, voids) — not separate drawing views.
-    if main.count < 0.60 * total_entities:
+    if main.count < 0.50 * total_entities:
         logger.info(
             f"Region filter: {len(regions)} regions detected but main has only "
             f"{main.count}/{total_entities} ({main.count/total_entities:.0%}) — "
@@ -227,19 +235,30 @@ def filter_main_plan(
             return ((s.x_min + s.x_max) / 2, s.y)
         return (s.x, (s.y_min + s.y_max) / 2)
 
-    def _in_main(x: float, y: float) -> bool:
-        return _point_in_region(x, y, main, m) and not _is_in_detail_zone(x, y, texts)
+    def _is_detail_layer(layer: str) -> bool:
+        """Check if entity is on a detail/section layer."""
+        lower = layer.lower().strip()
+        return any(kw in lower for kw in DETAIL_LAYER_KEYWORDS)
 
-    f_segments = [s for s in segments if _in_main(*_seg_center(s))]
-    f_rects = [r for r in rects if _in_main(r.cx, r.cy)]
-    f_circles = [c for c in circles if _in_main(c.cx, c.cy)]
+    def _in_main(x: float, y: float, layer: str = "") -> bool:
+        if not _point_in_region(x, y, main, m):
+            return False
+        if _is_in_detail_zone(x, y, texts):
+            return False
+        if layer and _is_detail_layer(layer):
+            return False
+        return True
+
+    f_segments = [s for s in segments if _in_main(*_seg_center(s), getattr(s, 'layer', ''))]
+    f_rects = [r for r in rects if _in_main(r.cx, r.cy, getattr(r, 'layer', ''))]
+    f_circles = [c for c in circles if _in_main(c.cx, c.cy, getattr(c, 'layer', ''))]
     f_polylines = [
         p for p in polylines
-        if p.points and _in_main(*_centroid_of_points(p.points))
+        if p.points and _in_main(*_centroid_of_points(p.points), getattr(p, 'layer', ''))
     ]
     f_hatches = [
         h for h in hatches
-        if h.points and _in_main(*_centroid_of_points(h.points))
+        if h.points and _in_main(*_centroid_of_points(h.points), getattr(h, 'layer', ''))
     ]
     f_texts = [t for t in texts if _point_in_region(t.x, t.y, main, m)]
     f_dims = [d for d in dimensions if _point_in_region(d.x, d.y, main, m)]

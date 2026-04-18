@@ -32,6 +32,7 @@ from src.engine.beam_calculator import (
     estimate_beam_shore_height,
 )
 from src.engine.grid_distributor import distribute_shores, PillarExclusion
+from src.engine.shore_capacity import compute_adaptive_spacing
 from src.engine.shore_selector import load_catalog, select_shore
 from src.engine.tower_selector import (
     load_tower_catalog, decide_support_type, select_tower,
@@ -699,20 +700,62 @@ def run_calculation(
             forced_positions=intersection_positions,
         )
 
-        # === MIXED BEAM SUPPORT ===
-        # When MIXED, swap a fraction of shores to tower entries.
-        # Towers go at ends (near supports) and evenly spaced along the beam.
+        # === MIXED BEAM SUPPORT (posicionamento estrutural) ===
+        # Torres em pontos de demanda estrutural, não fração fixa.
+        # Critérios (Orguel DOCX + DXF analysis):
+        # 1. Interseções viga×viga sem pilar → torre
+        # 2. Extremos de vigas longas (>4.5m) → torre nos apoios
+        # 3. Vãos entre torres > 4.0m → torre intermediária (VM130 max span)
         if (support_type == SupportType.MIXED and tower_shore_entry is not None
                 and len(shores) >= 2):
             import math as _m
-            n_tower = max(2, round(len(shores) * tower_fraction))
-            n_tower = min(n_tower, len(shores))
-            # Choose tower positions: first, last, then evenly spaced interior
-            tower_indices = {0, len(shores) - 1}
-            if n_tower > 2:
-                step = (len(shores) - 1) / (n_tower - 1)
-                for k in range(n_tower):
-                    tower_indices.add(round(k * step))
+            tower_indices = set()
+
+            # 1. Interseções sem pilar → torre na escora mais próxima
+            if intersection_positions:
+                for ipos in intersection_positions:
+                    best_idx = None
+                    best_dist = float('inf')
+                    for idx, s in enumerate(shores):
+                        # Distância ao longo do eixo da viga
+                        if direction == "x":
+                            d = abs(s.x - (start_pt[0] + ipos))
+                        else:
+                            d = abs(s.y - (start_pt[1] + ipos))
+                        if d < best_dist:
+                            best_dist = d
+                            best_idx = idx
+                    if best_idx is not None and best_dist < 1.0:
+                        tower_indices.add(best_idx)
+
+            # 2. Extremos (apoios) para vigas longas (>4.5m, mediana DXF Orguel)
+            if beam_length > 4.5:
+                tower_indices.add(0)
+                tower_indices.add(len(shores) - 1)
+
+            # 3. Preencher vãos entre torres > 4.0m (VM130 max span ~4.10m)
+            _MAX_TOWER_GAP = 4.0
+            if len(tower_indices) >= 2 and len(shores) >= 3:
+                sorted_ti = sorted(tower_indices)
+                new_towers = set()
+                for a, b in zip(sorted_ti, sorted_ti[1:]):
+                    sa, sb = shores[a], shores[b]
+                    gap = _m.hypot(sb.x - sa.x, sb.y - sa.y)
+                    if gap > _MAX_TOWER_GAP:
+                        # Inserir torre(s) intermediária(s)
+                        n_fill = _m.ceil(gap / _MAX_TOWER_GAP) - 1
+                        for k in range(1, n_fill + 1):
+                            target_frac = k / (n_fill + 1)
+                            target_idx = a + round((b - a) * target_frac)
+                            target_idx = max(a + 1, min(target_idx, b - 1))
+                            new_towers.add(target_idx)
+                tower_indices.update(new_towers)
+
+            # Garantir mínimo de 2 torres para MIXED
+            if len(tower_indices) < 2 and len(shores) >= 2:
+                tower_indices.add(0)
+                tower_indices.add(len(shores) - 1)
+
             from src.models.shore import PositionedShore as _PS
             for idx in tower_indices:
                 if idx < len(shores):
@@ -1334,12 +1377,14 @@ def run_calculation(
             is_nervura_panel = False
 
         # Solid slab — uniform grid shore placement
+        # Passa floor_height_m para ativar espaçamento adaptativo por carga
         shores, nx, ny, sx, sy = distribute_shores(
             slab=slab,
             shore=selected_shore,
             total_load_kn=total_load,
             max_spacing=max_spacing,
             exclusions=all_exclusions,
+            floor_height_m=slab_shore_height,
         )
 
         # === MIXED SLAB SUPPORT ===
@@ -1351,11 +1396,31 @@ def run_calculation(
                 and len(shores) >= 4):
             n_tower = max(2, round(len(shores) * slab_tower_fraction))
             n_tower = min(n_tower, len(shores))
-            # Pick tower positions: evenly distributed across the grid
-            step = len(shores) / n_tower
+
+            # Build capitel exclusion set: shores within 1.50m of any pillar
+            # must stay TELESCOPIC (Orguel practice — towers away from pillars).
+            import math as _m2
+            _CAPITEL_RADIUS = 1.50
+            _pillar_xy_mixed = [
+                (p.geometry[0][0], p.geometry[0][1])
+                for p in pillars
+                if p.element_type == ElementType.PILLAR and p.geometry
+            ]
+            capitel_indices = set()
+            for idx, s in enumerate(shores):
+                for px, py in _pillar_xy_mixed:
+                    if _m2.hypot(s.x - px, s.y - py) <= _CAPITEL_RADIUS:
+                        capitel_indices.add(idx)
+                        break
+
+            # Pick tower positions: evenly distributed, excluding capitel ring
+            eligible = [i for i in range(len(shores)) if i not in capitel_indices]
+            n_tower = min(n_tower, len(eligible))
+            step = len(eligible) / n_tower if n_tower > 0 else 1
             tower_indices = set()
             for k in range(n_tower):
-                tower_indices.add(min(round(k * step), len(shores) - 1))
+                tower_indices.add(eligible[min(round(k * step), len(eligible) - 1)])
+
             from src.models.shore import PositionedShore as _PS
             for idx in tower_indices:
                 s = shores[idx]

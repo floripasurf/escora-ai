@@ -55,6 +55,9 @@ SLAB_TOWER_THICKNESS_M = 0.20       # ≥20cm slab → tower grid
 # Beams: 29-44% towers at intersections → use 0.35 (midpoint)
 # Slabs thick ≥20cm: 13-22% towers → use 0.18 (midpoint)
 # Slabs large ≥40m²: 13-22% towers → use 0.15 (conservative)
+# NOTE: these are FALLBACK fractions for the MIXED mode. The real Orguel
+# decision is structural — towers at high-load points, shores elsewhere.
+# See scripts/analyze_orguel_rules.py for the correlation analysis.
 BEAM_TOWER_FRACTION = 0.35
 SLAB_TOWER_FRACTION_THICK = 0.18
 SLAB_TOWER_FRACTION_LARGE = 0.15
@@ -257,18 +260,19 @@ def select_tower(
 ) -> Optional[TowerCatalogEntry]:
     """Select the most economical tower that meets height and load requirements.
 
+    Uses effective_capacity(height) for derating by height (T1.4).
     mode='inventory': prefer towers in stock; fall back to price-min if none.
     """
     compatible = [
         t for t in towers
         if t.max_height_m >= required_height_m
-        and t.load_capacity_kn >= required_capacity_kn
+        and t.effective_capacity(required_height_m) >= required_capacity_kn
     ]
 
     if not compatible:
         compatible = [
             t for t in towers
-            if t.load_capacity_kn >= required_capacity_kn
+            if t.effective_capacity(required_height_m) >= required_capacity_kn
         ]
 
     if not compatible:
@@ -291,25 +295,72 @@ def select_tower(
 
 
 
+# Deflection limits by span (manual p.45-50)
+DEFLECTION_LIMITS = [
+    (2.00, 400),
+    (2.50, 415),
+    (2.75, 423),
+    (3.00, 429),
+]
+
+
+def _max_deflection_ratio(span_m: float) -> float:
+    """Return L/ratio for the given span (interpolated from manual table)."""
+    if span_m <= DEFLECTION_LIMITS[0][0]:
+        return DEFLECTION_LIMITS[0][1]
+    if span_m >= DEFLECTION_LIMITS[-1][0]:
+        return DEFLECTION_LIMITS[-1][1]
+    for (l0, r0), (l1, r1) in zip(DEFLECTION_LIMITS, DEFLECTION_LIMITS[1:]):
+        if l0 <= span_m <= l1:
+            t = (span_m - l0) / (l1 - l0)
+            return r0 + t * (r1 - r0)
+    return DEFLECTION_LIMITS[-1][1]
+
+
+def _passes_deflection_check(beam: 'DistributionBeamEntry', span_m: float, load_kn_m: float) -> bool:
+    """Check if beam passes deflection limit (manual p.45-50).
+
+    L_max(deflection) = ∛(384·EI / (5·q·f_max)) where f_max = L/ratio.
+    For simply-supported beam: δ_max = 5·q·L⁴ / (384·EI).
+    Check: δ_max ≤ L/ratio.
+    """
+    if beam.EI_knm2 is None or beam.EI_knm2 <= 0:
+        return True  # No EI data → skip deflection check (backward compat)
+    if span_m <= 0 or load_kn_m <= 0:
+        return True
+    ratio = _max_deflection_ratio(span_m)
+    f_max = span_m / ratio
+    delta = 5.0 * load_kn_m * span_m ** 4 / (384.0 * beam.EI_knm2)
+    return delta <= f_max
+
+
 def select_distribution_beam(
     beams: List[DistributionBeamEntry],
     span_m: float,
     load_kn_m: float,
     mode: Literal["price", "inventory"] = "price",
     inventory: Optional[InventoryAvailability] = None,
+    n_supports: int = 2,
 ) -> Optional[DistributionBeamEntry]:
     """Select distribution beam that can span between towers/shores.
 
-    Criteria:
+    Criteria (dual check — manual p.45-50):
     1. Max span ≥ required span
-    2. Moment capacity ≥ M_max = q*L²/8
-    3. Minimum cost per meter
+    2. Moment capacity ≥ M_max = q·L²/8 (biapoiada) or q·L²/10 (3+ apoios)
+    3. Deflection ≤ L/ratio (when EI_knm2 is available)
+    4. Minimum cost per meter
+
+    Args:
+        n_supports: number of supports on the VM. When ≥ 3 (continuous beam),
+            uses q·L²/10 instead of q·L²/8 (+25% effective capacity).
 
     Orguel B1: `available=False` entries (ALU14/ALU20/H20) são ofertas
     técnicas. Modo preço: entram normalmente; modo inventário: são
     sempre filtradas (locadora só sugere o que tem em estoque).
     """
-    m_required = load_kn_m * span_m ** 2 / 8.0  # Simply supported beam
+    # T1.3: bônus hiperestático 25% para VMs com 3+ apoios
+    divisor = 10.0 if n_supports >= 3 else 8.0
+    m_required = load_kn_m * span_m ** 2 / divisor
 
     candidates = beams if mode == "price" else [b for b in beams if b.available]
 
@@ -317,10 +368,11 @@ def select_distribution_beam(
         b for b in candidates
         if b.max_span_m >= span_m
         and b.moment_capacity_knm >= m_required
+        and _passes_deflection_check(b, span_m, load_kn_m)
     ]
 
     if not compatible:
-        # Fallback: select by moment capacity only
+        # Fallback: select by moment capacity only (skip deflection)
         compatible = [
             b for b in candidates
             if b.moment_capacity_knm >= m_required

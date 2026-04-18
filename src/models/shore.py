@@ -71,11 +71,39 @@ class TowerCatalogEntry(BaseModel):
     includes_bracing: bool = True
     price_per_module_brl: float
     notes: str = ""
+    capacity_curve: Optional[List[Tuple[float, float]]] = Field(
+        default=None,
+        description="List of [height_m, capacity_kn] pairs for derating by height",
+    )
 
     def modules_for_height(self, required_height_m: float) -> int:
         """Calculate number of modules needed for a given height."""
         import math
         return max(1, math.ceil(required_height_m / self.module_height_m))
+
+    def effective_capacity(self, height_m: float) -> float:
+        """Return derated load capacity at the given height.
+
+        Tower capacity decreases with height (more modules = more
+        buckling risk). When a capacity_curve is defined, linearly
+        interpolate between the provided [height, capacity] points.
+        Outside the range, clamp to the nearest endpoint.
+        If no curve is defined, fall back to the static rating.
+        """
+        if not self.capacity_curve:
+            return self.load_capacity_kn
+        curve = sorted(self.capacity_curve, key=lambda p: p[0])
+        if height_m <= curve[0][0]:
+            return curve[0][1]
+        if height_m >= curve[-1][0]:
+            return curve[-1][1]
+        for (h0, c0), (h1, c1) in zip(curve, curve[1:]):
+            if h0 <= height_m <= h1:
+                if h1 == h0:
+                    return c0
+                t = (height_m - h0) / (h1 - h0)
+                return c0 + t * (c1 - c0)
+        return curve[-1][1]
 
     def total_weight_kg(self, required_height_m: float) -> float:
         """Total weight for the required height."""
@@ -101,6 +129,12 @@ class DistributionBeamEntry(BaseModel):
     # "preço" como alternativa técnica, nunca sugerida no modo "estoque"
     # (ADR Orguel B1 — ALU14/ALU20/H20 entram como opções técnicas).
     available: bool = True
+    # Rigidez à flexão (kNm²) — manual Orguel p.45-55.
+    # Usado para verificação de deflexão (dual check: momento + flecha).
+    EI_knm2: Optional[float] = Field(
+        default=None,
+        description="Flexural rigidity EI in kNm² for deflection check",
+    )
 
 
 class AccessoryCatalogEntry(BaseModel):

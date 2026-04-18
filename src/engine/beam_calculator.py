@@ -203,16 +203,17 @@ def distribute_beam_shores(
             fp_clamped = max(0.0, min(beam_length_m, fp))
             if all_positions and min(
                 abs(fp_clamped - p) for p in all_positions
-            ) < ESPACAMENTO_MIN:
+            ) < ESPACAMENTO_MIN - 1e-6:
                 continue
             all_positions.append(fp_clamped)
 
-    # Deduplicate positions that are too close (from adjacent spans)
+    # Deduplicate positions that are too close (from adjacent spans).
+    # Use small tolerance to avoid floating-point edge cases at boundaries.
     if all_positions:
         all_positions.sort()
         deduped = [all_positions[0]]
         for pos in all_positions[1:]:
-            if pos - deduped[-1] >= ESPACAMENTO_MIN:
+            if pos - deduped[-1] >= ESPACAMENTO_MIN - 1e-6:
                 deduped.append(pos)
         all_positions = deduped
 

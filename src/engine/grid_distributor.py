@@ -6,6 +6,7 @@ from shapely.geometry import Point
 from src.models.slab import Slab
 from src.models.shore import PositionedShore, ShoreCatalogEntry
 from src.utils.constants import ESPACAMENTO_MAX_DEFAULT, DISTANCIA_BORDA_MIN, DISTANCIA_PILAR_MIN, ESPACAMENTO_MIN
+from src.engine.shore_capacity import compute_adaptive_spacing
 
 
 class PillarExclusion:
@@ -61,6 +62,7 @@ def distribute_shores(
     total_load_kn: float,
     max_spacing: float = ESPACAMENTO_MAX_DEFAULT,
     exclusions: Optional[List[PillarExclusion]] = None,
+    floor_height_m: Optional[float] = None,
 ) -> Tuple[List[PositionedShore], int, int, float, float]:
     """
     Distribui escoras em grid regular sobre a laje.
@@ -70,6 +72,11 @@ def distribute_shores(
     2. Deve respeitar a distância mínima da borda do polígono (DISTANCIA_BORDA_MIN)
     3. Não pode cair em zona de exclusão de pilar
 
+    Quando floor_height_m é fornecido, calcula espaçamento adaptativo baseado
+    na carga real (espessura da laje + capacidade derateada da escora). O
+    max_spacing passado funciona como TETO — o espaçamento adaptativo nunca
+    ultrapassa o max_spacing.
+
     Suporta polígonos com qualquer número de lados e ângulos não retos.
 
     Retorna: (shores, nx, ny, spacing_x, spacing_y)
@@ -78,8 +85,19 @@ def distribute_shores(
     width = bb.width
     height = bb.height
 
+    # Espaçamento adaptativo: calcula a partir de carga/capacidade quando possível
+    effective_spacing = max_spacing
+    if floor_height_m is not None and slab.thickness_m > 0:
+        derated_cap = shore.effective_capacity(floor_height_m)
+        adaptive = compute_adaptive_spacing(
+            slab_thickness_m=slab.thickness_m,
+            floor_height_m=floor_height_m,
+            shore_capacity_kn=derated_cap,
+        )
+        effective_spacing = min(adaptive, max_spacing)
+
     nx, ny, spacing_x, spacing_y = calculate_grid_dimensions(
-        width, height, max_spacing
+        width, height, effective_spacing
     )
 
     # Usar o polígono real da laje para verificar contenção.

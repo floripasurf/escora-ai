@@ -481,10 +481,11 @@ def derive_slabs_from_axes(
 # Layer name patterns that indicate slab boundaries
 _SLAB_LAYER_KEYWORDS = {
     "laje", "lajes", "slab", "forma", "piso", "forro",
+    "cobertura", "cob", "estrutura", "concreto", "pav", "lj",
 }
 
 # Maximum realistic slab area (m²) — filter out full-floor hatches
-MAX_SLAB_AREA = 500.0
+MAX_SLAB_AREA = 2000.0
 
 # Minimum overlap to consider two polygons as duplicates
 DEDUP_OVERLAP_RATIO = 0.50
@@ -522,6 +523,10 @@ def _points_to_polygon(
         if poly.is_empty or poly.area < MIN_SLAB_AREA:
             return None
         if poly.area > MAX_SLAB_AREA:
+            logger.warning(
+                f"Slab dropped: area {poly.area:.0f}m² > {MAX_SLAB_AREA}m² "
+                f"(points: {len(points)})"
+            )
             return None
         return poly
     except Exception:
@@ -585,22 +590,37 @@ def derive_slabs_from_boundaries(
         is_solid = h.get("is_solid", False)
         pattern = h.get("pattern_name", "").upper()
 
-        # Accept hatches on slab layers, or solid/concrete fills anywhere
+        # Accept hatches on slab layers (any pattern), or solid/concrete fills anywhere
+        _KNOWN_HATCH_PATTERNS = {
+            "CONCRETE", "ANSI31", "ANSI32", "AR-CONC", "SOLID",
+            "BRICK", "EARTH", "GRAVEL", "DOTS", "CROSS", "NET", "HONEY",
+        }
         is_slab_hatch = (
-            _is_slab_layer(layer)
+            _is_slab_layer(layer)  # any hatch on a slab layer
             or is_solid
-            or pattern in ("CONCRETE", "ANSI31", "ANSI32", "AR-CONC", "SOLID")
+            or pattern in _KNOWN_HATCH_PATTERNS
         )
         if not is_slab_hatch:
+            logger.debug(
+                f"Hatch skipped: layer={layer!r}, pattern={pattern!r}"
+            )
             continue
 
         poly = _points_to_polygon(points, scale)
         if poly is not None:
             candidates.append(poly)
 
-    # Extract from closed polylines
+    # Extract from closed polylines (or near-closed: first ≈ last within 0.1m)
     for pl in polylines:
-        if not pl.get("is_closed", False):
+        is_closed = pl.get("is_closed", False)
+        if not is_closed:
+            pts = pl.get("points", [])
+            if len(pts) >= 3:
+                dx = abs(pts[0][0] - pts[-1][0])
+                dy = abs(pts[0][1] - pts[-1][1])
+                if dx < 0.1 and dy < 0.1:
+                    is_closed = True
+        if not is_closed:
             continue
         layer = pl.get("layer", "")
         if not _is_slab_layer(layer):
