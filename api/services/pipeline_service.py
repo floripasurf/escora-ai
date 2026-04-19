@@ -14,6 +14,7 @@ from src.output.report_data import build_report_data, ReportMetadata
 from src.output.pdf_generator import generate_pdf, generate_memoria_calculo, generate_orcamento
 from src.output.ifc_generator import generate_ifc
 from src.output.csv_generator import write_consumption_csv
+from src.output.mermaid_generator import generate_all_diagrams
 from api.config import settings
 
 logger = logging.getLogger(__name__)
@@ -149,6 +150,14 @@ def process_dxf(
     except Exception as e:
         logger.warning(f"PDF generation failed (non-fatal): {e}")
 
+    # Generate Mermaid.js diagrams (decision flow + project summary + spacing)
+    mermaid_diagrams = {}
+    try:
+        mermaid_diagrams = generate_all_diagrams(calc)
+        logger.info(f"Generated {len(mermaid_diagrams)} Mermaid diagrams")
+    except Exception as e:
+        logger.warning(f"Mermaid diagram generation failed (non-fatal): {e}")
+
     return {
         "beam_count": len(calc.beam_results),
         "pillar_count": pillar_count,
@@ -161,6 +170,7 @@ def process_dxf(
         "consumption_csv_path": consumption_csv_path,
         "consumption_summary": consumption_summary,
         "ifc_path": ifc_path,
+        "mermaid_diagrams": mermaid_diagrams,
         **pdf_paths,
     }
 

@@ -207,6 +207,7 @@ async def get_status(
         "has_consumption_csv": bool(results.get("consumption_csv_path")),
         "has_revision": job.get("revision_path") is not None,
         "has_validated": job.get("validated_dxf_path") is not None,
+        "has_diagrams": bool((job.get("results_data") or {}).get("mermaid_diagrams")),
         "optimization_mode": job.get("optimization_mode"),
         "inventory_name": job.get("inventory_name"),
     }
@@ -349,6 +350,49 @@ async def download_ifc(
         media_type="application/x-step",
         filename=filename,
     )
+
+
+@router.get("/{job_id}/diagrams")
+async def get_diagrams(
+    job_id: str,
+    diagram_type: Optional[str] = None,
+    branch: Branch = Depends(get_current_branch),
+):
+    """Return Mermaid.js diagrams for a completed job.
+
+    Diagram types:
+    - decision_flow: árvore de decisão torre vs escora
+    - project_summary: resumo com regras disparadas por elemento
+    - spacing: espaçamento adaptativo por laje
+
+    Query params:
+        diagram_type: optional, return only this diagram type.
+                      If omitted, returns all diagrams.
+
+    Response: {"diagrams": {"decision_flow": "...", "project_summary": "...", "spacing": "..."}}
+    Render with mermaid.js: mermaid.render('id', diagram_string)
+    """
+    job = job_service.get_job(job_id, branch_id=branch.id)
+    if not job:
+        raise HTTPException(404, "Job nao encontrado")
+    if job["status"] != "done":
+        raise HTTPException(400, "Processamento ainda nao concluido")
+
+    results = job.get("results_data") or {}
+    diagrams = results.get("mermaid_diagrams") or {}
+
+    if not diagrams:
+        raise HTTPException(404, "Diagramas nao disponiveis para este job")
+
+    if diagram_type:
+        if diagram_type not in diagrams:
+            raise HTTPException(
+                400,
+                f"Tipo invalido. Disponiveis: {', '.join(diagrams.keys())}",
+            )
+        return {"diagrams": {diagram_type: diagrams[diagram_type]}}
+
+    return {"diagrams": diagrams}
 
 
 @router.delete("/{job_id}")
