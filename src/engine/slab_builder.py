@@ -484,6 +484,14 @@ _SLAB_LAYER_KEYWORDS = {
     "cobertura", "cob", "estrutura", "concreto", "pav", "lj",
 }
 
+# Layer keywords that EXCLUDE slab detection — hatches on these layers
+# are detail views, sections, title blocks, etc., NOT structural slabs
+_SLAB_LAYER_EXCLUDES = {
+    "detalhe", "det", "corte", "secao", "seção", "sec",
+    "vista", "elevacao", "elevação", "elev",
+    "carimbo", "legenda", "titulo", "título", "notas",
+}
+
 # Maximum realistic slab area (m²) — filter out full-floor hatches
 MAX_SLAB_AREA = 2000.0
 
@@ -491,8 +499,16 @@ MAX_SLAB_AREA = 2000.0
 DEDUP_OVERLAP_RATIO = 0.50
 
 
+def _is_excluded_layer(layer_name: str) -> bool:
+    """Check if a layer name indicates a detail/section view (not a slab)."""
+    lower = layer_name.lower().strip()
+    return any(kw in lower for kw in _SLAB_LAYER_EXCLUDES)
+
+
 def _is_slab_layer(layer_name: str) -> bool:
     """Check if a layer name suggests slab content."""
+    if _is_excluded_layer(layer_name):
+        return False
     lower = layer_name.lower().strip()
     for kw in _SLAB_LAYER_KEYWORDS:
         if kw in lower:
@@ -590,6 +606,11 @@ def derive_slabs_from_boundaries(
         is_solid = h.get("is_solid", False)
         pattern = h.get("pattern_name", "").upper()
 
+        # Skip hatches on layers that indicate detail/section views
+        if _is_excluded_layer(layer):
+            logger.debug(f"Hatch skipped (excluded layer): layer={layer!r}")
+            continue
+
         # Accept hatches on slab layers (any pattern), or solid/concrete fills anywhere
         _KNOWN_HATCH_PATTERNS = {
             "CONCRETE", "ANSI31", "ANSI32", "AR-CONC", "SOLID",
@@ -650,17 +671,34 @@ def derive_slabs_from_boundaries(
 def merge_slab_sources(
     beam_slabs: List[Polygon],
     boundary_slabs: List[Polygon],
+    beam_lines: List[LineString] | None = None,
+    beam_proximity_buffer: float = 1.0,
 ) -> List[Polygon]:
     """Merge slab polygons from beam grid and boundary extraction.
 
     Strategy:
     - Start with beam-grid slabs (more precise, aligned to beams)
     - Add boundary slabs that don't overlap significantly with existing ones
-    - This captures slabs that the beam grid misses
+    - When beam_lines is provided, boundary slabs must be near at least one
+      classified beam (within beam_proximity_buffer meters) to be accepted.
+      This prevents slabs derived from detail views / secondary areas.
+    - Beam-grid slabs (Tier 1) are always kept — they are defined by beams.
     """
     if not boundary_slabs:
         return beam_slabs
     if not beam_slabs:
+        # Even without beam slabs, validate boundaries against beam proximity
+        if beam_lines:
+            validated = []
+            for bslab in boundary_slabs:
+                if _slab_near_beams(bslab, beam_lines, beam_proximity_buffer):
+                    validated.append(bslab)
+                else:
+                    logger.warning(
+                        f"Boundary slab discarded: area={bslab.area:.1f}m² "
+                        f"— not near any classified beam"
+                    )
+            return validated
         return boundary_slabs
 
     merged = list(beam_slabs)
@@ -676,10 +714,33 @@ def merge_slab_sources(
                     break
             except Exception:
                 continue
-        if not is_covered:
-            merged.append(bslab)
+        if is_covered:
+            continue
+        # Validate proximity to beams when available
+        if beam_lines and not _slab_near_beams(bslab, beam_lines, beam_proximity_buffer):
+            logger.warning(
+                f"Boundary slab discarded: area={bslab.area:.1f}m² "
+                f"— not near any classified beam"
+            )
+            continue
+        merged.append(bslab)
 
     return merged
+
+
+def _slab_near_beams(
+    slab: Polygon,
+    beam_lines: List[LineString],
+    buffer_m: float = 1.0,
+) -> bool:
+    """Check if a slab polygon is near at least one classified beam."""
+    for bl in beam_lines:
+        try:
+            if slab.intersects(bl.buffer(buffer_m)):
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def detect_cantilever_slabs(

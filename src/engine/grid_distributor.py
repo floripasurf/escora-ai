@@ -9,6 +9,116 @@ from src.utils.constants import ESPACAMENTO_MAX_DEFAULT, DISTANCIA_BORDA_MIN, DI
 from src.engine.shore_capacity import compute_adaptive_spacing
 
 
+def _is_narrow_corridor(slab: 'Slab', max_spacing: float) -> bool:
+    """Check if a slab is a narrow corridor (width < 2× max_spacing)."""
+    bb = slab.bounding_box
+    min_dim = min(bb.width, bb.height)
+    return min_dim < 2 * max_spacing
+
+
+def _distribute_linear(
+    slab: 'Slab',
+    shore: 'ShoreCatalogEntry',
+    total_load_kn: float,
+    max_spacing: float,
+    exclusions: Optional[List['PillarExclusion']] = None,
+) -> Tuple[List[PositionedShore], int, int, float, float]:
+    """Linear distribution for narrow corridors.
+
+    Instead of a 2D grid (which produces irregular patterns in narrow slabs),
+    places shores along the central axis of the corridor at regular intervals.
+
+    Uses minimum_rotated_rectangle to find the principal axis, then generates
+    points along the centerline.
+    """
+    polygon = slab.polygon
+    mrr = polygon.minimum_rotated_rectangle
+    coords = list(mrr.exterior.coords)
+
+    # Identify long axis from minimum rotated rectangle
+    edge1_len = math.hypot(coords[1][0] - coords[0][0], coords[1][1] - coords[0][1])
+    edge2_len = math.hypot(coords[2][0] - coords[1][0], coords[2][1] - coords[1][1])
+
+    if edge1_len >= edge2_len:
+        start = ((coords[0][0] + coords[3][0]) / 2, (coords[0][1] + coords[3][1]) / 2)
+        end = ((coords[1][0] + coords[2][0]) / 2, (coords[1][1] + coords[2][1]) / 2)
+    else:
+        start = ((coords[0][0] + coords[1][0]) / 2, (coords[0][1] + coords[1][1]) / 2)
+        end = ((coords[3][0] + coords[2][0]) / 2, (coords[3][1] + coords[2][1]) / 2)
+
+    length = math.hypot(end[0] - start[0], end[1] - start[1])
+    if length < 0.01:
+        # Degenerate — fallback to centroid
+        centroid = polygon.centroid
+        s = PositionedShore(
+            x=round(centroid.x, 4), y=round(centroid.y, 4),
+            shore=shore, load_applied_kn=total_load_kn, utilization_ratio=0.0,
+        )
+        return [s], 1, 1, 0.0, 0.0
+
+    # Recede start/end by DISTANCIA_BORDA_MIN along the axis
+    dx, dy = (end[0] - start[0]) / length, (end[1] - start[1]) / length
+    effective_start = (start[0] + dx * DISTANCIA_BORDA_MIN, start[1] + dy * DISTANCIA_BORDA_MIN)
+    effective_end = (end[0] - dx * DISTANCIA_BORDA_MIN, end[1] - dy * DISTANCIA_BORDA_MIN)
+    effective_length = length - 2 * DISTANCIA_BORDA_MIN
+
+    if effective_length <= 0:
+        n_points = 1
+    else:
+        n_points = max(2, math.ceil(effective_length / max_spacing) + 1)
+
+    shores: List[PositionedShore] = []
+    for i in range(n_points):
+        if n_points == 1:
+            t = 0.5
+            x = (start[0] + end[0]) / 2
+            y = (start[1] + end[1]) / 2
+        else:
+            t = i / (n_points - 1)
+            x = effective_start[0] + t * (effective_end[0] - effective_start[0])
+            y = effective_start[1] + t * (effective_end[1] - effective_start[1])
+
+        point = Point(x, y)
+        if not polygon.contains(point):
+            continue
+
+        if exclusions and any(exc.contains(x, y) for exc in exclusions):
+            continue
+
+        # Check minimum spacing
+        too_close = False
+        for existing in shores:
+            if math.hypot(x - existing.x, y - existing.y) < ESPACAMENTO_MIN:
+                too_close = True
+                break
+        if too_close:
+            continue
+
+        shores.append(PositionedShore(
+            x=round(x, 4), y=round(y, 4),
+            shore=shore, load_applied_kn=0.0, utilization_ratio=0.0,
+        ))
+
+    # Fallback: at least 1 shore at centroid
+    if not shores:
+        centroid = polygon.centroid
+        shores.append(PositionedShore(
+            x=round(centroid.x, 4), y=round(centroid.y, 4),
+            shore=shore, load_applied_kn=0.0, utilization_ratio=0.0,
+        ))
+
+    # Recalculate loads
+    if shores:
+        load_per_shore = total_load_kn / len(shores)
+        utilization = load_per_shore / shore.load_capacity_kn
+        for s in shores:
+            s.load_applied_kn = round(load_per_shore, 2)
+            s.utilization_ratio = round(utilization, 4)
+
+    spacing = effective_length / (n_points - 1) if n_points > 1 else 0.0
+    return shores, n_points, 1, spacing, 0.0
+
+
 class PillarExclusion:
     """Zona de exclusão retangular ao redor de um pilar."""
 
@@ -86,6 +196,23 @@ def distribute_shores(
     height = bb.height
 
     # Espaçamento adaptativo: calcula a partir de carga/capacidade quando possível
+    effective_spacing = max_spacing
+
+    # Pre-compute adaptive spacing for corridor check
+    if floor_height_m is not None and slab.thickness_m > 0:
+        derated_cap = shore.effective_capacity(floor_height_m)
+        _adaptive = compute_adaptive_spacing(
+            slab_thickness_m=slab.thickness_m,
+            floor_height_m=floor_height_m,
+            shore_capacity_kn=derated_cap,
+        )
+        effective_spacing = min(_adaptive, max_spacing)
+
+    # Narrow corridor detection: use linear distribution instead of grid
+    if _is_narrow_corridor(slab, effective_spacing):
+        return _distribute_linear(slab, shore, total_load_kn, effective_spacing, exclusions)
+
+    # Reset effective_spacing for the normal grid path below
     effective_spacing = max_spacing
     if floor_height_m is not None and slab.thickness_m > 0:
         derated_cap = shore.effective_capacity(floor_height_m)

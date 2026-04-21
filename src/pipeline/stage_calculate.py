@@ -813,6 +813,15 @@ def run_calculation(
     # Tier 2: Beam axes with extended tolerance (fallback for sparse grids)
     # Tier 3: Direct boundary extraction from DXF hatches/polylines
 
+    # Build beam LineStrings for proximity validation in Tier 3
+    _beam_lines: List[LineString] = []
+    for b in valid_beams:
+        if b.element_type == ElementType.BEAM and len(b.geometry) >= 2:
+            try:
+                _beam_lines.append(LineString([b.geometry[0], b.geometry[1]]))
+            except Exception:
+                pass
+
     # Tier 1: Beam grid
     slab_polygons = derive_slabs_from_beams(valid_beams)
 
@@ -862,7 +871,10 @@ def run_calculation(
         )
         if boundary_slabs:
             before = len(slab_polygons)
-            slab_polygons = merge_slab_sources(slab_polygons, boundary_slabs)
+            slab_polygons = merge_slab_sources(
+                slab_polygons, boundary_slabs,
+                beam_lines=_beam_lines if _beam_lines else None,
+            )
             added = len(slab_polygons) - before
             if added > 0:
                 total_area = sum(p.area for p in boundary_slabs)
