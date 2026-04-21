@@ -131,6 +131,188 @@ def _contra_flecha_warnings(beam_length_m: float, beam_name: str) -> list:
     return warnings
 
 
+def _filter_beams_to_main_cluster(
+    beams: List[ClassifiedElement],
+    buffer_m: float = 3.0,
+) -> List[ClassifiedElement]:
+    """Keep only beams belonging to the largest spatial cluster.
+
+    Detail/section views contain lines that get classified as beams.
+    These "phantom beams" are spatially isolated from the main structural
+    plan. By clustering beam midpoints and keeping only the largest
+    connected component, we discard all detail-view beams.
+
+    Uses union-find on beam midpoints: two beams are "connected" if their
+    midpoints are within buffer_m of each other or if their LineStrings
+    (buffered) intersect.
+    """
+    if len(beams) <= 1:
+        return beams
+
+    # Collect midpoints and LineStrings
+    midpoints = []
+    lines = []
+    for b in beams:
+        if b.element_type != ElementType.BEAM or len(b.geometry) < 2:
+            midpoints.append(None)
+            lines.append(None)
+            continue
+        s, e = b.geometry[0], b.geometry[1]
+        midpoints.append(((s[0] + e[0]) / 2, (s[1] + e[1]) / 2))
+        try:
+            lines.append(LineString([s, e]).buffer(buffer_m))
+        except Exception:
+            lines.append(None)
+
+    n = len(beams)
+    parent = list(range(n))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    # Connect beams whose buffered geometries intersect
+    for i in range(n):
+        if midpoints[i] is None:
+            continue
+        for j in range(i + 1, n):
+            if midpoints[j] is None:
+                continue
+            # Quick distance check first
+            dx = midpoints[i][0] - midpoints[j][0]
+            dy = midpoints[i][1] - midpoints[j][1]
+            dist_sq = dx * dx + dy * dy
+            # Skip pairs that are very far apart (> 20m between midpoints)
+            if dist_sq > 400.0:
+                continue
+            # Connect if buffered lines intersect
+            if lines[i] is not None and lines[j] is not None:
+                try:
+                    if lines[i].intersects(lines[j]):
+                        union(i, j)
+                except Exception:
+                    pass
+
+    # Find largest group by total beam length (not just count)
+    from collections import defaultdict as dd
+    groups: dict = dd(float)
+    for i in range(n):
+        if midpoints[i] is None:
+            continue
+        root = find(i)
+        s, e = beams[i].geometry[0], beams[i].geometry[1]
+        length = ((s[0] - e[0]) ** 2 + (s[1] - e[1]) ** 2) ** 0.5
+        groups[root] += length
+
+    if not groups:
+        return beams
+
+    main_root = max(groups, key=groups.get)
+    main_total_length = groups[main_root]
+
+    filtered = [beams[i] for i in range(n) if find(i) == main_root]
+    removed = len(beams) - len(filtered)
+
+    if removed > 0:
+        logger.info(
+            f"Beam cluster filter: kept {len(filtered)} beams "
+            f"(total length {main_total_length:.0f}m), "
+            f"discarded {removed} from {len(groups)} isolated cluster(s)"
+        )
+
+    return filtered
+
+
+def _filter_isolated_slabs(
+    polygons: List[Polygon],
+    min_group_area_ratio: float = 0.10,
+) -> List[Polygon]:
+    """Keep only the largest connected component of slab polygons.
+
+    Slabs from the main structural plan form a contiguous group (sharing
+    beam boundaries, touching or very close). Slabs from detail views /
+    secondary drawings are spatially isolated.
+
+    Two slabs are "connected" if they intersect when buffered by 2m
+    (typical pillar width + tolerance).
+    """
+    if len(polygons) <= 1:
+        return polygons
+
+    n = len(polygons)
+    buffered = []
+    for p in polygons:
+        try:
+            buffered.append(p.buffer(2.0))
+        except Exception:
+            buffered.append(p)
+
+    parent = list(range(n))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            try:
+                if buffered[i].intersects(polygons[j]):
+                    union(i, j)
+            except Exception:
+                pass
+
+    # Find group with largest total area
+    from collections import defaultdict as dd
+    group_area: dict = dd(float)
+    group_members: dict = dd(list)
+    for i in range(n):
+        root = find(i)
+        group_area[root] += polygons[i].area
+        group_members[root].append(i)
+
+    if not group_area:
+        return polygons
+
+    main_root = max(group_area, key=group_area.get)
+    total_area = sum(group_area.values())
+    main_area = group_area[main_root]
+
+    # Only filter if the main group clearly dominates
+    if main_area < min_group_area_ratio * total_area:
+        logger.info(
+            f"Slab connectivity filter: main group area={main_area:.0f}m² "
+            f"is only {main_area / total_area:.0%} of total — keeping all slabs"
+        )
+        return polygons
+
+    filtered = [polygons[i] for i in group_members[main_root]]
+    removed = n - len(filtered)
+
+    if removed > 0:
+        removed_area = total_area - main_area
+        logger.info(
+            f"Slab connectivity filter: kept {len(filtered)} slabs "
+            f"({main_area:.0f}m²), discarded {removed} isolated slabs "
+            f"({removed_area:.0f}m²) from {len(group_area)} group(s)"
+        )
+
+    return filtered
+
+
 def _pillar_hull(pillars: List[ClassifiedElement]):
     """Return the convex hull polygon of pillar centers, or None if <3 pillars.
 
@@ -441,6 +623,18 @@ def run_calculation(
         warnings.append(
             f"{rejected_section} vigas com seção absurda (<10 cm) descartadas"
         )
+
+    # Filter beams to main structural cluster — discards beams from
+    # detail views, sections, and other non-structural drawing areas
+    if len(valid_beams) > 3:
+        before_count = len(valid_beams)
+        valid_beams = _filter_beams_to_main_cluster(valid_beams)
+        removed_beams = before_count - len(valid_beams)
+        if removed_beams > 0:
+            warnings.append(
+                f"Filtradas {removed_beams} vigas de regiões secundárias "
+                f"(cortes, detalhes, elevações)"
+            )
 
     # Load shore catalog
     try:
@@ -903,6 +1097,19 @@ def run_calculation(
             warnings.append(
                 f"Shafts detectados: {len(shaft_regions)} abertura(s) — "
                 f"{len(removed_indices)} painel(éis) de laje excluído(s)"
+            )
+
+    # Filter isolated slab groups — discard slabs from detail views that
+    # survived upstream filters. Main plan slabs form a connected cluster;
+    # slabs from sections/details are spatially isolated.
+    if len(slab_polygons) > 2:
+        before_slab_count = len(slab_polygons)
+        slab_polygons = _filter_isolated_slabs(slab_polygons)
+        removed_slabs = before_slab_count - len(slab_polygons)
+        if removed_slabs > 0:
+            warnings.append(
+                f"Filtradas {removed_slabs} lajes isoladas de regiões "
+                f"não-estruturais (cortes, detalhes)"
             )
 
     cantilever_flags = detect_cantilever_slabs(slab_polygons, pillars)
