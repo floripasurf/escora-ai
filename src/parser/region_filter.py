@@ -32,7 +32,7 @@ DETAIL_KEYWORDS = [
     "A-A", "B-B", "C-C", "D-D", "E-E",
 ]
 
-DETAIL_EXCLUSION_RADIUS = 8.0  # meters (detail views can span 5-10m)
+DETAIL_EXCLUSION_RADIUS = 5.0  # meters (detail views typically span 3-8m)
 
 # Layer name patterns that indicate detail/section views (not main plan)
 DETAIL_LAYER_KEYWORDS = [
@@ -96,7 +96,7 @@ def _find_gap_splits(values: List[float], total_range: float) -> List[float]:
     """
     if len(values) < 2:
         return []
-    threshold = max(3.0, 0.03 * total_range)
+    threshold = max(2.0, 0.02 * total_range)
     sorted_vals = sorted(values)
     splits = []
     for i in range(len(sorted_vals) - 1):
@@ -162,6 +162,49 @@ def _is_in_detail_zone(x: float, y: float, texts: List[TextEntity]) -> bool:
     return False
 
 
+def _detect_bounding_rectangles(
+    polylines: List[PolylineEntity],
+) -> List[Region]:
+    """Detect closed rectangular polylines that frame detail/section views.
+
+    Brazilian DXFs commonly use rectangular LWPOLYLINE frames around views
+    labeled "CORTE A-A", "DETALHE 01", etc. These frames help identify
+    secondary regions even when gap-based clustering fails.
+
+    Returns list of Regions corresponding to detected bounding rectangles.
+    """
+    rects: List[Region] = []
+    for p in polylines:
+        pts = p.points if hasattr(p, "points") else []
+        if not pts or len(pts) < 4:
+            continue
+        # Check if closed (first ≈ last)
+        if abs(pts[0][0] - pts[-1][0]) > 0.1 or abs(pts[0][1] - pts[-1][1]) > 0.1:
+            # Also accept 4-point polylines (implicitly closed)
+            if len(pts) != 4:
+                continue
+        # Check rectangularity: 4 unique corners, axis-aligned edges
+        corners = pts[:4]
+        xs = sorted(set(round(c[0], 2) for c in corners))
+        ys = sorted(set(round(c[1], 2) for c in corners))
+        if len(xs) != 2 or len(ys) != 2:
+            continue
+        w = xs[1] - xs[0]
+        h = ys[1] - ys[0]
+        # Filter: too small → not a view frame; too large → the whole sheet
+        if w < 1.0 or h < 1.0 or w > 50.0 or h > 50.0:
+            continue
+        # Check if layer suggests a frame/detail
+        layer = getattr(p, "layer", "").lower()
+        is_frame_layer = any(
+            kw in layer for kw in ["quadro", "frame", "borda", "viewport"]
+        )
+        # Accept if it's on a frame layer OR has reasonable detail-view dimensions
+        if is_frame_layer or (w < 20.0 and h < 20.0):
+            rects.append(Region(xs[0], xs[1], ys[0], ys[1], count=0))
+    return rects
+
+
 def filter_main_plan(
     texts: List[TextEntity],
     segments: List[SegmentEntity],
@@ -199,10 +242,10 @@ def filter_main_plan(
     total_entities = sum(r.count for r in regions)
     main = max(regions, key=lambda r: r.count)
 
-    # Only activate filtering if main region clearly dominates (>60% of entities).
-    # If entities are spread across regions, it's likely a single-zone file with
-    # internal gaps (courtyards, voids) — not separate drawing views.
-    if main.count < 0.50 * total_entities:
+    # Only activate filtering if main region clearly dominates (>35% of entities).
+    # Lowered from 50% because detail views with many entities (hatches, dims)
+    # can push the main region below 50%, disabling the filter entirely.
+    if main.count < 0.35 * total_entities:
         logger.info(
             f"Region filter: {len(regions)} regions detected but main has only "
             f"{main.count}/{total_entities} ({main.count/total_entities:.0%}) — "
@@ -229,6 +272,21 @@ def filter_main_plan(
 
     m = REGION_MARGIN
 
+    # Step 2.5: Detect bounding rectangles that frame detail views
+    detail_rects = _detect_bounding_rectangles(polylines)
+    # Remove rectangles that overlap with the main region (they ARE the plan)
+    detail_rects = [
+        dr for dr in detail_rects
+        if not _point_in_region(
+            (dr.x_min + dr.x_max) / 2, (dr.y_min + dr.y_max) / 2, main, m
+        )
+    ]
+    if detail_rects:
+        logger.info(
+            f"Region filter: {len(detail_rects)} bounding rectangles "
+            f"detected as detail/section frames"
+        )
+
     # Step 3: Filter entities — keep only those in main plan region
     def _seg_center(s: SegmentEntity) -> Tuple[float, float]:
         if s.type == "H":
@@ -240,8 +298,13 @@ def filter_main_plan(
         lower = layer.lower().strip()
         return any(kw in lower for kw in DETAIL_LAYER_KEYWORDS)
 
+    def _in_detail_rect(x: float, y: float) -> bool:
+        return any(_point_in_region(x, y, dr) for dr in detail_rects)
+
     def _in_main(x: float, y: float, layer: str = "") -> bool:
         if not _point_in_region(x, y, main, m):
+            return False
+        if _in_detail_rect(x, y):
             return False
         if _is_in_detail_zone(x, y, texts):
             return False
