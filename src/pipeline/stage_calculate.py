@@ -636,6 +636,34 @@ def run_calculation(
                 f"(cortes, detalhes, elevações)"
             )
 
+    # Pillar hull clamp for beams: discard beams whose midpoint is far
+    # outside the structural footprint (convex hull of pillars).
+    _BEAM_HULL_MARGIN = 3.0
+    _pillar_pts_beam = [
+        p.geometry[0] for p in pillars
+        if p.element_type == ElementType.PILLAR and p.geometry
+    ]
+    if len(_pillar_pts_beam) >= 3 and len(valid_beams) > 1:
+        from shapely.geometry import MultiPoint as _MP, Point as _Pt
+        _bhull = _MP([_Pt(xy) for xy in _pillar_pts_beam]).convex_hull
+        _beam_hull_buf = _bhull.buffer(_BEAM_HULL_MARGIN)
+        before_hull_b = len(valid_beams)
+        valid_beams = [
+            b for b in valid_beams
+            if len(b.geometry) < 2 or _beam_hull_buf.contains(
+                _Pt(
+                    (b.geometry[0][0] + b.geometry[1][0]) / 2,
+                    (b.geometry[0][1] + b.geometry[1][1]) / 2,
+                )
+            )
+        ]
+        removed_hull_b = before_hull_b - len(valid_beams)
+        if removed_hull_b > 0:
+            warnings.append(
+                f"Filtradas {removed_hull_b} vigas fora do perímetro estrutural "
+                f"(detalhes, cortes, selo)"
+            )
+
     # Load shore catalog
     try:
         catalog = load_catalog()
@@ -1125,6 +1153,47 @@ def run_calculation(
             warnings.append(
                 f"Filtradas {removed_slabs} lajes isoladas de regiões "
                 f"não-estruturais (cortes, detalhes)"
+            )
+
+    # Pillar convex hull clamp: discard slabs whose centroid is far outside
+    # the structural footprint (convex hull of pillars). Detail views, section
+    # cuts, title blocks, and engineer notes produce phantom slabs that pass
+    # spatial clustering when they're adjacent to the main plan.
+    _HULL_MARGIN = 3.0  # m — tolerance for perimeter slabs slightly outside pillars
+    pillar_pts_for_hull = [
+        p.geometry[0] for p in pillars
+        if p.element_type == ElementType.PILLAR and p.geometry
+    ]
+    if len(pillar_pts_for_hull) >= 3 and len(slab_polygons) > 1:
+        from shapely.geometry import MultiPoint as _MP
+        _slab_hull = _MP([Point(xy) for xy in pillar_pts_for_hull]).convex_hull
+        _hull_buffered = _slab_hull.buffer(_HULL_MARGIN)
+        before_hull = len(slab_polygons)
+        kept_slabs = []
+        for sp in slab_polygons:
+            centroid = sp.centroid
+            if _hull_buffered.contains(Point(centroid.x, centroid.y)):
+                kept_slabs.append(sp)
+            else:
+                # Also keep if > 30% of slab area overlaps the hull (edge slabs)
+                try:
+                    overlap = sp.intersection(_hull_buffered).area / sp.area if sp.area > 0 else 0
+                except Exception:
+                    overlap = 0
+                if overlap >= 0.30:
+                    kept_slabs.append(sp)
+                else:
+                    logger.info(
+                        f"Pillar hull clamp: discarded slab area={sp.area:.1f}m² "
+                        f"centroid=({centroid.x:.1f}, {centroid.y:.1f}) — "
+                        f"outside structural footprint"
+                    )
+        slab_polygons = kept_slabs
+        removed_hull = before_hull - len(slab_polygons)
+        if removed_hull > 0:
+            warnings.append(
+                f"Filtradas {removed_hull} lajes fora do perímetro estrutural "
+                f"(detalhes, cortes, selo do engenheiro)"
             )
 
     cantilever_flags = detect_cantilever_slabs(slab_polygons, pillars)
