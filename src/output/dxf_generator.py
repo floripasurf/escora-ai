@@ -151,17 +151,51 @@ def generate_dxf(
                 )
             beam_shore_count += 1
 
-        # Distribution beam under this beam? Draw a thin line on VM*_Viga.
-        for s in br.shores:
-            db = getattr(s, "distribution_beam", None)
-            if db is None:
-                continue
+        # Distribution beam under this beam? Draw VM lines connecting adjacent towers.
+        beam_towers = [
+            s for s in br.shores
+            if getattr(s, "support_type", None) == SupportType.TOWER
+            and getattr(s, "distribution_beam", None) is not None
+        ]
+        if len(beam_towers) >= 2:
+            db = beam_towers[0].distribution_beam
             vm_layer = f"{db.id.split('-')[1] if '-' in db.id else db.id}_Viga"
-            # Catalog ids look like "VD-VM130-410"; collapse to "VM130_Viga".
             if "VM" in db.id:
                 vm_token = next((t for t in db.id.split("-") if t.startswith("VM")), db.id)
                 vm_layer = f"{vm_token}_Viga"
             _ensure_layer(doc, vm_layer)
+
+            # Sort towers by projection along beam axis
+            beam_obj = br.beam
+            if len(beam_obj.geometry) >= 2:
+                ax = beam_obj.geometry[1][0] - beam_obj.geometry[0][0]
+                ay = beam_obj.geometry[1][1] - beam_obj.geometry[0][1]
+                beam_towers.sort(key=lambda t: t.x * ax + t.y * ay)
+
+            for t1, t2 in zip(beam_towers, beam_towers[1:]):
+                msp.add_line(
+                    (t1.x, t1.y), (t2.x, t2.y),
+                    dxfattribs={"layer": vm_layer},
+                )
+                # VM model label at midpoint
+                mx, my = (t1.x + t2.x) / 2, (t1.y + t2.y) / 2
+                msp.add_text(
+                    db.model if hasattr(db, "model") else db.id,
+                    height=TEXT_HEIGHT * 0.6,
+                    dxfattribs={"layer": vm_layer},
+                ).set_placement((mx + 0.05, my + 0.05))
+        elif br.shores:
+            # Ensure VM layer exists even without lines (backward compat)
+            for s in br.shores:
+                db = getattr(s, "distribution_beam", None)
+                if db is None:
+                    continue
+                vm_layer = f"{db.id.split('-')[1] if '-' in db.id else db.id}_Viga"
+                if "VM" in db.id:
+                    vm_token = next((t for t in db.id.split("-") if t.startswith("VM")), db.id)
+                    vm_layer = f"{vm_token}_Viga"
+                _ensure_layer(doc, vm_layer)
+                break
 
     # Draw slab shores — Supplier naming: ESC{model}_Laje / TORRE_LAJE
     for sr in calc.slab_results:
@@ -183,6 +217,71 @@ def generate_dxf(
             else:
                 _draw_slab_shore(msp, s.x, s.y, layer)
             slab_shore_count += 1
+
+        # Draw VM lines connecting adjacent slab towers
+        slab_towers = [
+            s for s in sr.shores
+            if getattr(s, "support_type", None) == SupportType.TOWER
+            and getattr(s, "distribution_beam", None) is not None
+        ]
+        if len(slab_towers) >= 2:
+            sdb = slab_towers[0].distribution_beam
+            svm_layer = f"{sdb.id.split('-')[1] if '-' in sdb.id else sdb.id}_Laje"
+            if "VM" in sdb.id:
+                svm_token = next((t for t in sdb.id.split("-") if t.startswith("VM")), sdb.id)
+                svm_layer = f"{svm_token}_Laje"
+            _ensure_layer(doc, svm_layer)
+
+            # Group towers by row (similar Y within tolerance) and draw horizontal VMs
+            _ROW_TOL = 0.3  # m
+            sorted_by_y = sorted(slab_towers, key=lambda t: t.y)
+            rows = []
+            current_row = [sorted_by_y[0]]
+            for t in sorted_by_y[1:]:
+                if abs(t.y - current_row[0].y) <= _ROW_TOL:
+                    current_row.append(t)
+                else:
+                    rows.append(current_row)
+                    current_row = [t]
+            rows.append(current_row)
+
+            for row in rows:
+                row.sort(key=lambda t: t.x)
+                for t1, t2 in zip(row, row[1:]):
+                    msp.add_line(
+                        (t1.x, t1.y), (t2.x, t2.y),
+                        dxfattribs={"layer": svm_layer},
+                    )
+
+            # Group towers by column (similar X) and draw vertical VMs
+            sorted_by_x = sorted(slab_towers, key=lambda t: t.x)
+            cols = []
+            current_col = [sorted_by_x[0]]
+            for t in sorted_by_x[1:]:
+                if abs(t.x - current_col[0].x) <= _ROW_TOL:
+                    current_col.append(t)
+                else:
+                    cols.append(current_col)
+                    current_col = [t]
+            cols.append(current_col)
+
+            for col in cols:
+                col.sort(key=lambda t: t.y)
+                for t1, t2 in zip(col, col[1:]):
+                    msp.add_line(
+                        (t1.x, t1.y), (t2.x, t2.y),
+                        dxfattribs={"layer": svm_layer},
+                    )
+
+            # VM label at centroid
+            if hasattr(sr.polygon, "centroid"):
+                cx = sr.polygon.centroid.x
+                cy = sr.polygon.centroid.y
+                msp.add_text(
+                    sdb.model if hasattr(sdb, "model") else sdb.id,
+                    height=TEXT_HEIGHT * 0.6,
+                    dxfattribs={"layer": svm_layer},
+                ).set_placement((cx + 0.1, cy + 0.1))
 
         # Info label at slab center
         if hasattr(sr.polygon, "centroid"):

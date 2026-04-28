@@ -93,3 +93,7 @@ ESPESSURA_DEFAULT = 0.12
 
 # Altura padrão do pé-direito (m)
 ALTURA_DEFAULT = 2.80
+
+# Preço por kg de equipamento por mês de locação (R$/kg/mês)
+# Referência: Supplier SJC padrão de mercado regional
+PRECO_POR_KG_MES_BRL = 1.11

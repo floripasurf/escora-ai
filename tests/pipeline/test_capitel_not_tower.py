@@ -60,7 +60,8 @@ class TestCapitelNeverBecomesTower:
     def test_tower_shores_not_in_capitel_ring(self):
         """No TOWER shore may lie within 1.50m of any pillar."""
         elements, pillar_xy = _large_slab_elements()
-        result = run_calculation(elements, pe_direito_m=2.80,
+        # pe_direito > 3.10m to bypass Rule 0 (baixo pé-direito → TELESCOPIC)
+        result = run_calculation(elements, pe_direito_m=3.50,
                                  slab_thickness_m=0.12)
 
         # Only MIXED slabs exercise the bug; at least one must be MIXED
@@ -91,7 +92,8 @@ class TestCapitelNeverBecomesTower:
     def test_capitel_densification_produces_telescopic_shores(self):
         """Shores in capitel ring (0.70-1.50m) exist and are telescopic."""
         elements, pillar_xy = _large_slab_elements()
-        result = run_calculation(elements, pe_direito_m=2.80,
+        # pe_direito > 3.10m to bypass Rule 0 (baixo pé-direito → TELESCOPIC)
+        result = run_calculation(elements, pe_direito_m=3.50,
                                  slab_thickness_m=0.12)
 
         capitel_shores = 0

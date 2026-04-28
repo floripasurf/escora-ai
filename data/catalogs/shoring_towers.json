@@ -15,11 +15,11 @@
       "max_height_m": 20.0,
       "weight_per_module_kg": 25.0,
       "includes_bracing": true,
-      "price_per_module_brl": 12.00,
+      "price_per_module_brl": 27.75,
       "capacity_curve": [
         [1.0, 100.0], [5.0, 88.5], [10.0, 83.5], [15.0, 78.5], [20.0, 73.5]
       ],
-      "notes": "Torre base 1.00m. Painéis: A(150cm), B(125cm), C(100cm). Derating proporcional à TA-150."
+      "notes": "Torre base 1.00m. Painéis: A(150cm), B(125cm), C(100cm). Derating proporcional à TA-150. Preço: 25.0kg × R$1.11/kg/mês."
     },
     {
       "id": "TWR-TA150",
@@ -32,11 +32,11 @@
       "max_height_m": 30.0,
       "weight_per_module_kg": 38.0,
       "includes_bracing": true,
-      "price_per_module_brl": 15.00,
+      "price_per_module_brl": 42.18,
       "capacity_curve": [
         [1.5, 200.0], [7.5, 177.0], [15.0, 167.0], [22.5, 157.0], [30.0, 147.0]
       ],
-      "notes": "Torre base 1.54m. Painéis: A(1540x1500), B(1540x1250), C(1540x1000). Padrão para vigas. Manual p.35: capacidade varia de 200kN (1 mod) a 147kN (20 mod)."
+      "notes": "Torre base 1.54m. Painéis: A(1540x1500), B(1540x1250), C(1540x1000). Padrão para vigas. Manual p.35: capacidade varia de 200kN (1 mod) a 147kN (20 mod). Preço: 38.0kg × R$1.11/kg/mês."
     },
     {
       "id": "TWR-SH-LTT",
@@ -49,8 +49,8 @@
       "max_height_m": 30.0,
       "weight_per_module_kg": 38.0,
       "includes_bracing": true,
-      "price_per_module_brl": 15.00,
-      "notes": "Torre padrão SH, capacidade 12tf"
+      "price_per_module_brl": 42.18,
+      "notes": "Torre padrão SH, capacidade 12tf. Preço: 38.0kg × R$1.11/kg/mês."
     }
   ],
   "distribution_beams": [
@@ -63,8 +63,8 @@
       "EI_knm2": 461.8,
       "max_span_m": 1.55,
       "weight_per_m_kg": 6.5,
-      "price_per_m_brl": 8.00,
-      "notes": "Viga Mecanor VM130 L=1.55m (516 kgf.m)"
+      "price_per_m_brl": 7.22,
+      "notes": "Viga Mecanor VM130 L=1.55m (516 kgf.m). Preço: 6.5kg/m × R$1.11/kg/mês."
     },
     {
       "id": "VD-VM130-205",
@@ -75,7 +75,7 @@
       "EI_knm2": 461.8,
       "max_span_m": 2.05,
       "weight_per_m_kg": 6.5,
-      "price_per_m_brl": 8.00,
+      "price_per_m_brl": 7.22,
       "notes": "Viga Mecanor VM130 L=2.05m"
     },
     {
@@ -87,7 +87,7 @@
       "EI_knm2": 461.8,
       "max_span_m": 2.55,
       "weight_per_m_kg": 6.5,
-      "price_per_m_brl": 8.00,
+      "price_per_m_brl": 7.22,
       "notes": "Viga Mecanor VM130 L=2.55m"
     },
     {
@@ -99,7 +99,7 @@
       "EI_knm2": 461.8,
       "max_span_m": 3.10,
       "weight_per_m_kg": 6.5,
-      "price_per_m_brl": 8.00,
+      "price_per_m_brl": 7.22,
       "notes": "Viga Mecanor VM130 L=3.10m"
     },
     {
@@ -111,7 +111,7 @@
       "EI_knm2": 461.8,
       "max_span_m": 3.60,
       "weight_per_m_kg": 6.5,
-      "price_per_m_brl": 8.00,
+      "price_per_m_brl": 7.22,
       "notes": "Viga Mecanor VM130 L=3.60m"
     },
     {
@@ -123,7 +123,7 @@
       "EI_knm2": 461.8,
       "max_span_m": 4.10,
       "weight_per_m_kg": 6.5,
-      "price_per_m_brl": 8.00,
+      "price_per_m_brl": 7.22,
       "notes": "Viga Mecanor VM130 L=4.10m"
     },
     {
@@ -135,7 +135,7 @@
       "EI_knm2": 146.8,
       "max_span_m": 1.00,
       "weight_per_m_kg": 4.0,
-      "price_per_m_brl": 6.00,
+      "price_per_m_brl": 4.44,
       "notes": "Viga Mecanor VM80 L=1.00m"
     },
     {
@@ -147,7 +147,7 @@
       "EI_knm2": 146.8,
       "max_span_m": 1.55,
       "weight_per_m_kg": 4.0,
-      "price_per_m_brl": 6.00,
+      "price_per_m_brl": 4.44,
       "notes": "Viga Mecanor VM80 L=1.55m — most common in Supplier plans"
     },
     {
@@ -159,7 +159,7 @@
       "EI_knm2": 146.8,
       "max_span_m": 2.05,
       "weight_per_m_kg": 4.0,
-      "price_per_m_brl": 6.00,
+      "price_per_m_brl": 4.44,
       "notes": "Viga Mecanor VM80 L=2.05m"
     },
     {
@@ -171,7 +171,7 @@
       "EI_knm2": 146.8,
       "max_span_m": 2.55,
       "weight_per_m_kg": 4.0,
-      "price_per_m_brl": 6.00,
+      "price_per_m_brl": 4.44,
       "notes": "Viga Mecanor VM80 L=2.55m — max practical span for VM80"
     },
     {
@@ -183,7 +183,7 @@
       "EI_knm2": 146.8,
       "max_span_m": 3.10,
       "weight_per_m_kg": 4.0,
-      "price_per_m_brl": 6.00,
+      "price_per_m_brl": 4.44,
       "notes": "Viga Mecanor VM80 L=3.10m"
     },
     {
@@ -195,7 +195,7 @@
       "EI_knm2": 146.8,
       "max_span_m": 3.60,
       "weight_per_m_kg": 4.0,
-      "price_per_m_brl": 6.00,
+      "price_per_m_brl": 4.44,
       "notes": "Viga Mecanor VM80 L=3.60m"
     },
     {
@@ -207,7 +207,7 @@
       "EI_knm2": 146.8,
       "max_span_m": 4.10,
       "weight_per_m_kg": 4.0,
-      "price_per_m_brl": 6.00,
+      "price_per_m_brl": 4.44,
       "notes": "Viga Mecanor VM80 L=4.10m"
     },
     {
@@ -219,7 +219,7 @@
       "EI_knm2": 20.0,
       "max_span_m": 1.00,
       "weight_per_m_kg": 2.5,
-      "price_per_m_brl": 4.00,
+      "price_per_m_brl": 2.78,
       "notes": "Viga Mecanor VM50 L=1.00m — TRAVAMENTO lateral"
     },
     {
@@ -231,7 +231,7 @@
       "EI_knm2": 20.0,
       "max_span_m": 1.55,
       "weight_per_m_kg": 2.5,
-      "price_per_m_brl": 4.00,
+      "price_per_m_brl": 2.78,
       "notes": "Viga Mecanor VM50 L=1.55m — TRAVAMENTO lateral"
     },
     {
@@ -243,7 +243,7 @@
       "EI_knm2": 20.0,
       "max_span_m": 2.05,
       "weight_per_m_kg": 2.5,
-      "price_per_m_brl": 4.00,
+      "price_per_m_brl": 2.78,
       "notes": "Viga Mecanor VM50 L=2.05m — TRAVAMENTO lateral"
     },
     {
@@ -255,7 +255,7 @@
       "EI_knm2": 20.0,
       "max_span_m": 2.55,
       "weight_per_m_kg": 2.5,
-      "price_per_m_brl": 4.00,
+      "price_per_m_brl": 2.78,
       "notes": "Viga Mecanor VM50 L=2.55m — TRAVAMENTO lateral"
     },
     {
@@ -267,7 +267,7 @@
       "EI_knm2": 20.0,
       "max_span_m": 3.10,
       "weight_per_m_kg": 2.5,
-      "price_per_m_brl": 4.00,
+      "price_per_m_brl": 2.78,
       "notes": "Viga Mecanor VM50 L=3.10m — TRAVAMENTO lateral"
     },
     {
@@ -279,7 +279,7 @@
       "EI_knm2": 20.0,
       "max_span_m": 3.60,
       "weight_per_m_kg": 2.5,
-      "price_per_m_brl": 4.00,
+      "price_per_m_brl": 2.78,
       "notes": "Viga Mecanor VM50 L=3.60m — TRAVAMENTO lateral"
     },
     {
@@ -291,7 +291,7 @@
       "EI_knm2": 20.0,
       "max_span_m": 4.10,
       "weight_per_m_kg": 2.5,
-      "price_per_m_brl": 4.00,
+      "price_per_m_brl": 2.78,
       "notes": "Viga Mecanor VM50 L=4.10m — TRAVAMENTO lateral"
     },
     {
@@ -303,9 +303,9 @@
       "EI_knm2": 250.0,
       "max_span_m": 3.50,
       "weight_per_m_kg": 4.5,
-      "price_per_m_brl": 10.00,
+      "price_per_m_brl": 5.00,
       "available": false,
-      "notes": "Viga H20 madeira/alumínio (500 kgf.m). Supplier Q7: oferta técnica — hoje sem estoque na locadora."
+      "notes": "Viga H20 madeira/alumínio (500 kgf.m). Supplier Q7: oferta técnica — hoje sem estoque na locadora. Preço: 4.5kg/m × R$1.11/kg/mês."
     },
     {
       "id": "VD-ALU14",
@@ -316,9 +316,9 @@
       "EI_knm2": 199.2,
       "max_span_m": 3.00,
       "weight_per_m_kg": 5.0,
-      "price_per_m_brl": 12.00,
+      "price_per_m_brl": 5.55,
       "available": false,
-      "notes": "Viga ALU14 alumínio (Supplier Q7: principal com VM80 secundária). Hoje sem estoque — só ofertada como alternativa técnica."
+      "notes": "Viga ALU14 alumínio (Supplier Q7: principal com VM80 secundária). Hoje sem estoque — só ofertada como alternativa técnica. Preço: 5.0kg/m × R$1.11/kg/mês."
     },
     {
       "id": "VD-ALU20",
@@ -329,9 +329,9 @@
       "EI_knm2": 400.0,
       "max_span_m": 4.00,
       "weight_per_m_kg": 6.5,
-      "price_per_m_brl": 15.00,
+      "price_per_m_brl": 7.22,
       "available": false,
-      "notes": "Viga ALU20 alumínio (Supplier Q7: principal, vãos maiores). Hoje sem estoque — só ofertada como alternativa técnica."
+      "notes": "Viga ALU20 alumínio (Supplier Q7: principal, vãos maiores). Hoje sem estoque — só ofertada como alternativa técnica. Preço: 6.5kg/m × R$1.11/kg/mês."
     },
     {
       "id": "VD-SF250",
@@ -342,8 +342,8 @@
       "EI_knm2": 800.0,
       "max_span_m": 4.00,
       "weight_per_m_kg": 8.0,
-      "price_per_m_brl": 14.00,
-      "notes": "Perfil SF-250 para vigas pesadas"
+      "price_per_m_brl": 8.88,
+      "notes": "Perfil SF-250 para vigas pesadas. Preço: 8.0kg/m × R$1.11/kg/mês."
     },
     {
       "id": "VD-SF500",
@@ -354,8 +354,8 @@
       "EI_knm2": 3000.0,
       "max_span_m": 5.00,
       "weight_per_m_kg": 15.0,
-      "price_per_m_brl": 22.00,
-      "notes": "Perfil SF-500 para vigas muito pesadas"
+      "price_per_m_brl": 16.65,
+      "notes": "Perfil SF-500 para vigas muito pesadas. Preço: 15.0kg/m × R$1.11/kg/mês."
     }
   ],
   "accessories": [
@@ -366,8 +366,8 @@
       "model": "Cruzeta ESC310",
       "associated_model_ids": ["ESC310", "ESC360"],
       "weight_kg": 3.4,
-      "price_brl": 6.50,
-      "notes": "Travamento horizontal entre escoras adjacentes"
+      "price_brl": 3.77,
+      "notes": "Travamento horizontal entre escoras adjacentes. Preço: 3.4kg × R$1.11/kg/mês."
     },
     {
       "id": "CRZ-ESC450",
@@ -376,7 +376,7 @@
       "model": "Cruzeta ESC450",
       "associated_model_ids": ["ESC450", "ESC-PESADA"],
       "weight_kg": 4.6,
-      "price_brl": 8.20
+      "price_brl": 5.11
     },
     {
       "id": "CRZ-TORRE",
@@ -385,8 +385,8 @@
       "model": "Cruzeta TA",
       "associated_model_ids": ["TWR-TA100", "TWR-TA150", "TWR-SH-LTT"],
       "weight_kg": 5.8,
-      "price_brl": 11.00,
-      "notes": "Travamento de torres TA — 1 por face de painel"
+      "price_brl": 6.44,
+      "notes": "Travamento de torres TA — 1 por face de painel. Preço: 5.8kg × R$1.11/kg/mês."
     }
   ]
 }
