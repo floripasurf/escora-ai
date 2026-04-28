@@ -71,10 +71,10 @@ class TestBeamPairSlabs:
         assert len(slabs) == 0
 
     def test_short_beams_filtered(self):
-        """Beams shorter than 2.5m are filtered (pillar outlines)."""
+        """Beams shorter than 1.5m are filtered (pillar outlines)."""
         beams = [
-            _make_beam(0, 0, 2.0, 0, "V1"),
-            _make_beam(0, 5, 2.0, 5, "V2"),
+            _make_beam(0, 0, 1.0, 0, "V1"),
+            _make_beam(0, 5, 1.0, 5, "V2"),
         ]
         slabs = derive_slabs_from_beam_pairs(beams)
         assert len(slabs) == 0

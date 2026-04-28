@@ -17,8 +17,8 @@
       "tube_external_mm": 48.3,
       "tube_internal_mm": 38.1,
       "base_plate_mm": 120,
-      "price_reference_brl": 45.00,
-      "notes": "Tensão base: 26.45 kgf/cm². Padrão p/ pé-direito até 3.10m."
+      "price_reference_brl": 9.44,
+      "notes": "Tensão base: 26.45 kgf/cm². Padrão p/ pé-direito até 3.10m. Preço: 8.5kg × R$1.11/kg/mês."
     },
     {
       "id": "ESC450",
@@ -33,8 +33,8 @@
       "tube_external_mm": 60.3,
       "tube_internal_mm": 48.3,
       "base_plate_mm": 150,
-      "price_reference_brl": 65.00,
-      "notes": "Tensão base: 17.35 kgf/cm². Para pé-direito 3.00-4.50m."
+      "price_reference_brl": 12.43,
+      "notes": "Tensão base: 17.35 kgf/cm². Para pé-direito 3.00-4.50m. Preço: 11.2kg × R$1.11/kg/mês."
     },
     {
       "id": "ESC-PESADA",
@@ -49,8 +49,8 @@
       "tube_external_mm": 76.1,
       "tube_internal_mm": 60.3,
       "base_plate_mm": 180,
-      "price_reference_brl": 95.00,
-      "notes": "Para cargas pesadas, vigas e lajes espessas."
+      "price_reference_brl": 18.65,
+      "notes": "Para cargas pesadas, vigas e lajes espessas. Preço: 16.8kg × R$1.11/kg/mês."
     }
   ]
 }

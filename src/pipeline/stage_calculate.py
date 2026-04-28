@@ -41,12 +41,12 @@ from src.engine.tower_selector import (
 )
 from src.engine.validator import validate_result
 from src.engine.nervura_detector import detect_nervura_regions, distribute_nervura_shores
-from src.engine.shaft_detector import detect_all_shafts, filter_slab_polygons_by_shafts
+from src.engine.shaft_detector import detect_all_shafts, filter_slab_polygons_by_shafts, subtract_shafts_from_slabs
 from src.ml.predictor import ShoringPredictor
 from src.utils.constants import (
     GAMMA_F, Q_SOBRECARGA_DEFAULT, ESPESSURA_DEFAULT, ALTURA_DEFAULT,
     ESPACAMENTO_MAX_DEFAULT, ESPACAMENTO_MAX_VIGA, ESPACAMENTO_POR_ALTURA,
-    CONTRA_FLECHA,
+    CONTRA_FLECHA, DISTANCIA_BORDA_MIN,
 )
 
 logger = logging.getLogger(__name__)
@@ -70,7 +70,7 @@ PERIMETER_BEAM_HULL_DISTANCE_M = 0.5
 BEAM_ENDPOINT_PROXIMITY = 1.00
 
 # Minimum confidence to include in calculations
-MIN_CONFIDENCE = 0.50
+MIN_CONFIDENCE = 0.35
 
 # Minimum confidence for pillars — filters only rects where nearby beam text
 # actively contradicts pillar classification (score drops via CONTRADICT_PENALTY)
@@ -133,7 +133,7 @@ def _contra_flecha_warnings(beam_length_m: float, beam_name: str) -> list:
 
 def _filter_beams_to_main_cluster(
     beams: List[ClassifiedElement],
-    buffer_m: float = 3.0,
+    buffer_m: float = 5.0,
 ) -> List[ClassifiedElement]:
     """Keep only beams belonging to the largest spatial cluster.
 
@@ -250,7 +250,7 @@ def _filter_isolated_slabs(
     buffered = []
     for p in polygons:
         try:
-            buffered.append(p.buffer(2.0))
+            buffered.append(p.buffer(3.0))
         except Exception:
             buffered.append(p)
 
@@ -936,13 +936,22 @@ def run_calculation(
                     sa, sb = shores[a], shores[b]
                     gap = _m.hypot(sb.x - sa.x, sb.y - sa.y)
                     if gap > _MAX_TOWER_GAP:
-                        # Inserir torre(s) intermediária(s)
+                        # Inserir torre(s) intermediária(s) — coordinate-based search
                         n_fill = _m.ceil(gap / _MAX_TOWER_GAP) - 1
                         for k in range(1, n_fill + 1):
-                            target_frac = k / (n_fill + 1)
-                            target_idx = a + round((b - a) * target_frac)
-                            target_idx = max(a + 1, min(target_idx, b - 1))
-                            new_towers.add(target_idx)
+                            frac = k / (n_fill + 1)
+                            target_x = sa.x + frac * (sb.x - sa.x)
+                            target_y = sa.y + frac * (sb.y - sa.y)
+                            # Find closest shore to target coordinate (not already a tower)
+                            best_idx = min(
+                                (idx for idx in range(a + 1, b)
+                                 if idx not in tower_indices and idx not in new_towers),
+                                key=lambda idx: _m.hypot(
+                                    shores[idx].x - target_x, shores[idx].y - target_y),
+                                default=None,
+                            )
+                            if best_idx is not None:
+                                new_towers.add(best_idx)
                 tower_indices.update(new_towers)
 
             # Garantir mínimo de 2 torres para MIXED
@@ -1089,6 +1098,12 @@ def run_calculation(
     )
 
     if shaft_regions:
+        # First, cut shaft holes from slab polygons (handles small shafts
+        # inside large slabs without removing the entire slab)
+        before_cut = len(slab_polygons)
+        slab_polygons = subtract_shafts_from_slabs(slab_polygons, shaft_regions)
+
+        # Then, remove slabs that are mostly shaft (overlap >= 30%)
         before = len(slab_polygons)
         slab_polygons, removed_indices = filter_slab_polygons_by_shafts(
             slab_polygons, shaft_regions,
@@ -1125,7 +1140,7 @@ def run_calculation(
                 cy=(sr.y_min + sr.y_max) / 2,
                 width_m=sr.x_max - sr.x_min,
                 depth_m=sr.y_max - sr.y_min,
-                margin=0.0,
+                margin=0.30,
             ))
     all_exclusions = pillar_exclusions + beam_exclusions + shaft_exclusions
 
@@ -1455,7 +1470,8 @@ def run_calculation(
             selected_shore = select_shore(catalog, slab_shore_height, load_per_shore_estimate, mode=mode, inventory=inventory) if catalog else None
 
         if not selected_shore:
-            if slab_tower:
+            if slab_tower and slab_support_type == SupportType.TOWER:
+                # Only fall back to tower if Rule 0 didn't force TELESCOPIC
                 from src.models.shore import ShoreCatalogEntry
                 selected_shore = ShoreCatalogEntry(
                     id=slab_tower.id,
@@ -1471,27 +1487,41 @@ def run_calculation(
                     base_plate_mm=slab_tower.base_dimension_m * 1000,
                     price_reference_brl=slab_tower.total_price_brl(slab_shore_height),
                 )
-            else:
+            elif not selected_shore and catalog:
+                # Fallback: try the smallest telescopic shore that covers the height
+                for shore in sorted(catalog, key=lambda s: s.height_max_m):
+                    if shore.height_min_m <= slab_shore_height <= shore.height_max_m:
+                        selected_shore = shore
+                        break
+            if not selected_shore and catalog:
+                # Last resort: use the tallest shore in catalog even if height
+                # doesn't match perfectly — at least 1 shore on the drawing
+                selected_shore = max(catalog, key=lambda s: s.height_max_m)
+                warnings.append(
+                    f"Laje (área {slab.area_m2:.1f}m²) — escora aproximada usada "
+                    f"(altura {slab_shore_height:.2f}m, carga {load_per_shore_estimate:.1f} kN)"
+                )
+            if not selected_shore:
                 warnings.append(
                     f"Laje (área {slab.area_m2:.1f}m²) — nenhuma escora/torre compatível "
                     f"(altura {slab_shore_height:.2f}m, carga {load_per_shore_estimate:.1f} kN)"
                 )
-            slab_results.append(SlabShoringResult(
-                polygon=polygon,
-                thickness_m=thickness,
-                thickness_is_default=thickness_is_default,
-                area_m2=slab.area_m2,
-                is_cantilever=is_cantilever,
-                total_load_kn=total_load,
-                shores=[],
-                exclusions=all_exclusions,
-                category=panel_category,
-                structural_name=panel_structural_name,
-                room_hint=panel_room_hint,
-                shores_weight_kg=0.0,
-                decision_rule=slab_decision_rule,
-            ))
-            continue
+                slab_results.append(SlabShoringResult(
+                    polygon=polygon,
+                    thickness_m=thickness,
+                    thickness_is_default=thickness_is_default,
+                    area_m2=slab.area_m2,
+                    is_cantilever=is_cantilever,
+                    total_load_kn=total_load,
+                    shores=[],
+                    exclusions=all_exclusions,
+                    category=panel_category,
+                    structural_name=panel_structural_name,
+                    room_hint=panel_room_hint,
+                    shores_weight_kg=0.0,
+                    decision_rule=slab_decision_rule,
+                ))
+                continue
 
         max_spacing = _max_spacing_for_slab(thickness)
         if is_cantilever:
@@ -1607,38 +1637,82 @@ def run_calculation(
         )
 
         # === MIXED SLAB SUPPORT ===
-        # Runs BEFORE capitel densification (Orguel Q6): só o grid regular
-        # recebe torres distribuídas. O anel de capitel, adicionado depois,
-        # permanece 100% telescópico — torres grudadas a pilares em pé
-        # direito baixo não fazem sentido e contradizem a prática Orguel.
+        # VM-driven orthogonal tower grid: towers spaced at VM130 max span
+        # (3.0-4.0m) on strict orthogonal axes within the slab bounding box.
+        # Runs BEFORE capitel densification (Orguel Q6): capitel ring stays
+        # 100% telescopic — towers near pillars contradict Orguel practice.
         if (slab_support_type == SupportType.MIXED and use_tower_entry is not None
                 and len(shores) >= 4):
-            n_tower = max(2, round(len(shores) * slab_tower_fraction))
-            n_tower = min(n_tower, len(shores))
+            import math as _m2
 
             # Build capitel exclusion set: shores within 1.50m of any pillar
-            # must stay TELESCOPIC (Orguel practice — towers away from pillars).
-            import math as _m2
             _CAPITEL_RADIUS = 1.50
             _pillar_xy_mixed = [
                 (p.geometry[0][0], p.geometry[0][1])
                 for p in pillars
                 if p.element_type == ElementType.PILLAR and p.geometry
             ]
-            capitel_indices = set()
+            capitel_set = set()
             for idx, s in enumerate(shores):
                 for px, py in _pillar_xy_mixed:
                     if _m2.hypot(s.x - px, s.y - py) <= _CAPITEL_RADIUS:
-                        capitel_indices.add(idx)
+                        capitel_set.add(idx)
                         break
 
-            # Pick tower positions: evenly distributed, excluding capitel ring
-            eligible = [i for i in range(len(shores)) if i not in capitel_indices]
-            n_tower = min(n_tower, len(eligible))
-            step = len(eligible) / n_tower if n_tower > 0 else 1
+            # VM-driven tower grid spacing (VM130 max practical span = 4.10m)
+            bb = slab.bounding_box
+            slab_w = bb.max_x - bb.min_x
+            slab_h = bb.max_y - bb.min_y
+            _VM_MAX_SPAN = 4.0
+            spacing_tw = min(_VM_MAX_SPAN, max(min(slab_w, slab_h) / 2, 2.0))
+
+            # Generate ideal tower (x, y) positions on strict orthogonal grid
+            n_tw_x = max(2, _m2.ceil(slab_w / spacing_tw) + 1)
+            n_tw_y = max(2, _m2.ceil(slab_h / spacing_tw) + 1)
+            actual_sx = slab_w / max(n_tw_x - 1, 1)
+            actual_sy = slab_h / max(n_tw_y - 1, 1)
+
+            ideal_positions = []
+            for iy in range(n_tw_y):
+                for ix in range(n_tw_x):
+                    ideal_positions.append((
+                        bb.min_x + ix * actual_sx,
+                        bb.min_y + iy * actual_sy,
+                    ))
+
+            # For each ideal position, snap to nearest eligible shore
             tower_indices = set()
-            for k in range(n_tower):
-                tower_indices.add(eligible[min(round(k * step), len(eligible) - 1)])
+            eligible = [i for i in range(len(shores)) if i not in capitel_set]
+            for tx, ty in ideal_positions:
+                # Skip positions within capitel radius of any pillar
+                skip = False
+                for px, py in _pillar_xy_mixed:
+                    if _m2.hypot(tx - px, ty - py) <= _CAPITEL_RADIUS:
+                        skip = True
+                        break
+                if skip:
+                    continue
+                # Find closest eligible shore not already assigned
+                best_idx = min(
+                    (i for i in eligible if i not in tower_indices),
+                    key=lambda i: _m2.hypot(shores[i].x - tx, shores[i].y - ty),
+                    default=None,
+                )
+                if best_idx is not None:
+                    # Only snap if reasonably close (within 1.5× grid spacing)
+                    dist = _m2.hypot(shores[best_idx].x - tx, shores[best_idx].y - ty)
+                    if dist <= spacing_tw * 1.5:
+                        tower_indices.add(best_idx)
+
+            # Select distribution beam for slab towers
+            slab_dist_beam = None
+            if dist_beam_catalog and tower_indices:
+                slab_vm_span = spacing_tw
+                slab_vm_load = total_load / max(len(shores), 1)
+                slab_dist_beam = select_distribution_beam(
+                    dist_beam_catalog, span_m=slab_vm_span,
+                    load_kn_m=slab_vm_load, mode=mode, inventory=inventory,
+                )
 
             from src.models.shore import PositionedShore as _PS
             for idx in tower_indices:
@@ -1652,6 +1726,7 @@ def run_calculation(
                     ),
                     support_type=SupportType.TOWER,
                     tower=slab_tower,
+                    distribution_beam=slab_dist_beam,
                 )
 
         # === CAPITEL DENSIFICATION (Orguel Q6) ===
@@ -1739,6 +1814,9 @@ def run_calculation(
             if not too_close:
                 filtered.append(ss)
         if len(filtered) < len(sr.shores):
+            # Never reduce to 0 — keep at least 1 shore per slab
+            if not filtered and sr.shores:
+                filtered = [sr.shores[len(sr.shores) // 2]]
             removed = len(sr.shores) - len(filtered)
             sr.shores = filtered
             # Recalculate load per shore
@@ -1780,12 +1858,15 @@ def run_calculation(
                 else:
                     to_remove.add((bi, si))
 
-    # Apply removals
+    # Apply removals (never reduce a beam to 0 shores)
     if to_remove:
         for bi, br in enumerate(beam_results):
             indices_to_remove = {si for (b, si) in to_remove if b == bi}
             if indices_to_remove:
-                br.shores = [s for idx, s in enumerate(br.shores) if idx not in indices_to_remove]
+                remaining = [s for idx, s in enumerate(br.shores) if idx not in indices_to_remove]
+                if not remaining and br.shores:
+                    remaining = [br.shores[len(br.shores) // 2]]
+                br.shores = remaining
                 br.shore_count = len(br.shores)
 
     # === POST-PROCESSING REVIEW ===
@@ -1808,6 +1889,10 @@ def run_calculation(
 
     review_corrections = review_and_fix(calc_result, pillars, valid_beams)
     warnings.extend(review_corrections)
+
+    # Sync shore_count with actual len(shores) after all post-processing
+    for br in beam_results:
+        br.shore_count = len(br.shores)
 
     # === AGGREGATE RESULTS ===
     all_shores_count = (

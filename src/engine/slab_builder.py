@@ -321,14 +321,14 @@ def derive_slabs_from_beam_pairs(
             x_min = min(start[0], end[0])
             x_max = max(start[0], end[0])
             # Skip very short segments (pillar outlines, not real beams)
-            if x_max - x_min < 2.5:
+            if x_max - x_min < 1.5:
                 continue
             h_beams.append((y, x_min, x_max))
         else:
             x = (start[0] + end[0]) / 2
             y_min = min(start[1], end[1])
             y_max = max(start[1], end[1])
-            if y_max - y_min < 2.5:
+            if y_max - y_min < 1.5:
                 continue
             v_beams.append((x, y_min, y_max))
 
@@ -672,7 +672,7 @@ def merge_slab_sources(
     beam_slabs: List[Polygon],
     boundary_slabs: List[Polygon],
     beam_lines: List[LineString] | None = None,
-    beam_proximity_buffer: float = 1.0,
+    beam_proximity_buffer: float = 2.0,
 ) -> List[Polygon]:
     """Merge slab polygons from beam grid and boundary extraction.
 

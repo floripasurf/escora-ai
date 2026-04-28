@@ -218,7 +218,10 @@ def distribute_beam_shores(
         all_positions = deduped
 
     if not all_positions:
-        return [], 0, 0.0
+        # Fallback: all candidate positions were filtered out (proximity to
+        # supports). Place at least 1 shore at beam midpoint — a beam always
+        # needs shoring regardless of support proximity rules.
+        all_positions = [beam_length_m / 2.0]
 
     # Calculate load per shore based on total count
     n_effective = len(all_positions)

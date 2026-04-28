@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 # Shaft size constraints (m²) — real-world shaft areas
 MIN_SHAFT_AREA = 0.5    # Smallest pipe opening worth excluding
-MAX_SHAFT_AREA = 25.0   # Largest elevator shaft
+MAX_SHAFT_AREA = 50.0   # Largest elevator shaft / stairwell group
 
 # Aspect ratio limits for shaft rectangles
 MAX_SHAFT_ASPECT = 4.0  # Shafts are roughly square; aspect > 4 is likely a beam
@@ -475,10 +475,62 @@ def detect_all_shafts(
     return merged
 
 
+def subtract_shafts_from_slabs(
+    slab_polygons: list,
+    shaft_regions: List[ShaftRegion],
+    buffer_m: float = 0.05,
+) -> list:
+    """Cut shaft holes from slab polygons instead of removing whole slabs.
+
+    When a small shaft sits inside a large slab, the slab keeps its boundary
+    but gets a hole where the shaft is. This prevents shores from being
+    placed inside shaft voids while preserving the surrounding slab.
+
+    Args:
+        slab_polygons: List of Shapely Polygon objects (slab panels).
+        shaft_regions: Detected shaft regions.
+        buffer_m: Small buffer around shaft polygons for clean cuts.
+
+    Returns:
+        Updated list of slab polygons (some may now have holes).
+    """
+    if not shaft_regions or not slab_polygons:
+        return slab_polygons
+
+    from shapely.geometry import MultiPolygon
+    from shapely.validation import make_valid
+
+    shaft_polys = [s.polygon.buffer(buffer_m) for s in shaft_regions]
+    result = []
+
+    for slab in slab_polygons:
+        modified = slab
+        for sp in shaft_polys:
+            try:
+                if modified.intersects(sp):
+                    diff = modified.difference(sp)
+                    if diff.is_empty:
+                        modified = None
+                        break
+                    # difference() may return MultiPolygon — keep all parts
+                    if isinstance(diff, MultiPolygon):
+                        modified = max(diff.geoms, key=lambda g: g.area)
+                    else:
+                        modified = diff
+                    if not modified.is_valid:
+                        modified = make_valid(modified)
+            except Exception:
+                continue
+        if modified is not None and not modified.is_empty and modified.area >= 0.5:
+            result.append(modified)
+
+    return result
+
+
 def filter_slab_polygons_by_shafts(
     slab_polygons: list,
     shaft_regions: List[ShaftRegion],
-    overlap_threshold: float = 0.50,
+    overlap_threshold: float = 0.30,
 ) -> Tuple[list, List[int]]:
     """Remove slab polygons that overlap significantly with shaft regions.
 

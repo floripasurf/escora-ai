@@ -164,9 +164,10 @@ class TestInventoryMode:
         from src.models.shore import SupportType
 
         # Heavy slab that would normally trigger MIXED (Rule 4, ≥20cm)
-        # but no towers in inventory → falls back to TELESCOPIC
+        # but no towers in inventory → falls back to TELESCOPIC.
+        # Height > 3.10m to bypass Rule 0 (baixo pé-direito → TELESCOPIC).
         support, fraction, reasons, _rule = decide_support_type(
-            required_height_m=3.0,
+            required_height_m=3.50,
             load_per_point_kn=10.0,
             slab_thickness_m=0.25,
             slab_area_m2=60.0,
@@ -304,8 +305,9 @@ class TestDerating:
         from src.models.shore import SupportType
 
         # Beam with thick slab (≥15cm) → MIXED ~35% towers
+        # Height > 3.10m to bypass Rule 0 (baixo pé-direito → TELESCOPIC)
         support, fraction, reasons, _rule = decide_support_type(
-            required_height_m=2.8,
+            required_height_m=3.50,
             load_per_point_kn=8.0,
             slab_thickness_m=0.18,
             span_m=5.0,
@@ -321,8 +323,9 @@ class TestDerating:
         from src.models.shore import SupportType
 
         # Thick slab ≥20cm → MIXED ~18% towers (not pure TOWER)
+        # Height > 3.10m to bypass Rule 0 (baixo pé-direito → TELESCOPIC)
         support, fraction, reasons, _rule = decide_support_type(
-            required_height_m=2.8,
+            required_height_m=3.50,
             load_per_point_kn=8.0,
             slab_thickness_m=0.22,
             element_type="slab",
@@ -338,8 +341,9 @@ class TestDerating:
         from src.models.shore import SupportType
 
         # Large slab ≥40m² with thin slab → MIXED ~15% towers
+        # Height > 3.10m to bypass Rule 0 (baixo pé-direito → TELESCOPIC)
         support, fraction, reasons, _rule = decide_support_type(
-            required_height_m=2.8,
+            required_height_m=3.50,
             load_per_point_kn=5.0,
             slab_thickness_m=0.12,
             element_type="slab",

@@ -51,16 +51,15 @@ HEAVY_SLAB_THICKNESS_M = 0.30       # Above this → tower with dist. beam
 SLAB_TOWER_AREA_M2 = 40.0           # ≥40m² panel → tower grid
 SLAB_TOWER_THICKNESS_M = 0.20       # ≥20cm slab → tower grid
 
-# Orguel-measured mixed tower fractions (from 12-project calibration):
-# Beams: 29-44% towers at intersections → use 0.35 (midpoint)
-# Slabs thick ≥20cm: 13-22% towers → use 0.18 (midpoint)
-# Slabs large ≥40m²: 13-22% towers → use 0.15 (conservative)
-# NOTE: these are FALLBACK fractions for the MIXED mode. The real Orguel
-# decision is structural — towers at high-load points, shores elsewhere.
-# See scripts/analyze_orguel_rules.py for the correlation analysis.
-BEAM_TOWER_FRACTION = 0.35
+# Orguel-measured mixed tower fractions (16,046 entities from 11 Orguel projects):
+# Beams: 26.6% towers at intersections → use 0.27
+# Slabs: 20.8% towers → use 0.18 (thick) / 0.18 (large)
+# NOTE: BEAM_TOWER_FRACTION is a metadata/reporting value — beam MIXED
+# placement is structural (intersection + endpoints + gap-fill), not
+# fraction-based. But it should match reality for accurate reporting.
+BEAM_TOWER_FRACTION = 0.27
 SLAB_TOWER_FRACTION_THICK = 0.18
-SLAB_TOWER_FRACTION_LARGE = 0.15
+SLAB_TOWER_FRACTION_LARGE = 0.18
 
 # Tower grid spacing for mixed mode (m) — Orguel measured: 2.55m consistent
 MIXED_TOWER_GRID_SPACING = 2.55
@@ -142,7 +141,23 @@ def decide_support_type(
         )
         return SupportType.TOWER, 1.0, reasons, "rule-1-altura"
 
+    # Rule 0: Low ceiling height — ESC310 handles everything.
+    # At ≤ 3.10m, telescopic shores (ESC310) are structurally adequate.
+    # Even if per-point load estimate seems high, the engine can always
+    # reduce spacing (add more shores) — towers are never needed here.
+    # This MUST fire before Rule 1b to prevent false tower escalation
+    # from aggressive load estimates on beams.
+    LOW_HEIGHT_TELESCOPIC_MAX_M = 3.10  # ESC310 max range
+    if required_height_m <= LOW_HEIGHT_TELESCOPIC_MAX_M:
+        reasons.append(
+            f"Pé-direito {required_height_m:.2f}m ≤ {LOW_HEIGHT_TELESCOPIC_MAX_M}m: "
+            f"escora telescópica adequada (ESC310 cobre até 3.10m, "
+            f"espaçamento reduzido compensa cargas maiores)"
+        )
+        return SupportType.TELESCOPIC, 0.0, reasons, "rule-0-baixo-pe-direito"
+
     # Rule 1b: Load-based derating check.
+    # Only relevant for heights > 3.10m where shore capacity is limited.
     if shore_catalog and load_per_point_kn > 0:
         best_cap_kn = 0.0
         for shore in shore_catalog:

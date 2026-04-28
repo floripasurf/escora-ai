@@ -74,6 +74,9 @@ def review_and_fix(
     # === PASS 4: Remove slab shores outside polygon ===
     corrections.extend(_fix_outside_polygon(calc.slab_results))
 
+    # === FINAL SAFETY NET: never output 0 shores for any element ===
+    corrections.extend(_ensure_minimum_shores(calc.beam_results, calc.slab_results))
+
     # Update totals
     calc.total_shores = (
         sum(r.shore_count for r in calc.beam_results)
@@ -129,6 +132,9 @@ def _fix_pillar_overlaps(
                     break
             if not on_pillar:
                 filtered.append(s)
+        # Never reduce to 0 — a beam always needs at least 1 shore
+        if not filtered and br.shores:
+            filtered = [br.shores[len(br.shores) // 2]]
         if len(filtered) < before:
             removed = before - len(filtered)
             br.shores = filtered
@@ -159,6 +165,9 @@ def _fix_pillar_overlaps_slab(
                     break
             if not on_pillar:
                 filtered.append(s)
+        # Never reduce to 0 — a slab always needs at least 1 shore
+        if not filtered and sr.shores:
+            filtered = [sr.shores[len(sr.shores) // 2]]
         if len(filtered) < before:
             removed = before - len(filtered)
             sr.shores = filtered
@@ -217,6 +226,9 @@ def _fix_beam_axis_overlaps(
                     break
             if not on_beam:
                 filtered.append(s)
+        # Never reduce to 0 — a slab always needs at least 1 shore
+        if not filtered and sr.shores:
+            filtered = [sr.shores[len(sr.shores) // 2]]
         if len(filtered) < before:
             removed = before - len(filtered)
             sr.shores = filtered
@@ -278,23 +290,33 @@ def _fix_global_overlaps(
     if not to_remove:
         return corrections
 
-    # Apply removals to beam results
+    # Apply removals to beam results (never reduce to 0)
     beam_removals = 0
     for bi, br in enumerate(beam_results):
         indices = {s for (t, r, s) in to_remove if t == "beam" and r == bi}
         if indices:
-            beam_removals += len(indices)
-            br.shores = [s for idx, s in enumerate(br.shores) if idx not in indices]
+            remaining = [s for idx, s in enumerate(br.shores) if idx not in indices]
+            if not remaining and br.shores:
+                remaining = [br.shores[len(br.shores) // 2]]
+            beam_removals += len(br.shores) - len(remaining)
+            br.shores = remaining
             br.shore_count = len(br.shores)
             _recalc_beam_loads(br)
 
-    # Apply removals to slab results
+    # Apply removals to slab results (never reduce below minimum)
     slab_removals = 0
     for si_r, sr in enumerate(slab_results):
         indices = {s for (t, r, s) in to_remove if t == "slab" and r == si_r}
         if indices:
-            slab_removals += len(indices)
-            sr.shores = [s for idx, s in enumerate(sr.shores) if idx not in indices]
+            remaining = [s for idx, s in enumerate(sr.shores) if idx not in indices]
+            # Minimum 1 shore per 20m² (at least 1 always)
+            min_shores = max(1, math.ceil(sr.area_m2 / 20.0))
+            if len(remaining) < min_shores and sr.shores:
+                # Keep the min_shores with highest load
+                sorted_shores = sorted(sr.shores, key=lambda s: s.load_applied_kn, reverse=True)
+                remaining = sorted_shores[:min_shores]
+            slab_removals += len(sr.shores) - len(remaining)
+            sr.shores = remaining
             _recalc_slab_loads(sr)
 
     if beam_removals > 0:
@@ -342,8 +364,8 @@ def _thin_redundant_shores(
         while True:
             if len(br.shores) <= 1:
                 break
-            # Minimum shores needed physically
-            required_n = math.ceil(total_load * SHORE_SAFETY_FACTOR / eff_cap)
+            # Minimum shores needed physically (never 0)
+            required_n = max(1, math.ceil(total_load * SHORE_SAFETY_FACTOR / eff_cap))
             if len(br.shores) <= required_n:
                 break
             # Find the tightest pair
@@ -380,11 +402,15 @@ def _thin_redundant_shores(
             continue
         total_load = sr.total_load_kn
 
+        # Minimum 1 shore per 20m² (at least 1 shore always)
+        min_shores = max(1, math.ceil(sr.area_m2 / 20.0))
+
         removed = 0
         while True:
-            if len(sr.shores) <= 1:
+            if len(sr.shores) <= min_shores:
                 break
             required_n = math.ceil(total_load * SHORE_SAFETY_FACTOR / eff_cap)
+            required_n = max(required_n, min_shores)
             if len(sr.shores) <= required_n:
                 break
             idx_to_remove = _find_closest_redundant(
@@ -446,6 +472,18 @@ def _fix_outside_polygon(
         for s in sr.shores:
             if sr.polygon.contains(Point(s.x, s.y)):
                 filtered.append(s)
+        # Never reduce to 0 — if all are outside, keep centroid shore
+        if not filtered and sr.shores:
+            centroid = sr.polygon.centroid
+            from src.models.shore import PositionedShore as _PS
+            # Place a fallback shore at polygon centroid
+            best = sr.shores[0]
+            filtered = [_PS(
+                x=round(centroid.x, 4), y=round(centroid.y, 4),
+                shore=best.shore,
+                load_applied_kn=best.load_applied_kn,
+                utilization_ratio=best.utilization_ratio,
+            )]
         if len(filtered) < before:
             removed = before - len(filtered)
             sr.shores = filtered
@@ -481,3 +519,63 @@ def _recalc_slab_loads(sr: SlabShoringResult) -> None:
     for s in sr.shores:
         s.load_applied_kn = round(load_per, 2)
         s.utilization_ratio = round(min(util, 1.0), 4)
+
+
+def _ensure_minimum_shores(
+    beam_results: List[BeamShoringResult],
+    slab_results: List[SlabShoringResult],
+) -> List[str]:
+    """Final safety net: any element with 0 shores gets a fallback at its centroid."""
+    corrections = []
+
+    for br in beam_results:
+        if br.shores or br.selected_shore is None:
+            continue
+        # Place a fallback shore at beam midpoint
+        geom = br.beam.geometry
+        if geom and len(geom) >= 2:
+            mx = (geom[0][0] + geom[-1][0]) / 2
+            my = (geom[0][1] + geom[-1][1]) / 2
+        else:
+            continue
+        beam_length = br.beam.length_m or 1.0
+        total_load = br.total_linear_load_kn_m * beam_length
+        cap = br.selected_shore.load_capacity_kn
+        util = min(total_load / cap, 1.0) if cap > 0 else 1.0
+        br.shores = [PositionedShore(
+            x=round(mx, 4), y=round(my, 4),
+            shore=br.selected_shore,
+            load_applied_kn=round(total_load, 2),
+            utilization_ratio=round(util, 4),
+        )]
+        br.shore_count = 1
+        name = br.beam.name or "sem nome"
+        corrections.append(
+            f"Revisão: viga {name} ficou com 0 escoras — colocada 1 escora "
+            f"de segurança no ponto médio"
+        )
+
+    for i, sr in enumerate(slab_results):
+        if sr.shores or sr.selected_shore is None:
+            continue
+        # Place a fallback shore at polygon centroid
+        if hasattr(sr, 'polygon') and sr.polygon is not None:
+            centroid = sr.polygon.centroid
+            cx, cy = centroid.x, centroid.y
+        else:
+            continue
+        total_load = sr.total_load_kn
+        cap = sr.selected_shore.load_capacity_kn
+        util = min(total_load / cap, 1.0) if cap > 0 else 1.0
+        sr.shores = [PositionedShore(
+            x=round(cx, 4), y=round(cy, 4),
+            shore=sr.selected_shore,
+            load_applied_kn=round(total_load, 2),
+            utilization_ratio=round(util, 4),
+        )]
+        corrections.append(
+            f"Revisão: laje {i+1} (área {sr.area_m2:.1f}m²) ficou com 0 escoras "
+            f"— colocada 1 escora de segurança no centroide"
+        )
+
+    return corrections
