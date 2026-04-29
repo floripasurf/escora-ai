@@ -2133,15 +2133,48 @@
                         const fmtNum = (n, d = 2) => Number(n).toLocaleString('pt-BR', {
                             minimumFractionDigits: d, maximumFractionDigits: d,
                         });
-                        const rows = job.consumption_summary.map(r => {
-                            const label = r.category_label || 'Laje';
-                            return `<div>\u00c1rea constru\u00edda: ${fmtNum(r.area_m2, 2)} m\u00b2 &nbsp; `
-                                + `P\u00e9 direito: ${fmtNum(r.pe_direito_m)}m (${esc(label)})`
-                                + ` \u2014 Volume: ${fmtNum(r.volume_bruto_m3, 1)} m\u00b3`
-                                + ` \u2014 Consumo: ${fmtNum(r.total_kg, 1)} kg`
-                                + ` \u2014 Taxa: ${fmtNum(r.rate_kg_m3_bruto)} kg/m\u00b3</div>`;
-                        }).join('');
-                        content += `<div class="warnings" style="background:var(--surface2);border-left:3px solid var(--accent)">${rows}</div>`;
+                        // Group rows by p\u00e9-direito for multi-height projects
+                        const byHeight = {};
+                        job.consumption_summary.forEach(r => {
+                            const key = r.pe_direito_m;
+                            if (!byHeight[key]) byHeight[key] = [];
+                            byHeight[key].push(r);
+                        });
+                        const heights = Object.keys(byHeight).sort((a, b) => Number(a) - Number(b));
+                        const multiHeight = heights.length > 1;
+                        let chtml = '';
+                        heights.forEach(h => {
+                            const group = byHeight[h];
+                            if (multiHeight) {
+                                chtml += `<div style="font-weight:600;margin-top:6px;margin-bottom:2px">P\u00e9 direito: ${fmtNum(Number(h))}m</div>`;
+                            }
+                            group.forEach(r => {
+                                const label = r.category_label || 'Laje';
+                                const indent = multiHeight ? 'padding-left:12px' : '';
+                                chtml += `<div style="${indent}">`;
+                                chtml += `\u00c1rea: ${fmtNum(r.area_m2, 2)} m\u00b2`;
+                                chtml += multiHeight
+                                    ? ` (${esc(label)})`
+                                    : ` &nbsp; P\u00e9 direito: ${fmtNum(r.pe_direito_m)}m (${esc(label)})`;
+                                chtml += ` \u2014 Volume: ${fmtNum(r.volume_bruto_m3, 1)} m\u00b3`;
+                                chtml += ` \u2014 Consumo: ${fmtNum(r.total_kg, 1)} kg`;
+                                chtml += ` \u2014 Taxa: ${fmtNum(r.rate_kg_m3_bruto)} kg/m\u00b3`;
+                                chtml += `</div>`;
+                            });
+                        });
+                        if (multiHeight) {
+                            const totArea = job.consumption_summary.reduce((s, r) => s + (r.area_m2 || 0), 0);
+                            const totVol = job.consumption_summary.reduce((s, r) => s + (r.volume_bruto_m3 || 0), 0);
+                            const totKg = job.consumption_summary.reduce((s, r) => s + (r.total_kg || 0), 0);
+                            const totRate = totVol > 0 ? totKg / totVol : 0;
+                            chtml += `<div style="font-weight:700;margin-top:6px;border-top:1px solid var(--border);padding-top:4px">`;
+                            chtml += `Total: \u00c1rea: ${fmtNum(totArea, 2)} m\u00b2`;
+                            chtml += ` \u2014 Volume: ${fmtNum(totVol, 1)} m\u00b3`;
+                            chtml += ` \u2014 Consumo: ${fmtNum(totKg, 1)} kg`;
+                            chtml += ` \u2014 Taxa: ${fmtNum(totRate)} kg/m\u00b3`;
+                            chtml += `</div>`;
+                        }
+                        content += `<div class="warnings" style="background:var(--surface2);border-left:3px solid var(--accent)">${chtml}</div>`;
                     }
 
                     if (job.has_validated) {
