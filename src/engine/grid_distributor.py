@@ -229,8 +229,10 @@ def distribute_shores(
 
     # Usar o polígono real da laje para verificar contenção.
     # A distância da borda já é garantida pelo grid (start_x/y com offset).
-    # Não aplicar buffer negativo aqui para não duplicar o recuo.
-    polygon_check = slab.polygon
+    # Small positive buffer (5cm) on the polygon prevents grid points from
+    # being rejected at slightly irregular edges — for rectangular buildings
+    # this keeps the grid strictly orthogonal without holes.
+    polygon_check = slab.polygon.buffer(0.05)
 
     shores: List[PositionedShore] = []
     start_x = bb.min_x + DISTANCIA_BORDA_MIN

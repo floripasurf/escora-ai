@@ -636,9 +636,10 @@ def run_calculation(
                 f"(cortes, detalhes, elevações)"
             )
 
-    # Pillar hull clamp for beams: discard beams whose midpoint is far
-    # outside the structural footprint (convex hull of pillars).
-    _BEAM_HULL_MARGIN = 3.0
+    # Pillar hull clamp for beams: discard beams whose line doesn't touch
+    # the structural footprint (convex hull of pillars + margin).
+    # Uses intersects() instead of contains() to keep perimeter beams.
+    _BEAM_HULL_MARGIN = 5.0  # generous margin for perimeter/cantilever beams
     _pillar_pts_beam = [
         p.geometry[0] for p in pillars
         if p.element_type == ElementType.PILLAR and p.geometry
@@ -650,11 +651,8 @@ def run_calculation(
         before_hull_b = len(valid_beams)
         valid_beams = [
             b for b in valid_beams
-            if len(b.geometry) < 2 or _beam_hull_buf.contains(
-                _Pt(
-                    (b.geometry[0][0] + b.geometry[1][0]) / 2,
-                    (b.geometry[0][1] + b.geometry[1][1]) / 2,
-                )
+            if len(b.geometry) < 2 or _beam_hull_buf.intersects(
+                LineString([b.geometry[0], b.geometry[1]])
             )
         ]
         removed_hull_b = before_hull_b - len(valid_beams)
@@ -1159,7 +1157,7 @@ def run_calculation(
     # the structural footprint (convex hull of pillars). Detail views, section
     # cuts, title blocks, and engineer notes produce phantom slabs that pass
     # spatial clustering when they're adjacent to the main plan.
-    _HULL_MARGIN = 3.0  # m — tolerance for perimeter slabs slightly outside pillars
+    _HULL_MARGIN = 5.0  # m — generous tolerance for perimeter/cantilever slabs
     pillar_pts_for_hull = [
         p.geometry[0] for p in pillars
         if p.element_type == ElementType.PILLAR and p.geometry
@@ -1171,23 +1169,20 @@ def run_calculation(
         before_hull = len(slab_polygons)
         kept_slabs = []
         for sp in slab_polygons:
-            centroid = sp.centroid
-            if _hull_buffered.contains(Point(centroid.x, centroid.y)):
+            # Keep slab if ANY part of it overlaps the hull (generous — only
+            # discard slabs that are completely outside the structural footprint)
+            try:
+                overlaps = sp.intersects(_hull_buffered)
+            except Exception:
+                overlaps = True  # keep on error
+            if overlaps:
                 kept_slabs.append(sp)
             else:
-                # Also keep if > 30% of slab area overlaps the hull (edge slabs)
-                try:
-                    overlap = sp.intersection(_hull_buffered).area / sp.area if sp.area > 0 else 0
-                except Exception:
-                    overlap = 0
-                if overlap >= 0.30:
-                    kept_slabs.append(sp)
-                else:
-                    logger.info(
-                        f"Pillar hull clamp: discarded slab area={sp.area:.1f}m² "
-                        f"centroid=({centroid.x:.1f}, {centroid.y:.1f}) — "
-                        f"outside structural footprint"
-                    )
+                logger.info(
+                    f"Pillar hull clamp: discarded slab area={sp.area:.1f}m² "
+                    f"centroid=({sp.centroid.x:.1f}, {sp.centroid.y:.1f}) — "
+                    f"outside structural footprint"
+                )
         slab_polygons = kept_slabs
         removed_hull = before_hull - len(slab_polygons)
         if removed_hull > 0:

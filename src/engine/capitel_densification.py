@@ -23,7 +23,7 @@ existentes são respeitadas (não duplicamos).
 """
 
 import math
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from shapely.geometry import Point, Polygon
 
@@ -45,9 +45,17 @@ def _is_clear(
     polygon: Polygon,
     existing_shores: List[PositionedShore],
     candidates: List[PositionedShore],
+    pillar_positions: Optional[List[Tuple[float, float]]] = None,
 ) -> bool:
     if not polygon.contains(Point(x, y)):
         return False
+    # Enforce minimum distance from ALL pillar faces (not just the
+    # pillar that generated this offset). Prevents shores landing
+    # right next to a neighboring pillar.
+    if pillar_positions:
+        for px, py in pillar_positions:
+            if math.hypot(x - px, y - py) < DISTANCIA_PILAR_MIN - 1e-6:
+                return False
     for s in existing_shores:
         if math.hypot(s.x - x, s.y - y) < _CAPITEL_DEDUP_MIN_DIST_M:
             return False
@@ -121,7 +129,7 @@ def capitel_densification_shores(
         for dx, dy in offsets:
             x = cx + dx
             y = cy + dy
-            if not _is_clear(x, y, polygon, existing_shores, extra):
+            if not _is_clear(x, y, polygon, existing_shores, extra, pillar_positions):
                 continue
             extra.append(PositionedShore(
                 x=round(x, 4),
