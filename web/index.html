@@ -2136,6 +2136,7 @@
                         const rows = job.consumption_summary.map(r => {
                             const label = r.category_label || 'Laje';
                             return `<div>P\u00e9 direito: ${fmtNum(r.pe_direito_m)}m (${esc(label)})`
+                                + ` \u2014 Volume: ${fmtNum(r.volume_bruto_m3, 1)} m\u00b3`
                                 + ` \u2014 Consumo: ${fmtNum(r.total_kg, 1)} kg`
                                 + ` \u2014 Taxa: ${fmtNum(r.rate_kg_m3_bruto)} kg/m\u00b3</div>`;
                         }).join('');
