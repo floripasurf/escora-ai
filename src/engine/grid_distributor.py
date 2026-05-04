@@ -173,6 +173,7 @@ def distribute_shores(
     max_spacing: float = ESPACAMENTO_MAX_DEFAULT,
     exclusions: Optional[List[PillarExclusion]] = None,
     floor_height_m: Optional[float] = None,
+    global_origin: Optional[Tuple[float, float]] = None,
 ) -> Tuple[List[PositionedShore], int, int, float, float]:
     """
     Distribui escoras em grid regular sobre a laje.
@@ -186,6 +187,10 @@ def distribute_shores(
     na carga real (espessura da laje + capacidade derateada da escora). O
     max_spacing passado funciona como TETO — o espaçamento adaptativo nunca
     ultrapassa o max_spacing.
+
+    Quando global_origin é fornecido, o grid é alinhado a esse ponto global
+    em vez do bounding box individual — garante alinhamento entre lajes
+    adjacentes.
 
     Suporta polígonos com qualquer número de lados e ângulos não retos.
 
@@ -223,10 +228,6 @@ def distribute_shores(
         )
         effective_spacing = min(adaptive, max_spacing)
 
-    nx, ny, spacing_x, spacing_y = calculate_grid_dimensions(
-        width, height, effective_spacing
-    )
-
     # Usar o polígono real da laje para verificar contenção.
     # A distância da borda já é garantida pelo grid (start_x/y com offset).
     # Small positive buffer (5cm) on the polygon prevents grid points from
@@ -235,13 +236,42 @@ def distribute_shores(
     polygon_check = slab.polygon.buffer(0.05)
 
     shores: List[PositionedShore] = []
-    start_x = bb.min_x + DISTANCIA_BORDA_MIN
-    start_y = bb.min_y + DISTANCIA_BORDA_MIN
 
-    for i in range(nx):
-        for j in range(ny):
-            x = start_x + i * spacing_x if nx > 1 else bb.min_x + width / 2
-            y = start_y + j * spacing_y if ny > 1 else bb.min_y + height / 2
+    # Grid alignment: when global_origin is provided, use a FIXED spacing
+    # (effective_spacing) and snap grid lines to global coordinates so
+    # adjacent slabs share exactly the same grid lines.
+    if global_origin is not None:
+        spacing_x = effective_spacing
+        spacing_y = effective_spacing
+        ox, oy = global_origin
+        # First grid line >= bb.min_x + DISTANCIA_BORDA_MIN
+        first_nx = math.ceil((bb.min_x + DISTANCIA_BORDA_MIN - ox) / spacing_x) if spacing_x > 0 else 0
+        first_ny = math.ceil((bb.min_y + DISTANCIA_BORDA_MIN - oy) / spacing_y) if spacing_y > 0 else 0
+        # Last grid line <= bb.max_x - DISTANCIA_BORDA_MIN
+        last_nx = math.floor((bb.max_x - DISTANCIA_BORDA_MIN - ox) / spacing_x) if spacing_x > 0 else 0
+        last_ny = math.floor((bb.max_y - DISTANCIA_BORDA_MIN - oy) / spacing_y) if spacing_y > 0 else 0
+
+        grid_xs = [ox + n * spacing_x for n in range(first_nx, last_nx + 1)]
+        grid_ys = [oy + n * spacing_y for n in range(first_ny, last_ny + 1)]
+
+        if not grid_xs:
+            grid_xs = [bb.min_x + width / 2]
+        if not grid_ys:
+            grid_ys = [bb.min_y + height / 2]
+
+        nx = len(grid_xs)
+        ny = len(grid_ys)
+    else:
+        nx, ny, spacing_x, spacing_y = calculate_grid_dimensions(
+            width, height, effective_spacing
+        )
+        start_x = bb.min_x + DISTANCIA_BORDA_MIN
+        start_y = bb.min_y + DISTANCIA_BORDA_MIN
+        grid_xs = [start_x + i * spacing_x if nx > 1 else bb.min_x + width / 2 for i in range(nx)]
+        grid_ys = [start_y + j * spacing_y if ny > 1 else bb.min_y + height / 2 for j in range(ny)]
+
+    for x in grid_xs:
+        for y in grid_ys:
 
             point = Point(x, y)
 

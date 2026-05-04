@@ -46,7 +46,7 @@ from src.ml.predictor import ShoringPredictor
 from src.utils.constants import (
     GAMMA_F, Q_SOBRECARGA_DEFAULT, ESPESSURA_DEFAULT, ALTURA_DEFAULT,
     ESPACAMENTO_MAX_DEFAULT, ESPACAMENTO_MAX_VIGA, ESPACAMENTO_POR_ALTURA,
-    CONTRA_FLECHA, DISTANCIA_BORDA_MIN,
+    CONTRA_FLECHA, DISTANCIA_BORDA_MIN, ESPACAMENTO_MIN,
 )
 
 logger = logging.getLogger(__name__)
@@ -1441,6 +1441,14 @@ def run_calculation(
                 continue
         return best_layer
 
+    # Compute global grid origin: the minimum (x, y) across all slab bounding
+    # boxes, offset by DISTANCIA_BORDA_MIN.  All slab grids snap to this origin
+    # so shores align across adjacent compartments.
+    _all_bounds = [p.bounds for p in slab_polygons]
+    _global_ox = min(b[0] for b in _all_bounds) + DISTANCIA_BORDA_MIN
+    _global_oy = min(b[1] for b in _all_bounds) + DISTANCIA_BORDA_MIN
+    _global_origin = (_global_ox, _global_oy)
+
     for i, polygon in enumerate(slab_polygons):
         is_cantilever = cantilever_flags[i] if i < len(cantilever_flags) else False
         panel_layer = _layer_for_polygon(polygon)
@@ -1698,6 +1706,7 @@ def run_calculation(
             max_spacing=max_spacing,
             exclusions=all_exclusions,
             floor_height_m=slab_shore_height,
+            global_origin=_global_origin,
         )
 
         # === MIXED SLAB SUPPORT ===
@@ -1890,6 +1899,45 @@ def run_calculation(
                 for s in sr.shores:
                     s.load_applied_kn = round(load_per, 2)
                     s.utilization_ratio = round(util, 4)
+
+    # === CROSS-SLAB DEDUPLICATION ===
+    # With global grid alignment, overlapping slab polygons produce shores at
+    # identical or near-identical positions. Remove shores from larger slabs
+    # (processed later) that are too close to shores from smaller slabs
+    # (processed earlier, more precise beam-grid panels).
+    MIN_CROSS_SLAB_DIST = ESPACAMENTO_MIN  # 0.30m
+    # Sort slab results by area ascending — smaller slabs have priority
+    slab_order = sorted(range(len(slab_results)), key=lambda k: slab_results[k].area_m2)
+    # Build set of all "claimed" shore positions (from smaller slabs first)
+    claimed_positions: list = []
+    for si in slab_order:
+        sr = slab_results[si]
+        filtered = []
+        for ss in sr.shores:
+            too_close = False
+            for cx, cy in claimed_positions:
+                if math.hypot(ss.x - cx, ss.y - cy) < MIN_CROSS_SLAB_DIST:
+                    too_close = True
+                    break
+            if not too_close:
+                filtered.append(ss)
+                claimed_positions.append((ss.x, ss.y))
+        if len(filtered) < len(sr.shores):
+            if not filtered and sr.shores:
+                filtered = [sr.shores[len(sr.shores) // 2]]
+                claimed_positions.append((filtered[0].x, filtered[0].y))
+            removed = len(sr.shores) - len(filtered)
+            sr.shores = filtered
+            if sr.shores and sr.total_load_kn > 0:
+                load_per = sr.total_load_kn / len(sr.shores)
+                util = load_per / (sr.selected_shore.load_capacity_kn if sr.selected_shore else 1)
+                for s in sr.shores:
+                    s.load_applied_kn = round(load_per, 2)
+                    s.utilization_ratio = round(util, 4)
+            logger.info(
+                f"Cross-slab dedup: removed {removed} shores from slab "
+                f"area={sr.area_m2:.1f}m²"
+            )
 
     # === CROSS-BEAM DEDUPLICATION ===
     # At beam intersections, shores from different beams cluster together.

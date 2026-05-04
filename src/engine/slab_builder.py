@@ -704,18 +704,23 @@ def merge_slab_sources(
     merged = list(beam_slabs)
 
     for bslab in boundary_slabs:
-        is_covered = False
+        # Check CUMULATIVE coverage: a large boundary slab may partially
+        # overlap many small beam-grid slabs (each <50%), but combined they
+        # cover most of its area.  We union all intersections and compare
+        # against the boundary slab's total area.
+        intersection_parts = []
         for existing in merged:
             try:
-                intersection = bslab.intersection(existing)
-                overlap = intersection.area / bslab.area if bslab.area > 0 else 0
-                if overlap >= DEDUP_OVERLAP_RATIO:
-                    is_covered = True
-                    break
+                ix = bslab.intersection(existing)
+                if not ix.is_empty and ix.area > 0:
+                    intersection_parts.append(ix)
             except Exception:
                 continue
-        if is_covered:
-            continue
+        if intersection_parts:
+            cumulative = unary_union(intersection_parts)
+            overlap = cumulative.area / bslab.area if bslab.area > 0 else 0
+            if overlap >= DEDUP_OVERLAP_RATIO:
+                continue
         # Validate proximity to beams when available
         if beam_lines and not _slab_near_beams(bslab, beam_lines, beam_proximity_buffer):
             logger.warning(
