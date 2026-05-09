@@ -1,0 +1,218 @@
+# Maximum barrote spacing by slab thickness x plywood thickness — Supplier p.89
+# "Espaçamentos máximos entre vigas secundárias para diversos compensados em cm"
+# segundo NBR 15696 — para 2 / 3+ apoios
+#
+# Format: each entry has bi_apoiada (2 supports) and continua (3+ supports)
+# values in cm.
+
+rows:
+  - slab_cm: 8
+    load_kgf_m2: 408
+    spans:
+      12: { bi: 42, cont: 50 }
+      14: { bi: 48, cont: 61 }
+      15: { bi: 50, cont: 61 }
+      17: { bi: 58, cont: 69 }
+      18: { bi: 61, cont: 71 }
+      20: { bi: 68, cont: 84 }
+      21: { bi: 71, cont: 84 }
+  - slab_cm: 9
+    load_kgf_m2: 434
+    spans:
+      12: { bi: 41, cont: 49 }
+      14: { bi: 48, cont: 49 }
+      15: { bi: 50, cont: 60 }
+      17: { bi: 57, cont: 68 }
+      18: { bi: 60, cont: 70 }
+      20: { bi: 66, cont: 79 }
+      21: { bi: 70, cont: 82 }
+  - slab_cm: 10
+    load_kgf_m2: 459
+    spans:
+      12: { bi: 40, cont: 49 }
+      14: { bi: 47, cont: 49 }
+      15: { bi: 50, cont: 60 }
+      17: { bi: 55, cont: 67 }
+      18: { bi: 59, cont: 69 }
+      20: { bi: 65, cont: 77 }
+      21: { bi: 68, cont: 80 }
+  - slab_cm: 11
+    load_kgf_m2: 485
+    spans:
+      12: { bi: 39, cont: 48 }
+      14: { bi: 46, cont: 48 }
+      15: { bi: 49, cont: 59 }
+      17: { bi: 54, cont: 66 }
+      18: { bi: 58, cont: 68 }
+      20: { bi: 64, cont: 76 }
+      21: { bi: 67, cont: 79 }
+  - slab_cm: 12
+    load_kgf_m2: 510
+    spans:
+      12: { bi: 38, cont: 47 }
+      14: { bi: 45, cont: 47 }
+      15: { bi: 48, cont: 59 }
+      17: { bi: 53, cont: 64 }
+      18: { bi: 57, cont: 67 }
+      20: { bi: 63, cont: 75 }
+      21: { bi: 66, cont: 78 }
+  - slab_cm: 13
+    load_kgf_m2: 536
+    spans:
+      12: { bi: 38, cont: 46 }
+      14: { bi: 44, cont: 46 }
+      15: { bi: 47, cont: 58 }
+      17: { bi: 53, cont: 64 }
+      18: { bi: 56, cont: 66 }
+      20: { bi: 62, cont: 74 }
+      21: { bi: 65, cont: 77 }
+  - slab_cm: 14
+    load_kgf_m2: 561
+    spans:
+      12: { bi: 37, cont: 45 }
+      14: { bi: 44, cont: 46 }
+      15: { bi: 47, cont: 57 }
+      17: { bi: 52, cont: 63 }
+      18: { bi: 55, cont: 64 }
+      20: { bi: 61, cont: 73 }
+      21: { bi: 64, cont: 76 }
+  - slab_cm: 15
+    load_kgf_m2: 587
+    spans:
+      12: { bi: 37, cont: 45 }
+      14: { bi: 43, cont: 45 }
+      15: { bi: 46, cont: 56 }
+      17: { bi: 51, cont: 62 }
+      18: { bi: 54, cont: 63 }
+      20: { bi: 60, cont: 72 }
+      21: { bi: 63, cont: 75 }
+  - slab_cm: 16
+    load_kgf_m2: 612
+    spans:
+      12: { bi: 36, cont: 44 }
+      14: { bi: 42, cont: 44 }
+      15: { bi: 45, cont: 55 }
+      17: { bi: 50, cont: 61 }
+      18: { bi: 53, cont: 62 }
+      20: { bi: 60, cont: 71 }
+      21: { bi: 62, cont: 74 }
+  - slab_cm: 18
+    load_kgf_m2: 663
+    spans:
+      12: { bi: 35, cont: 43 }
+      14: { bi: 41, cont: 43 }
+      15: { bi: 44, cont: 54 }
+      17: { bi: 50, cont: 60 }
+      18: { bi: 52, cont: 62 }
+      20: { bi: 58, cont: 70 }
+      21: { bi: 61, cont: 72 }
+  - slab_cm: 20
+    load_kgf_m2: 714
+    spans:
+      12: { bi: 34, cont: 42 }
+      14: { bi: 40, cont: 42 }
+      15: { bi: 43, cont: 52 }
+      17: { bi: 49, cont: 59 }
+      18: { bi: 51, cont: 61 }
+      20: { bi: 56, cont: 69 }
+      21: { bi: 59, cont: 70 }
+  - slab_cm: 22
+    load_kgf_m2: 765
+    spans:
+      12: { bi: 33, cont: 41 }
+      14: { bi: 39, cont: 41 }
+      15: { bi: 42, cont: 51 }
+      17: { bi: 48, cont: 58 }
+      18: { bi: 51, cont: 60 }
+      20: { bi: 55, cont: 66 }
+      21: { bi: 58, cont: 69 }
+  - slab_cm: 25
+    load_kgf_m2: 842
+    spans:
+      12: { bi: 33, cont: 40 }
+      14: { bi: 38, cont: 40 }
+      15: { bi: 41, cont: 50 }
+      17: { bi: 46, cont: 56 }
+      18: { bi: 49, cont: 60 }
+      20: { bi: 53, cont: 65 }
+      21: { bi: 56, cont: 67 }
+  - slab_cm: 28
+    load_kgf_m2: 918
+    spans:
+      12: { bi: 32, cont: 39 }
+      14: { bi: 37, cont: 39 }
+      15: { bi: 40, cont: 48 }
+      17: { bi: 45, cont: 55 }
+      18: { bi: 48, cont: 58 }
+      20: { bi: 52, cont: 63 }
+      21: { bi: 54, cont: 64 }
+  - slab_cm: 30
+    load_kgf_m2: 969
+    spans:
+      12: { bi: 31, cont: 38 }
+      14: { bi: 36, cont: 38 }
+      15: { bi: 39, cont: 47 }
+      17: { bi: 44, cont: 54 }
+      18: { bi: 47, cont: 57 }
+      20: { bi: 51, cont: 62 }
+      21: { bi: 53, cont: 64 }
+  - slab_cm: 35
+    load_kgf_m2: 1097
+    spans:
+      12: { bi: 30, cont: 36 }
+      14: { bi: 35, cont: 36 }
+      15: { bi: 37, cont: 46 }
+      17: { bi: 42, cont: 51 }
+      18: { bi: 45, cont: 54 }
+      20: { bi: 50, cont: 60 }
+      21: { bi: 51, cont: 62 }
+  - slab_cm: 40
+    load_kgf_m2: 1224
+    spans:
+      12: { bi: 29, cont: 35 }
+      14: { bi: 33, cont: 35 }
+      15: { bi: 36, cont: 44 }
+      17: { bi: 41, cont: 50 }
+      18: { bi: 43, cont: 53 }
+      20: { bi: 48, cont: 58 }
+      21: { bi: 50, cont: 60 }
+  - slab_cm: 50
+    load_kgf_m2: 1479
+    spans:
+      12: { bi: 27, cont: 33 }
+      14: { bi: 31, cont: 33 }
+      15: { bi: 34, cont: 41 }
+      17: { bi: 38, cont: 47 }
+      18: { bi: 41, cont: 49 }
+      20: { bi: 45, cont: 55 }
+      21: { bi: 47, cont: 57 }
+  - slab_cm: 60
+    load_kgf_m2: 1734
+    spans:
+      12: { bi: 25, cont: 31 }
+      14: { bi: 30, cont: 31 }
+      15: { bi: 32, cont: 39 }
+      17: { bi: 36, cont: 44 }
+      18: { bi: 38, cont: 47 }
+      20: { bi: 43, cont: 52 }
+      21: { bi: 45, cont: 54 }
+  - slab_cm: 80
+    load_kgf_m2: 2244
+    spans:
+      12: { bi: 23, cont: 29 }
+      14: { bi: 27, cont: 29 }
+      15: { bi: 29, cont: 36 }
+      17: { bi: 34, cont: 40 }
+      18: { bi: 35, cont: 43 }
+      20: { bi: 39, cont: 48 }
+      21: { bi: 41, cont: 50 }
+  - slab_cm: 100
+    load_kgf_m2: 2754
+    spans:
+      12: { bi: 22, cont: 27 }
+      14: { bi: 25, cont: 27 }
+      15: { bi: 27, cont: 33 }
+      17: { bi: 31, cont: 38 }
+      18: { bi: 33, cont: 40 }
+      20: { bi: 37, cont: 44 }
+      21: { bi: 38, cont: 47 }

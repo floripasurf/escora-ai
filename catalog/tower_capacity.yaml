@@ -1,0 +1,33 @@
+# Tower capacity curve — Supplier p.86
+# Capacity decreases with number of 1.5m modules (Euler buckling).
+# Units: height in meters, capacity in kN.
+#
+# NOTE: Module 14 shows 1500 kN in the PDF but this breaks the
+# monotonic curve. Almost certainly a typo for 1590. Flagged as
+# TODO(engineer-confirmation). Until confirmed, system flags any
+# 14-module placement for engineer review.
+
+description: "Torre de escoramento Supplier — curva de capacidade por módulos"
+module_height_m: 1.5
+
+curve:
+  - { modules: 1,  height_m: 1.5,  capacity_kn: 2000 }
+  - { modules: 2,  height_m: 3.0,  capacity_kn: 1900 }
+  - { modules: 3,  height_m: 4.5,  capacity_kn: 1850 }
+  - { modules: 4,  height_m: 6.0,  capacity_kn: 1800 }
+  - { modules: 5,  height_m: 7.5,  capacity_kn: 1770 }
+  - { modules: 6,  height_m: 9.0,  capacity_kn: 1750 }
+  - { modules: 7,  height_m: 10.5, capacity_kn: 1730 }
+  - { modules: 8,  height_m: 12.0, capacity_kn: 1710 }
+  - { modules: 9,  height_m: 13.5, capacity_kn: 1690 }
+  - { modules: 10, height_m: 15.0, capacity_kn: 1670 }
+  - { modules: 11, height_m: 16.5, capacity_kn: 1650 }
+  - { modules: 12, height_m: 18.0, capacity_kn: 1630 }
+  - { modules: 13, height_m: 19.5, capacity_kn: 1610 }
+  - { modules: 14, height_m: 21.0, capacity_kn: 1590 }  # PDF shows 1500 — suspected typo, using 1590 (TODO: confirm with Supplier)
+  - { modules: 15, height_m: 22.5, capacity_kn: 1570 }
+  - { modules: 16, height_m: 24.0, capacity_kn: 1550 }
+  - { modules: 17, height_m: 25.5, capacity_kn: 1530 }
+  - { modules: 18, height_m: 27.0, capacity_kn: 1510 }
+  - { modules: 19, height_m: 28.5, capacity_kn: 1490 }
+  - { modules: 20, height_m: 30.0, capacity_kn: 1470 }
