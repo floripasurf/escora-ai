@@ -1,0 +1,18 @@
+# Compensado (plywood) properties — Orguel p.78
+# Standard format: 1220 x 2440 mm
+# Length-multiples for seam alignment: 220 mm or 244 mm
+
+material_properties:
+  sigma_adm_kgf_cm2: 110      # Admissible flexural stress
+  E_m_kgf_cm2: 68200          # Average modulus of elasticity
+  standard_format_mm: [1220, 2440]
+  seam_multiples_mm: [220, 244]
+
+thicknesses:
+  - { e_mm: 12, M_adm_kgf_m_m: 26,  EI_kgf_m2_m: 98,   self_weight_kg_m2: 7.0 }
+  - { e_mm: 14, M_adm_kgf_m_m: 36,  EI_kgf_m2_m: 156,  self_weight_kg_m2: 8.0 }
+  - { e_mm: 15, M_adm_kgf_m_m: 41,  EI_kgf_m2_m: 192,  self_weight_kg_m2: 9.0 }
+  - { e_mm: 17, M_adm_kgf_m_m: 53,  EI_kgf_m2_m: 279,  self_weight_kg_m2: 10.0 }
+  - { e_mm: 18, M_adm_kgf_m_m: 60,  EI_kgf_m2_m: 331,  self_weight_kg_m2: 10.5 }
+  - { e_mm: 20, M_adm_kgf_m_m: 73,  EI_kgf_m2_m: 455,  self_weight_kg_m2: 12.0 }
+  - { e_mm: 21, M_adm_kgf_m_m: 81,  EI_kgf_m2_m: 526,  self_weight_kg_m2: 12.5 }

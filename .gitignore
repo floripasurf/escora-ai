@@ -39,3 +39,11 @@ input/**/*.dxf
 input/**/*.DXF
 input/**/*.pdf
 input/**/*.docx
+input/Prints/
+
+# Archives
+*.zip
+
+# Analysis data (local only)
+data/analysis/
+diagnostics/

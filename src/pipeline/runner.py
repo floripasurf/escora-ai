@@ -459,7 +459,18 @@ def run_pipeline(
         calculation=calculation,
     )
 
-    # Stage 6: Learning — save what we learned from this run
+    # Stage 6: Rule verification (feature flag: ESCORA_RUN_RULES, default on)
+    import os
+    if os.environ.get("ESCORA_RUN_RULES", "1") != "0" and result.calculation is not None:
+        try:
+            from src.rules import REGISTRY
+            from src.rules.project import RuleProject
+            rule_project = RuleProject.from_pipeline_result(result)
+            result.violations = REGISTRY.check_all(rule_project)
+        except Exception as e:
+            logger.warning(f"Rule verification failed (non-fatal): {e}")
+
+    # Stage 7: Learning — save what we learned from this run
     try:
         learn_and_save(result, level_segments=level_segments, store=store, source_dxf_path=filepath)
     except Exception as e:
