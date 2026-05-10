@@ -7,6 +7,7 @@ build/
 .eggs/
 *.egg
 .venv/
+.venv*/
 venv/
 env/
 .env
@@ -31,6 +32,8 @@ input/*.key
 output/
 !src/output/
 !tests/output/
+diagnostics/_unittest_inventory/
+diagnostics/*/*/
 uploads/
 .vercel
 data/*.db
