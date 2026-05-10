@@ -60,8 +60,8 @@ class TestCapitelNeverBecomesTower:
     def test_tower_shores_not_in_capitel_ring(self):
         """No TOWER shore may lie within 1.50m of any pillar."""
         elements, pillar_xy = _large_slab_elements()
-        # pe_direito > 3.10m to bypass Rule 0 (baixo pé-direito → TELESCOPIC)
-        result = run_calculation(elements, pe_direito_m=3.50,
+        # pe_direito > 3.50m to exercise the mixed-support height band.
+        result = run_calculation(elements, pe_direito_m=3.80,
                                  slab_thickness_m=0.12)
 
         # Only MIXED slabs exercise the bug; at least one must be MIXED
