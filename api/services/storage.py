@@ -8,6 +8,21 @@ from fastapi import HTTPException, UploadFile
 from api.config import settings
 
 CHUNK_SIZE = 1024 * 1024  # 1 MiB per read
+ALLOWED_UPLOAD_EXTENSIONS = {".dxf", ".dwg", ".pdf", ".csv", ".xlsx", ".xls", ".json"}
+
+
+def safe_upload_filename(filename: str) -> str:
+    """Return a filesystem-safe basename for a user supplied upload name."""
+    name = Path(filename or "upload.bin").name.strip()
+    if not name or name in {".", ".."}:
+        raise HTTPException(status_code=400, detail="Nome de arquivo inválido")
+    sanitized = "".join(c if c.isalnum() or c in "._- " else "_" for c in name)
+    if not sanitized or sanitized in {".", ".."}:
+        raise HTTPException(status_code=400, detail="Nome de arquivo inválido")
+    suffix = Path(sanitized).suffix.lower()
+    if suffix and suffix not in ALLOWED_UPLOAD_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Extensão de arquivo não permitida")
+    return sanitized
 
 
 def save_upload(file_content: bytes, filename: str, job_id: str) -> str:
@@ -15,7 +30,7 @@ def save_upload(file_content: bytes, filename: str, job_id: str) -> str:
     (e.g. revision files). Prefer `save_upload_stream` for user-uploaded DXFs."""
     upload_dir = Path(settings.upload_dir) / job_id
     upload_dir.mkdir(parents=True, exist_ok=True)
-    dest = upload_dir / filename
+    dest = upload_dir / safe_upload_filename(filename)
     dest.write_bytes(file_content)
     return str(dest)
 
@@ -31,7 +46,7 @@ async def save_upload_stream(
     """
     upload_dir = Path(settings.upload_dir) / job_id
     upload_dir.mkdir(parents=True, exist_ok=True)
-    dest = upload_dir / filename
+    dest = upload_dir / safe_upload_filename(filename)
 
     total = 0
     try:

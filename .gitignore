@@ -13,8 +13,11 @@ env/
 .pytest_cache/
 .coverage
 htmlcov/
+/*.pdf
+/*.pptx
 *.dxf.bak
 .DS_Store
+data/locadoras.json
 data/learning.json
 data/learning/
 

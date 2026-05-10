@@ -10,7 +10,7 @@ Login flow:
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Header, HTTPException, Request, status
 from pydantic import BaseModel
 
 from src.auth.branches import (
@@ -23,7 +23,7 @@ from src.auth.branches import (
     resolve_session,
     revoke_session,
 )
-from api.deps import get_current_branch
+from api.services.rate_limit import check_rate_limit, log_auth_event
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -63,20 +63,25 @@ class LoginResponse(BaseModel):
 
 
 @router.post("/login", response_model=LoginResponse)
-async def login(body: LoginRequest):
-    user = authenticate_user(body.username.strip().lower(), body.password)
+async def login(body: LoginRequest, request: Request):
+    username = body.username.strip().lower()
+    check_rate_limit(request, action="login", identifier=username)
+    user = authenticate_user(username, body.password)
     if user is None:
+        log_auth_event("login", username, "failed")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Usuário ou senha inválidos",
         )
     locadora = get_locadora_of_user(user.username)
     if locadora is None or not locadora.branches:
+        log_auth_event("login", username, "forbidden")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Usuário sem unidades disponíveis",
         )
     token = create_session(user)
+    log_auth_event("login", username, "success")
     return LoginResponse(
         token=token,
         username=user.username,
@@ -96,26 +101,33 @@ async def login(body: LoginRequest):
 
 
 @router.post("/signup")
-async def signup(body: SignupRequest):
+async def signup(body: SignupRequest, request: Request):
+    email = body.email.strip().lower()
+    check_rate_limit(request, action="signup", identifier=email)
     if not body.name or not body.email or not body.password:
+        log_auth_event("signup", email, "invalid")
         raise HTTPException(status_code=400, detail="Nome, email e senha são obrigatórios")
     if len(body.password) < 6:
+        log_auth_event("signup", email, "invalid")
         raise HTTPException(status_code=400, detail="A senha precisa ter ao menos 6 caracteres")
     import re
     if not re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", body.email.strip()):
+        log_auth_event("signup", email, "invalid")
         raise HTTPException(status_code=400, detail="Email inválido")
     user = create_user(
         name=body.name,
-        email=body.email,
+        email=email,
         company=body.company,
         phone=body.phone,
         password=body.password,
     )
     if user is None:
+        log_auth_event("signup", email, "conflict")
         raise HTTPException(status_code=409, detail="Este email já está cadastrado")
     # Auto-login after signup
     token = create_session(user)
     locadora = get_locadora_of_user(user.username)
+    log_auth_event("signup", email, "success")
     return LoginResponse(
         token=token,
         username=user.username,

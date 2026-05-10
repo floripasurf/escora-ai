@@ -4,10 +4,12 @@ import logging
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi import Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
+from api.deps import get_current_branch
 from api.routes.jobs import router as jobs_router
 from api.routes.auth import router as auth_router
 from api.routes.projects import router as projects_router
@@ -15,6 +17,7 @@ from api.routes.design import router as design_router
 from api.routes.drawing import router as drawing_router
 from api.config import settings
 from api.services import job_service
+from api.services import project_store
 
 logger = logging.getLogger(__name__)
 
@@ -22,16 +25,42 @@ app = FastAPI(title="Escora.AI", version="0.3.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://estrutura.app",
+        "https://www.estrutura.app",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    # Inline scripts/styles are still present in the static MVP frontend.
+    # Escora-2 should move them to static files and remove 'unsafe-inline'.
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: https:; "
+        "connect-src 'self' https://escora-ai.fly.dev https://estrutura.app https://www.estrutura.app; "
+        "frame-ancestors 'none'",
+    )
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    return response
+
 app.include_router(auth_router)
 app.include_router(jobs_router)
-app.include_router(projects_router)
-app.include_router(design_router)
-app.include_router(drawing_router)
+app.include_router(projects_router, dependencies=[Depends(get_current_branch)])
+app.include_router(design_router, dependencies=[Depends(get_current_branch)])
+app.include_router(drawing_router, dependencies=[Depends(get_current_branch)])
 
 # Serve static frontend
 STATIC_DIR = Path(__file__).parent.parent / "web" / "static"
@@ -41,25 +70,10 @@ if STATIC_DIR.exists():
 
 @app.on_event("startup")
 def _startup() -> None:
-    import os
-    import shutil
-
     settings.ensure_dirs()
 
-    # Seed persistent locadoras.json from the image-baked default on first boot.
-    # On subsequent starts the file already exists on the volume and is left alone,
-    # so password changes, new users, etc. survive restarts.
-    loc_target = os.environ.get("ESCORA_LOCADORAS_FILE")
-    if loc_target:
-        target = Path(loc_target)
-        if not target.exists():
-            source = Path(__file__).parent.parent / "data" / "locadoras.json"
-            if source.exists():
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source, target)
-                logger.info(f"Seeded locadoras from {source} → {target}")
-
     job_service.init_db()
+    project_store.init_db()
     swept = job_service.sweep_orphan_processing()
     if swept:
         logger.warning(f"Startup: marked {swept} orphan job(s) as error")

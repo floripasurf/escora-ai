@@ -9,7 +9,8 @@ Data model:
                 they are currently working on. The chosen branch determines
                 inventory and the learning partition used by the pipeline.
 
-Storage: a single JSON file (default: data/locadoras.json). Human-editable;
+Storage: a single JSON file (default: data/locadoras.json, ignored by git).
+In production, set ESCORA_LOCADORAS_FILE to a persistent volume path. Human-editable;
 swap for a real DB later without touching the rest of the codebase.
 
 Passwords are stored with PBKDF2-HMAC-SHA256 (Python stdlib only — no new

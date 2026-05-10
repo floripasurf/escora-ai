@@ -17,6 +17,8 @@ Itens dos planos que já foram implementados em sessões recentes e **não** pre
 - **M10.1 — Learning loop com revisão:** `LearningStore.update_record_with_revision`, `get_shore_density_correction`, `get_validated_layer_map`, stores particionados por branch.
 - **Regeneração a partir da revisão:** `regenerate_from_revision` produz `*_validated.{dxf,csv,ifc,pdf}` a partir do DXF editado.
 - **Auth multi-tenant:** login/senha por locadora, session tokens, branch picker, isolamento de jobs por `branch_id` (não estava no plano original — foi adicionado depois).
+- **Jobs persistidos em SQLite:** `api/services/job_service.py` já usa `jobs.db` com isolamento por branch e sweeper de jobs órfãos.
+- **Sessões persistidas em SQLite:** `src/auth/branches.py` já usa `sessions.db`; restart não deve deslogar todos os usuários.
 - **Phase B1 (versão adaptada):** learning store já é cross-session **dentro de cada branch** — intencionalmente não é global por causa do multi-tenant.
 
 ---
@@ -28,16 +30,15 @@ Itens dos planos que já foram implementados em sessões recentes e **não** pre
 Tudo isto vem do `production_upgrade_plan.md` e continua válido. Com o login em produção, perder jobs num restart agora é visível ao cliente e quebra confiança.
 
 **P1. Persistência em SQLite sobre volume Fly**
-- Hoje `_jobs: dict` in-memory. Um restart apaga tudo, inclusive jobs de clientes logados.
-- Criar `fly volumes create escora_data --size 1 --region gru`, mount em `/data`.
-- Refatorar `api/services/job_service.py` para SQLite em `/data/jobs.db` mantendo a mesma interface pública.
-- Mover `uploads/` e `output/` para `/data/uploads` e `/data/output`.
-- **Também persistir sessões** (`_SESSIONS` em `src/auth/branches.py`) — hoje um restart desloga todo mundo. Nova tabela `sessions(token, username, locadora_id, expires_at)`.
-- **Também persistir learning store por branch** — hoje `data/learning/{branch_id}.json` vive no FS da máquina, sumiria no restart sem volume.
+- ✅ Jobs já persistem em SQLite via `api/services/job_service.py`.
+- ✅ Sessões já persistem em SQLite via `src/auth/branches.py`.
+- ✅ Uploads/output já derivam de `ESCORA_DATA_DIR`.
+- ✅ Projetos de alvenaria (`/api/v1/projects`) agora persistem em SQLite com UUID completo e escopo por branch.
+- Pendente: garantir no deploy que `ESCORA_DATA_DIR=/data` está montado em volume Fly.
+- **Também persistir learning store por branch** — hoje `data/learning/{branch_id}.json` vive no FS da máquina, sumiria no restart sem volume se `ESCORA_DATA_DIR` não estiver no volume.
 
 **P2. Orphan-job sweeper no startup**
-- Varrer `status=processing` no startup e marcar como `error` com mensagem "Job interrompido por reinicio do servidor, reenvie o arquivo".
-- 5 linhas no startup event do `api/main.py`.
+- ✅ `api/main.py` chama `job_service.sweep_orphan_processing()` no startup.
 
 **P3. Sem cold start**
 - `fly.toml`: `min_machines_running = 1`, `auto_stop_machines = 'suspend'`.
@@ -46,9 +47,10 @@ Tudo isto vem do `production_upgrade_plan.md` e continua válido. Com o login em
 **P4. Máquina com headroom de memória**
 - Bumpar para 2GB / 2 shared CPUs. Os 4 arquivos Supplier que ainda travam (CVS, 59428, 97661) provavelmente são OOM silencioso.
 
-**P5. Job IDs não adivinháveis**
-- Hoje `uuid.uuid4()[:8]` → 4B combinações, scrapeável.
-- Usar UUID completo OU manter ID curto + adicionar `download_token` aleatório por job na URL de download. Com o tenant scoping via sessão, um atacante já precisa estar logado, mas uma locadora A não deve conseguir chutar IDs de locadora B.
+**P5. IDs não adivinháveis**
+- ✅ Jobs usam UUID completo e tenant scoping.
+- ✅ Projetos de alvenaria agora usam UUID completo e tenant scoping.
+- Manter essa regra para qualquer novo recurso com downloads.
 
 ### Tier 2 — Parser robusto (M1 do milestone plan)
 
@@ -146,8 +148,8 @@ Sem isso, cada novo cliente traz 1-2 DXFs que "não funcionam". É a fonte #1 de
 > **Parser robusto e confiabilidade de produção andam em paralelo — são os dois eixos com maior ROI agora.**
 > Confiabilidade protege a confiança de quem já está usando. Parser amplia quem consegue usar. Tudo mais só rende se estes dois estiverem sólidos.
 
-**Sessão 1 — Confiabilidade (Tier 1 completo, 1 deploy)**
-P1 + P2 + P3 + P4 + P5. Um deploy, ~90 min. Sem isso, qualquer divulgação queima a primeira impressão.
+**Sessão 1 — Confiabilidade / Safety**
+P1 + P2 + P5 estão essencialmente entregues para jobs/sessões/projetos. Próximo foco: manter `ESCORA_DATA_DIR=/data` no deploy, auth em toda rota técnica, CORS/CSP, rate-limit, seed seguro e ambiente reproduzível. Sem isso, qualquer divulgação queima a primeira impressão.
 
 **Sessão 2 — Parser robusto, round 1 (ganhos rápidos)**
 P6 (INSERT + ATTRIB via `virtual_entities()`), P7 (polylines multi-segmento → H/V), P10 (case-insensitive labels).
