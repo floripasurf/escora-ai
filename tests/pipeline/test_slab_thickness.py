@@ -40,3 +40,15 @@ class TestSlabThicknessExtraction:
     def test_value_already_in_meters(self):
         texts = [_text("h=0.15")]
         assert extract_slab_thickness(texts) == pytest.approx(0.15)
+
+    def test_does_not_match_project_code_with_bare_e(self):
+        texts = [_text("97661-PE-05-FL 01-02-COB-R00")]
+        assert extract_slab_thickness(texts) is None
+
+    def test_does_not_match_plain_numeric_annotation(self):
+        texts = [_text("2.5"), _text("3.3")]
+        assert extract_slab_thickness(texts) is None
+
+    def test_does_not_match_copyright_text_with_letter_e(self):
+        texts = [_text("DIREITOS AUTORAIS RESERVADOS 25 GPa")]
+        assert extract_slab_thickness(texts) is None

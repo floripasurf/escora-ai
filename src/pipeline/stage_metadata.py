@@ -35,9 +35,15 @@ def extract_level_height(texts: List[TextEntity]) -> Optional[float]:
     return None
 
 
-SLAB_THICKNESS_PATTERN = re.compile(
-    r"(?:h|e|ESP(?:ESSURA)?)\s*[=:]?\s*(\d+(?:[.,]\d+)?)\s*(?:cm|m)?",
-    re.IGNORECASE,
+SLAB_THICKNESS_PATTERNS = (
+    re.compile(
+        r"\b[he]\s*[=:]\s*(\d+(?:[.,]\d+)?)\s*(?:cm|m)?\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bESP(?:ESSURA)?\s*[=:]?\s*(\d+(?:[.,]\d+)?)\s*(?:cm|m)?\b",
+        re.IGNORECASE,
+    ),
 )
 
 
@@ -51,10 +57,11 @@ def extract_slab_thickness(texts: List[TextEntity]) -> Optional[float]:
     Returns thickness in meters, or None if not found.
     """
     for t in texts:
-        m = SLAB_THICKNESS_PATTERN.search(t.content)
-        if m:
-            value = float(m.group(1).replace(",", "."))
-            if value > 1.0:
-                value /= 100.0  # cm to m
-            return value
+        for pattern in SLAB_THICKNESS_PATTERNS:
+            m = pattern.search(t.content)
+            if m:
+                value = float(m.group(1).replace(",", "."))
+                if value > 1.0:
+                    value /= 100.0  # cm to m
+                return value
     return None
