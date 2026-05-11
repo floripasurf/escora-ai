@@ -45,13 +45,14 @@ class TestStructuralNameExtraction:
         assert extract_structural_name("LAJE 12") == "L12"
 
 
-def _build_calc_with_panel(polygon, text_entities, layer=""):
+def _build_calc_with_panel(polygon, text_entities, layer="LAJE"):
     """Helper: roda run_calculation com um único painel vindo de hatch."""
     from src.pipeline.stage_calculate import run_calculation
 
+    hatch_layer = layer if "LAJE" in layer.upper() else f"LAJE_{layer}"
     slab_hatches = [{
         "points": list(polygon.exterior.coords),
-        "layer": layer,
+        "layer": hatch_layer,
         "pattern_name": "SOLID",
         "is_solid": True,
         "area": polygon.area,
