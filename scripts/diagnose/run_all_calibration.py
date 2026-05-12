@@ -42,6 +42,8 @@ SUMMARY_FIELDS = [
     "generated_support_count",
     "generated_beam_support_count",
     "generated_slab_support_count",
+    "generated_tower_support_count",
+    "generated_telescopic_support_count",
     "support_count_delta",
     "support_count_ratio",
     "exceptions_count",
@@ -220,7 +222,7 @@ def _generated_support_count(
 
 def read_generated_bom_support_breakdown(bom_path: Path | str | None) -> dict[str, int]:
     """Read generated support counts by element family from the BOM CSV."""
-    counts = {"beam": 0, "slab": 0, "total": 0}
+    counts = {"beam": 0, "slab": 0, "tower": 0, "telescopic": 0, "total": 0}
     if not bom_path:
         return counts
     path = Path(bom_path)
@@ -288,6 +290,8 @@ def run_project(root: Path, out_dir: Path, project: CalibrationProject) -> dict[
         "generated_support_count": "",
         "generated_beam_support_count": "",
         "generated_slab_support_count": "",
+        "generated_tower_support_count": "",
+        "generated_telescopic_support_count": "",
         "support_count_delta": "",
         "support_count_ratio": "",
         "exceptions_count": "0",
@@ -329,7 +333,10 @@ def run_project(root: Path, out_dir: Path, project: CalibrationProject) -> dict[
         generated_output_dir = out_dir / "output" / project.project_id
         supplier_breakdown = count_support_breakdown(project.shoring_dxf)
         supplier_support_count = supplier_breakdown["total"]
-        generated_breakdown = read_generated_bom_support_breakdown(result.get("csv_path"))
+        generated_breakdown = (
+            result.get("support_breakdown")
+            or read_generated_bom_support_breakdown(result.get("csv_path"))
+        )
         generated_support_count = _generated_support_count(
             result,
             count_support_entities(_first_generated_dxf(generated_output_dir)),
@@ -343,6 +350,8 @@ def run_project(root: Path, out_dir: Path, project: CalibrationProject) -> dict[
         row["generated_support_count"] = _format_optional_int(generated_support_count)
         row["generated_beam_support_count"] = str(generated_breakdown["beam"])
         row["generated_slab_support_count"] = str(generated_breakdown["slab"])
+        row["generated_tower_support_count"] = str(generated_breakdown["tower"])
+        row["generated_telescopic_support_count"] = str(generated_breakdown["telescopic"])
         row["support_count_delta"] = _support_delta(
             supplier_support_count,
             generated_support_count,
@@ -425,6 +434,8 @@ def timeout_row(out_dir: Path, project: CalibrationProject, exc: TimeoutError) -
         "generated_support_count": "",
         "generated_beam_support_count": "",
         "generated_slab_support_count": "",
+        "generated_tower_support_count": "",
+        "generated_telescopic_support_count": "",
         "support_count_delta": "",
         "support_count_ratio": "",
         "exceptions_count": "1",

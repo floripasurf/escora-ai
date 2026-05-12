@@ -8,7 +8,7 @@ import ezdxf
 import pytest
 
 from api.services import pipeline_service
-from api.services.pipeline_service import _generate_output_dxf
+from api.services.pipeline_service import _generate_output_dxf, _support_breakdown
 from src.models.calculation_models import (
     BeamShoringResult, CalculationResult,
 )
@@ -174,6 +174,20 @@ def test_dxf_has_hexagon_shore_marker(empty_input_dxf, tmp_path):
         and len(list(e.vertices())) == 6
     ]
     assert len(hex_polylines) >= 1
+
+
+def test_support_breakdown_counts_actual_positioned_support_type():
+    calc = _calc([_telescopic_beam_result(), _tower_beam_result()])
+
+    breakdown = _support_breakdown(calc)
+
+    assert breakdown == {
+        "total": 9,
+        "beam": 9,
+        "slab": 0,
+        "tower": 4,
+        "telescopic": 5,
+    }
 
 
 def test_dxf_has_two_vm_rails_per_beam(empty_input_dxf, tmp_path):

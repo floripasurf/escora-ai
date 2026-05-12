@@ -206,19 +206,22 @@ def build_report_data(
             is_cantilever=sr.is_cantilever,
         ))
 
-    # BOM — aggregate by shore model ID
+    # BOM — aggregate by actual positioned support model.
+    # Mixed support can replace only some positions with towers while the
+    # panel/beam selected_shore remains telescopic, so count each shore.
     shore_counts: dict = {}  # id -> (ShoreCatalogEntry, count)
     for br in calc.beam_results:
-        sid = br.selected_shore.id
-        if sid not in shore_counts:
-            shore_counts[sid] = [br.selected_shore, 0]
-        shore_counts[sid][1] += br.shore_count
-    for sr in calc.slab_results:
-        if sr.selected_shore:
-            sid = sr.selected_shore.id
+        for positioned in br.shores:
+            sid = positioned.shore.id
             if sid not in shore_counts:
-                shore_counts[sid] = [sr.selected_shore, 0]
-            shore_counts[sid][1] += len(sr.shores)
+                shore_counts[sid] = [positioned.shore, 0]
+            shore_counts[sid][1] += 1
+    for sr in calc.slab_results:
+        for positioned in sr.shores:
+            sid = positioned.shore.id
+            if sid not in shore_counts:
+                shore_counts[sid] = [positioned.shore, 0]
+            shore_counts[sid][1] += 1
 
     bom_rows = []
     for sid, (shore, qty) in shore_counts.items():

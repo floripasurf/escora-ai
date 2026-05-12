@@ -9,7 +9,7 @@ from src.models.calculation_models import (
     CalculationResult, BeamShoringResult, SlabShoringResult,
 )
 from src.models.pipeline_models import ClassifiedElement, ElementType
-from src.models.shore import ShoreCatalogEntry, PositionedShore
+from src.models.shore import ShoreCatalogEntry, PositionedShore, SupportType
 from shapely.geometry import box
 
 
@@ -20,6 +20,16 @@ def _shore(shore_id="ESC-01", capacity=20.0, price=65.0):
         load_capacity_kn=capacity, weight_kg=11.0,
         tube_external_mm=60.0, tube_internal_mm=48.0,
         base_plate_mm=150.0, price_reference_brl=price,
+    )
+
+
+def _tower_shore(shore_id="TWR-01", capacity=80.0, price=140.0):
+    return ShoreCatalogEntry(
+        id=shore_id, manufacturer="Generico", model=f"Torre {shore_id}",
+        type="tower", height_min_m=0.0, height_max_m=6.0,
+        load_capacity_kn=capacity, weight_kg=45.0,
+        tube_external_mm=0.0, tube_internal_mm=0.0,
+        base_plate_mm=1200.0, price_reference_brl=price,
     )
 
 
@@ -179,6 +189,31 @@ class TestBuildReportData:
         assert len(shore_rows) == 2
         ids = {r.id for r in shore_rows}
         assert ids == {"ESC-01", "ESC-02"}
+
+    def test_bom_counts_mixed_positioned_support_models(self):
+        """MIXED panels must count actual tower replacements, not selected_shore."""
+        slab = _slab_result(shore_id="ESC310", shore_count=9)
+        tower = _tower_shore("TWR-TA100")
+        slab.shores[0] = PositionedShore(
+            x=0.0, y=0.0, shore=tower,
+            load_applied_kn=8.0, utilization_ratio=0.1,
+            support_type=SupportType.TOWER,
+        )
+        slab.shores[1] = PositionedShore(
+            x=1.0, y=0.0, shore=tower,
+            load_applied_kn=8.0, utilization_ratio=0.1,
+            support_type=SupportType.TOWER,
+        )
+
+        calc = _calc_result(slab_results=[slab])
+        report = build_report_data(calc, _metadata())
+
+        support_rows = {
+            r.id: r for r in report.bom_rows
+            if r.id in {"ESC310", "TWR-TA100"}
+        }
+        assert support_rows["ESC310"].quantity == 7
+        assert support_rows["TWR-TA100"].quantity == 2
 
     def test_warnings_include_validation_errors(self):
         calc = _calc_result(

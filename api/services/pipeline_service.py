@@ -163,6 +163,7 @@ def process_dxf(
         "pillar_count": pillar_count,
         "slab_count": len(calc.slab_results),
         "total_shores": total_beam_shores + total_slab_shores,
+        "support_breakdown": _support_breakdown(calc),
         "warnings": result.warnings[:60],  # Limit warnings (diagnostics first)
         "output_dxf_path": output_dxf,
         "dwg_path": dwg_path,
@@ -221,6 +222,37 @@ def _count_shores_by_id(calc):
                 sid = s.shore.id
                 slab_telescopic[sid] = slab_telescopic.get(sid, 0) + 1
     return beam_telescopic, slab_telescopic, tower_count
+
+
+def _support_breakdown(calc):
+    """Return support counts by element role and physical support type."""
+    from src.models.shore import SupportType
+
+    counts = {
+        "total": 0,
+        "beam": 0,
+        "slab": 0,
+        "tower": 0,
+        "telescopic": 0,
+    }
+
+    def add(positioned, role: str) -> None:
+        counts["total"] += 1
+        counts[role] += 1
+        shore_id = getattr(positioned.shore, "id", "")
+        is_tower = (
+            getattr(positioned, "support_type", None) == SupportType.TOWER
+            or shore_id.startswith("TWR-")
+        )
+        counts["tower" if is_tower else "telescopic"] += 1
+
+    for br in calc.beam_results:
+        for positioned in br.shores:
+            add(positioned, "beam")
+    for sr in calc.slab_results:
+        for positioned in sr.shores:
+            add(positioned, "slab")
+    return counts
 
 
 def _generate_bom_csv(calc, output_path: str, report_data=None):

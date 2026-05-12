@@ -160,7 +160,16 @@ class CalibrationInventoryTests(unittest.TestCase):
 
             breakdown = module.read_generated_bom_support_breakdown(bom_path)
 
-        self.assertEqual(breakdown, {"beam": 3, "slab": 8, "total": 11})
+        self.assertEqual(
+            breakdown,
+            {
+                "beam": 3,
+                "slab": 8,
+                "tower": 0,
+                "telescopic": 0,
+                "total": 11,
+            },
+        )
 
     def test_generated_support_count_uses_pipeline_total_not_dxf_drawing_entities(self):
         module = load_module()
