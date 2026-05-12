@@ -4,6 +4,7 @@ import subprocess
 import sys
 import time
 import unittest
+import tempfile
 from pathlib import Path
 
 
@@ -75,6 +76,40 @@ class CalibrationInventoryTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertIn(rows[0]["ran_to_completion"], {"true", "false"})
         self.assertTrue(rows[0]["project_id"])
+        self.assertIn("supplier_support_count", rows[0])
+        self.assertIn("generated_support_count", rows[0])
+        self.assertIn("support_count_delta", rows[0])
+        self.assertIn("support_count_ratio", rows[0])
+
+    def test_counts_support_entities_by_supplier_and_generated_layer_conventions(self):
+        if importlib.util.find_spec("ezdxf") is None:
+            self.skipTest("ezdxf unavailable")
+
+        import ezdxf
+
+        module = load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            dxf_path = Path(tmp) / "supports.dxf"
+            doc = ezdxf.new("R2010")
+            doc.blocks.new(name="ESC310_TEST")
+            doc.blocks.new(name="TWR-TEST")
+            msp = doc.modelspace()
+            msp.add_circle((0, 0), radius=0.1, dxfattribs={"layer": "ESC310_Laje"})
+            msp.add_line((0, 0), (1, 0), dxfattribs={"layer": "VM50_Viga"})
+            msp.add_blockref("TWR-TEST", (1, 1), dxfattribs={"layer": "0"})
+            msp.add_blockref("IGNORED", (2, 2), dxfattribs={"layer": "Cotas"})
+            msp.add_line((0, 0), (0, 1), dxfattribs={"layer": "Cotas"})
+            doc.saveas(dxf_path)
+
+            self.assertEqual(module.count_support_entities(dxf_path), 3)
+
+    def test_support_count_delta_and_ratio_are_formatted_for_summary(self):
+        module = load_module()
+
+        self.assertEqual(module._support_delta(10, 14), "4")
+        self.assertEqual(module._support_ratio(10, 14), "1.40")
+        self.assertEqual(module._support_delta(None, 14), "")
+        self.assertEqual(module._support_ratio(0, 14), "")
 
     def test_incremental_runner_preserves_completed_rows_when_later_project_fails(self):
         module = load_module()

@@ -33,11 +33,17 @@ SUMMARY_FIELDS = [
     "kg_per_m3",
     "tower_count",
     "telescopic_count",
+    "supplier_support_count",
+    "generated_support_count",
+    "support_count_delta",
+    "support_count_ratio",
     "exceptions_count",
     "error_type",
     "error_message",
     "output_dir",
 ]
+
+SUPPORT_LAYER_PREFIXES = ("ESC", "TORRE", "TWR", "VM", "ALU")
 
 
 @dataclass(frozen=True)
@@ -115,6 +121,53 @@ def _summarize_result(result: dict[str, Any]) -> tuple[float, float]:
     return total_kg, kg_per_m3
 
 
+def _is_support_entity(entity: Any) -> bool:
+    layer = getattr(entity.dxf, "layer", "").upper()
+    if layer.startswith(SUPPORT_LAYER_PREFIXES):
+        return True
+    if entity.dxftype() != "INSERT":
+        return False
+    name = getattr(entity.dxf, "name", "").upper()
+    return name.startswith(SUPPORT_LAYER_PREFIXES)
+
+
+def count_support_entities(dxf_path: Path | str | None) -> int | None:
+    """Count shoring-related DXF entities using Supplier/Escora layer names."""
+    if not dxf_path:
+        return None
+    path = Path(dxf_path)
+    if not path.exists():
+        return None
+    try:
+        import ezdxf
+
+        doc = ezdxf.readfile(path)
+        return sum(1 for entity in doc.modelspace() if _is_support_entity(entity))
+    except Exception:
+        return None
+
+
+def _first_generated_dxf(output_dir: Path) -> Path | None:
+    generated = sorted(output_dir.glob("*_escoras.dxf"))
+    return generated[0] if generated else None
+
+
+def _format_optional_int(value: int | None) -> str:
+    return "" if value is None else str(value)
+
+
+def _support_delta(supplier_count: int | None, generated_count: int | None) -> str:
+    if supplier_count is None or generated_count is None:
+        return ""
+    return str(generated_count - supplier_count)
+
+
+def _support_ratio(supplier_count: int | None, generated_count: int | None) -> str:
+    if supplier_count is None or generated_count is None or supplier_count == 0:
+        return ""
+    return f"{generated_count / supplier_count:.2f}"
+
+
 def run_project(root: Path, out_dir: Path, project: CalibrationProject) -> dict[str, Any]:
     project_dir = out_dir / project.project_id
     project_dir.mkdir(parents=True, exist_ok=True)
@@ -128,6 +181,10 @@ def run_project(root: Path, out_dir: Path, project: CalibrationProject) -> dict[
         "kg_per_m3": "",
         "tower_count": "",
         "telescopic_count": "",
+        "supplier_support_count": "",
+        "generated_support_count": "",
+        "support_count_delta": "",
+        "support_count_ratio": "",
         "exceptions_count": "0",
         "error_type": "",
         "error_message": "",
@@ -164,7 +221,22 @@ def run_project(root: Path, out_dir: Path, project: CalibrationProject) -> dict[
         row["kg_per_m3"] = f"{kg_per_m3:.2f}"
         row["tower_count"] = ""
         row["telescopic_count"] = str(result.get("total_shores", ""))
-        row["output_dir"] = str(out_dir / "output" / project.project_id)
+        generated_output_dir = out_dir / "output" / project.project_id
+        supplier_support_count = count_support_entities(project.shoring_dxf)
+        generated_support_count = count_support_entities(
+            _first_generated_dxf(generated_output_dir)
+        )
+        row["supplier_support_count"] = _format_optional_int(supplier_support_count)
+        row["generated_support_count"] = _format_optional_int(generated_support_count)
+        row["support_count_delta"] = _support_delta(
+            supplier_support_count,
+            generated_support_count,
+        )
+        row["support_count_ratio"] = _support_ratio(
+            supplier_support_count,
+            generated_support_count,
+        )
+        row["output_dir"] = str(generated_output_dir)
         return row
     except Exception as exc:
         row["exceptions_count"] = "1"
@@ -229,6 +301,10 @@ def timeout_row(out_dir: Path, project: CalibrationProject, exc: TimeoutError) -
         "kg_per_m3": "",
         "tower_count": "",
         "telescopic_count": "",
+        "supplier_support_count": "",
+        "generated_support_count": "",
+        "support_count_delta": "",
+        "support_count_ratio": "",
         "exceptions_count": "1",
         "error_type": "TimeoutError",
         "error_message": error_message,
