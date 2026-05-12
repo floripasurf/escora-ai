@@ -108,6 +108,60 @@ class CalibrationInventoryTests(unittest.TestCase):
 
             self.assertEqual(module.count_support_entities(dxf_path), 2)
 
+    def test_breaks_supplier_support_entities_down_by_layer_semantics(self):
+        if importlib.util.find_spec("ezdxf") is None:
+            self.skipTest("ezdxf unavailable")
+
+        import ezdxf
+
+        module = load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            dxf_path = Path(tmp) / "supports.dxf"
+            doc = ezdxf.new("R2010")
+            doc.blocks.new(name="ESC450-REESC")
+            doc.blocks.new(name="1001550")
+            doc.blocks.new(name="TWR-TEST")
+            msp = doc.modelspace()
+            msp.add_blockref("ESC450-REESC", (0, 0), dxfattribs={"layer": "ESC450_Laje"})
+            msp.add_blockref("ESC450-REESC", (1, 0), dxfattribs={"layer": "ESC310_Viga"})
+            msp.add_blockref("1001550", (2, 0), dxfattribs={"layer": "TORRE_LAJE"})
+            msp.add_blockref("1001550", (3, 0), dxfattribs={"layer": "TORRE_VIGA"})
+            msp.add_blockref("TWR-TEST", (4, 0), dxfattribs={"layer": "0"})
+            msp.add_blockref("IGNORED", (5, 0), dxfattribs={"layer": "Cotas"})
+            doc.saveas(dxf_path)
+
+            breakdown = module.count_support_breakdown(dxf_path)
+
+        self.assertEqual(
+            breakdown,
+            {
+                "total": 5,
+                "beam": 2,
+                "slab": 2,
+                "tower": 3,
+                "telescopic": 2,
+                "uncategorized": 1,
+            },
+        )
+
+    def test_reads_generated_support_breakdown_from_bom_csv(self):
+        module = load_module()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bom_path = Path(tmp) / "bom.csv"
+            bom_path.write_text(
+                "\ufeffTipo;Elemento;Comprimento (m);Secao (cm);Qtd Escoras;Espacamento (m);Regra\n"
+                "Viga;V1;2.0;20x40;3;1.0;rule\n"
+                "Laje;Laje 1;10.0;e=12cm;8;1.2x1.2;rule\n"
+                "Acessório;Cruzeta;;;;;\n"
+                "TOTAL;;;;11;;\n",
+                encoding="utf-8",
+            )
+
+            breakdown = module.read_generated_bom_support_breakdown(bom_path)
+
+        self.assertEqual(breakdown, {"beam": 3, "slab": 8, "total": 11})
+
     def test_generated_support_count_uses_pipeline_total_not_dxf_drawing_entities(self):
         module = load_module()
 

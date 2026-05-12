@@ -34,7 +34,14 @@ SUMMARY_FIELDS = [
     "tower_count",
     "telescopic_count",
     "supplier_support_count",
+    "supplier_beam_support_count",
+    "supplier_slab_support_count",
+    "supplier_tower_support_count",
+    "supplier_telescopic_support_count",
+    "supplier_uncategorized_support_count",
     "generated_support_count",
+    "generated_beam_support_count",
+    "generated_slab_support_count",
     "support_count_delta",
     "support_count_ratio",
     "exceptions_count",
@@ -44,6 +51,14 @@ SUMMARY_FIELDS = [
 ]
 
 SUPPORT_LAYER_PREFIXES = ("ESC", "TORRE", "TWR")
+SUPPORT_BREAKDOWN_KEYS = (
+    "total",
+    "beam",
+    "slab",
+    "tower",
+    "telescopic",
+    "uncategorized",
+)
 
 
 @dataclass(frozen=True)
@@ -134,6 +149,46 @@ def _is_support_entity(entity: Any) -> bool:
     )
 
 
+def _support_kind(entity: Any) -> str:
+    layer = getattr(entity.dxf, "layer", "").upper()
+    name = getattr(entity.dxf, "name", "").upper()
+    if layer.startswith(("TORRE", "TWR")) or name.startswith(("TORRE", "TWR")):
+        return "tower"
+    return "telescopic"
+
+
+def _support_element_role(entity: Any) -> str:
+    layer = getattr(entity.dxf, "layer", "").upper()
+    if "VIGA" in layer:
+        return "beam"
+    if "LAJE" in layer:
+        return "slab"
+    return "uncategorized"
+
+
+def count_support_breakdown(dxf_path: Path | str | None) -> dict[str, int]:
+    """Count Supplier physical supports by broad element and support semantics."""
+    counts = {key: 0 for key in SUPPORT_BREAKDOWN_KEYS}
+    if not dxf_path:
+        return counts
+    path = Path(dxf_path)
+    if not path.exists():
+        return counts
+    try:
+        import ezdxf
+
+        doc = ezdxf.readfile(path)
+        for entity in doc.modelspace():
+            if not _is_support_entity(entity):
+                continue
+            counts["total"] += 1
+            counts[_support_kind(entity)] += 1
+            counts[_support_element_role(entity)] += 1
+    except Exception:
+        return counts
+    return counts
+
+
 def count_support_entities(dxf_path: Path | str | None) -> int | None:
     """Count shoring-related DXF entities using Supplier/Escora layer names."""
     if not dxf_path:
@@ -161,6 +216,33 @@ def _generated_support_count(
         except (TypeError, ValueError):
             pass
     return generated_dxf_support_count
+
+
+def read_generated_bom_support_breakdown(bom_path: Path | str | None) -> dict[str, int]:
+    """Read generated support counts by element family from the BOM CSV."""
+    counts = {"beam": 0, "slab": 0, "total": 0}
+    if not bom_path:
+        return counts
+    path = Path(bom_path)
+    if not path.exists():
+        return counts
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle, delimiter=";")
+        for row in reader:
+            try:
+                quantity = int(row.get("Qtd Escoras") or 0)
+            except ValueError:
+                quantity = 0
+            tipo = (row.get("Tipo") or "").strip().lower()
+            if tipo == "viga":
+                counts["beam"] += quantity
+            elif tipo == "laje":
+                counts["slab"] += quantity
+            elif tipo == "total":
+                counts["total"] = quantity
+    if counts["total"] == 0:
+        counts["total"] = counts["beam"] + counts["slab"]
+    return counts
 
 
 def _first_generated_dxf(output_dir: Path) -> Path | None:
@@ -198,7 +280,14 @@ def run_project(root: Path, out_dir: Path, project: CalibrationProject) -> dict[
         "tower_count": "",
         "telescopic_count": "",
         "supplier_support_count": "",
+        "supplier_beam_support_count": "",
+        "supplier_slab_support_count": "",
+        "supplier_tower_support_count": "",
+        "supplier_telescopic_support_count": "",
+        "supplier_uncategorized_support_count": "",
         "generated_support_count": "",
+        "generated_beam_support_count": "",
+        "generated_slab_support_count": "",
         "support_count_delta": "",
         "support_count_ratio": "",
         "exceptions_count": "0",
@@ -238,13 +327,22 @@ def run_project(root: Path, out_dir: Path, project: CalibrationProject) -> dict[
         row["tower_count"] = ""
         row["telescopic_count"] = str(result.get("total_shores", ""))
         generated_output_dir = out_dir / "output" / project.project_id
-        supplier_support_count = count_support_entities(project.shoring_dxf)
+        supplier_breakdown = count_support_breakdown(project.shoring_dxf)
+        supplier_support_count = supplier_breakdown["total"]
+        generated_breakdown = read_generated_bom_support_breakdown(result.get("csv_path"))
         generated_support_count = _generated_support_count(
             result,
             count_support_entities(_first_generated_dxf(generated_output_dir)),
         )
         row["supplier_support_count"] = _format_optional_int(supplier_support_count)
+        row["supplier_beam_support_count"] = str(supplier_breakdown["beam"])
+        row["supplier_slab_support_count"] = str(supplier_breakdown["slab"])
+        row["supplier_tower_support_count"] = str(supplier_breakdown["tower"])
+        row["supplier_telescopic_support_count"] = str(supplier_breakdown["telescopic"])
+        row["supplier_uncategorized_support_count"] = str(supplier_breakdown["uncategorized"])
         row["generated_support_count"] = _format_optional_int(generated_support_count)
+        row["generated_beam_support_count"] = str(generated_breakdown["beam"])
+        row["generated_slab_support_count"] = str(generated_breakdown["slab"])
         row["support_count_delta"] = _support_delta(
             supplier_support_count,
             generated_support_count,
@@ -319,7 +417,14 @@ def timeout_row(out_dir: Path, project: CalibrationProject, exc: TimeoutError) -
         "tower_count": "",
         "telescopic_count": "",
         "supplier_support_count": "",
+        "supplier_beam_support_count": "",
+        "supplier_slab_support_count": "",
+        "supplier_tower_support_count": "",
+        "supplier_telescopic_support_count": "",
+        "supplier_uncategorized_support_count": "",
         "generated_support_count": "",
+        "generated_beam_support_count": "",
+        "generated_slab_support_count": "",
         "support_count_delta": "",
         "support_count_ratio": "",
         "exceptions_count": "1",
