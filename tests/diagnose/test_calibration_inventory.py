@@ -81,7 +81,7 @@ class CalibrationInventoryTests(unittest.TestCase):
         self.assertIn("support_count_delta", rows[0])
         self.assertIn("support_count_ratio", rows[0])
 
-    def test_counts_support_entities_by_supplier_and_generated_layer_conventions(self):
+    def test_counts_physical_support_entities_without_distribution_beams(self):
         if importlib.util.find_spec("ezdxf") is None:
             self.skipTest("ezdxf unavailable")
 
@@ -96,12 +96,28 @@ class CalibrationInventoryTests(unittest.TestCase):
             msp = doc.modelspace()
             msp.add_circle((0, 0), radius=0.1, dxfattribs={"layer": "ESC310_Laje"})
             msp.add_line((0, 0), (1, 0), dxfattribs={"layer": "VM50_Viga"})
+            msp.add_lwpolyline(
+                [(0, 0), (1, 0), (1, 1), (0, 1)],
+                close=True,
+                dxfattribs={"layer": "ESC450_Laje"},
+            )
             msp.add_blockref("TWR-TEST", (1, 1), dxfattribs={"layer": "0"})
             msp.add_blockref("IGNORED", (2, 2), dxfattribs={"layer": "Cotas"})
             msp.add_line((0, 0), (0, 1), dxfattribs={"layer": "Cotas"})
             doc.saveas(dxf_path)
 
-            self.assertEqual(module.count_support_entities(dxf_path), 3)
+            self.assertEqual(module.count_support_entities(dxf_path), 2)
+
+    def test_generated_support_count_uses_pipeline_total_not_dxf_drawing_entities(self):
+        module = load_module()
+
+        self.assertEqual(
+            module._generated_support_count(
+                {"total_shores": 12},
+                generated_dxf_support_count=48,
+            ),
+            12,
+        )
 
     def test_support_count_delta_and_ratio_are_formatted_for_summary(self):
         module = load_module()

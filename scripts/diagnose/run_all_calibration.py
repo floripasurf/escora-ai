@@ -43,7 +43,7 @@ SUMMARY_FIELDS = [
     "output_dir",
 ]
 
-SUPPORT_LAYER_PREFIXES = ("ESC", "TORRE", "TWR", "VM", "ALU")
+SUPPORT_LAYER_PREFIXES = ("ESC", "TORRE", "TWR")
 
 
 @dataclass(frozen=True)
@@ -123,12 +123,15 @@ def _summarize_result(result: dict[str, Any]) -> tuple[float, float]:
 
 def _is_support_entity(entity: Any) -> bool:
     layer = getattr(entity.dxf, "layer", "").upper()
-    if layer.startswith(SUPPORT_LAYER_PREFIXES):
+    entity_type = entity.dxftype()
+    if entity_type == "CIRCLE" and layer.startswith(SUPPORT_LAYER_PREFIXES):
         return True
-    if entity.dxftype() != "INSERT":
+    if entity_type != "INSERT":
         return False
     name = getattr(entity.dxf, "name", "").upper()
-    return name.startswith(SUPPORT_LAYER_PREFIXES)
+    return layer.startswith(SUPPORT_LAYER_PREFIXES) or name.startswith(
+        SUPPORT_LAYER_PREFIXES
+    )
 
 
 def count_support_entities(dxf_path: Path | str | None) -> int | None:
@@ -145,6 +148,19 @@ def count_support_entities(dxf_path: Path | str | None) -> int | None:
         return sum(1 for entity in doc.modelspace() if _is_support_entity(entity))
     except Exception:
         return None
+
+
+def _generated_support_count(
+    result: dict[str, Any],
+    generated_dxf_support_count: int | None,
+) -> int | None:
+    total_shores = result.get("total_shores")
+    if total_shores not in (None, ""):
+        try:
+            return int(total_shores)
+        except (TypeError, ValueError):
+            pass
+    return generated_dxf_support_count
 
 
 def _first_generated_dxf(output_dir: Path) -> Path | None:
@@ -223,8 +239,9 @@ def run_project(root: Path, out_dir: Path, project: CalibrationProject) -> dict[
         row["telescopic_count"] = str(result.get("total_shores", ""))
         generated_output_dir = out_dir / "output" / project.project_id
         supplier_support_count = count_support_entities(project.shoring_dxf)
-        generated_support_count = count_support_entities(
-            _first_generated_dxf(generated_output_dir)
+        generated_support_count = _generated_support_count(
+            result,
+            count_support_entities(_first_generated_dxf(generated_output_dir)),
         )
         row["supplier_support_count"] = _format_optional_int(supplier_support_count)
         row["generated_support_count"] = _format_optional_int(generated_support_count)
