@@ -13,11 +13,14 @@ import csv
 import importlib
 import os
 import re
+import signal
 import sys
 import traceback
 import unicodedata
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from types import FrameType
 from typing import Any
 
 
@@ -189,11 +192,82 @@ def write_summary(rows: list[dict[str, Any]], summary_path: Path) -> None:
         writer.writerows(rows)
 
 
+@contextmanager
+def project_timeout(seconds: float):
+    if seconds <= 0:
+        yield
+        return
+
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    previous_timer = signal.setitimer(signal.ITIMER_REAL, 0)
+
+    def raise_timeout(signum: int, frame: FrameType | None) -> None:
+        raise TimeoutError(f"project exceeded timeout of {seconds:g}s")
+
+    signal.signal(signal.SIGALRM, raise_timeout)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+        if previous_timer[0] > 0:
+            signal.setitimer(signal.ITIMER_REAL, *previous_timer)
+
+
+def timeout_row(out_dir: Path, project: CalibrationProject, exc: TimeoutError) -> dict[str, Any]:
+    project_dir = out_dir / project.project_id
+    project_dir.mkdir(parents=True, exist_ok=True)
+    error_message = str(exc)
+    (project_dir / "errors.log").write_text(error_message + "\n", encoding="utf-8")
+    return {
+        "project_id": project.project_id,
+        "shoring_dxf": str(project.shoring_dxf),
+        "structural_dxf": str(project.structural_dxf or ""),
+        "ran_to_completion": "false",
+        "bom_kg_total": "",
+        "kg_per_m3": "",
+        "tower_count": "",
+        "telescopic_count": "",
+        "exceptions_count": "1",
+        "error_type": "TimeoutError",
+        "error_message": error_message,
+        "output_dir": str(project_dir),
+    }
+
+
+def run_projects_incrementally(
+    root: Path,
+    out_dir: Path,
+    projects: list[CalibrationProject],
+    runner: Any = run_project,
+    project_timeout_seconds: float = 0,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    summary_path = out_dir / "summary.csv"
+    write_summary(rows, summary_path)
+    for project in projects:
+        try:
+            with project_timeout(project_timeout_seconds):
+                row = runner(root, out_dir, project)
+        except TimeoutError as exc:
+            row = timeout_row(out_dir, project, exc)
+        rows.append(row)
+        write_summary(rows, summary_path)
+    return rows
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--out", type=Path, default=Path("diagnostics"))
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument(
+        "--project-timeout",
+        type=float,
+        default=0,
+        help="Seconds before a single project is marked as timed out; 0 disables.",
+    )
     args = parser.parse_args()
 
     root = args.root.resolve()
@@ -202,8 +276,12 @@ def main() -> int:
     if args.limit > 0:
         projects = projects[: args.limit]
 
-    rows = [run_project(root, out_dir, project) for project in projects]
-    write_summary(rows, out_dir / "summary.csv")
+    rows = run_projects_incrementally(
+        root,
+        out_dir,
+        projects,
+        project_timeout_seconds=args.project_timeout,
+    )
 
     completed = sum(1 for row in rows if row["ran_to_completion"] == "true")
     print(f"diagnostics summary: {completed}/{len(rows)} completed")
