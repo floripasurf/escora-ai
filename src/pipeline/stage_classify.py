@@ -6,6 +6,7 @@ Uses layer classification to filter noise (dimension lines, hatching, etc.).
 """
 
 import math
+import re
 from typing import List, Set, Dict, Optional
 from src.pipeline.stage_segment import LevelSegment
 from src.pipeline.stage_parse import TextEntity
@@ -28,6 +29,52 @@ MIN_LEARNED_LAYER_CONFIDENCE = 0.80
 # Minimum detection rate for a learned layer to be accepted in the current DXF
 # Prevents accepting rebar/detailing layers that accidentally have a few parallel pairs
 MIN_LEARNED_LAYER_RATE = 0.10
+
+SLAB_TEXT_RECOVERY_BEAM_LAYERS = {
+    "VIGAS",
+    "VIGA",
+    "S-BEAM",
+    "FO-VIGAS",
+    "VIGAS_H",
+    "VIGAS_V",
+}
+SLAB_TEXT_RECOVERY_SECTION_RE = re.compile(r"^\d+/\d+$")
+SLAB_TEXT_RECOVERY_MIN_WIDTH_M = 0.18
+SLAB_TEXT_RECOVERY_MAX_WIDTH_DELTA_M = 0.30
+
+
+def _is_explicit_beam_layer(layer: str) -> bool:
+    return layer.strip().upper() in SLAB_TEXT_RECOVERY_BEAM_LAYERS
+
+
+def _beam_candidate_key(candidate) -> tuple[str, int, int, int, int]:
+    return (
+        candidate.direction,
+        round(candidate.axis_coord * 1000),
+        round(candidate.start * 1000),
+        round(candidate.end * 1000),
+        round(candidate.width_m * 1000),
+    )
+
+
+def _should_recover_slab_text_beam(
+    is_explicit_beam_candidate: bool,
+    candidate_width_m: float,
+    section_text: str,
+    section: tuple[float, float] | None,
+) -> bool:
+    if not is_explicit_beam_candidate:
+        return False
+    if candidate_width_m < SLAB_TEXT_RECOVERY_MIN_WIDTH_M:
+        return False
+    if not section or not SLAB_TEXT_RECOVERY_SECTION_RE.match(section_text):
+        return False
+
+    section_width = min(section)
+    return (
+        abs(candidate_width_m - section_width)
+        <= SLAB_TEXT_RECOVERY_MAX_WIDTH_DELTA_M
+    )
 
 
 def _find_nearest_texts(
@@ -282,16 +329,24 @@ def classify_elements(
     # Strict layer filter: when beam layers are identified, ONLY use those layers
     # This eliminates dimension lines, hatching, and other noise from unclassified layers
     seg_dicts = []
+    explicit_beam_layer_seg_dicts = []
     for s in level.segments:
         if beam_layers and s.layer not in beam_layers:
             continue  # Only use segments from beam-classified layers
         if s.type == "H":
-            seg_dicts.append({"type": "H", "y": s.y * scale, "x_min": s.x_min * scale, "x_max": s.x_max * scale})
+            seg_dict = {"type": "H", "y": s.y * scale, "x_min": s.x_min * scale, "x_max": s.x_max * scale}
         else:
-            seg_dicts.append({"type": "V", "x": s.x * scale, "y_min": s.y_min * scale, "y_max": s.y_max * scale})
+            seg_dict = {"type": "V", "x": s.x * scale, "y_min": s.y_min * scale, "y_max": s.y_max * scale}
+        seg_dicts.append(seg_dict)
+        if _is_explicit_beam_layer(s.layer):
+            explicit_beam_layer_seg_dicts.append(seg_dict)
 
     # Beams from geometry (parallel pairs + centerlines)
     beam_candidates = find_beam_candidates(seg_dicts)
+    explicit_recovery_candidate_keys = {
+        _beam_candidate_key(candidate)
+        for candidate in find_beam_candidates(explicit_beam_layer_seg_dicts)
+    }
 
     # Centerline beam detection disabled — produces too many false positives
     # (dimension lines, grid lines, detail lines misidentified as beams).
@@ -309,6 +364,7 @@ def classify_elements(
         )
         text_cls = TextClassification(ElementType.UNKNOWN, None, 0.0)
         section = None
+        section_text = ""
         for t in nearby:
             tc = classify_text(t.content)
             # For beams: only consider beam-confirming or slab-indicating text.
@@ -319,9 +375,21 @@ def classify_elements(
             s = extract_section(t.content)
             if s:
                 section = s
+                section_text = t.content
 
         # Text override: only skip if text clearly says SLAB (not pillar — pillars are expected near beams)
-        if text_cls.element_type == ElementType.SLAB and text_cls.score >= 0.80:
+        if (
+            text_cls.element_type == ElementType.SLAB
+            and text_cls.score >= 0.80
+            and not _should_recover_slab_text_beam(
+                is_explicit_beam_candidate=(
+                    _beam_candidate_key(bc) in explicit_recovery_candidate_keys
+                ),
+                candidate_width_m=bc.width_m,
+                section_text=section_text,
+                section=section,
+            )
+        ):
             continue
 
         agree = text_cls.element_type in (ElementType.BEAM, ElementType.UNKNOWN)

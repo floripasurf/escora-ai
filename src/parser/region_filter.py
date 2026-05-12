@@ -40,6 +40,7 @@ DETAIL_LAYER_KEYWORDS = [
     "elevacao", "elevação", "carimbo",
 ]
 REGION_MARGIN = 1.0  # meters of margin around main plan
+MIN_REGION_FILTER_ENTITIES = 10
 
 
 @dataclass
@@ -240,6 +241,13 @@ def filter_main_plan(
 
     # Step 2: Select main plan (region with most entities)
     total_entities = sum(r.count for r in regions)
+    if total_entities < MIN_REGION_FILTER_ENTITIES:
+        logger.info(
+            f"Region filter: {total_entities} entities across {len(regions)} "
+            "regions — treating as single-zone file"
+        )
+        return texts, segments, rects, circles, polylines, hatches, dimensions, warnings
+
     main = max(regions, key=lambda r: r.count)
 
     # Only activate filtering if main region clearly dominates (>35% of entities).

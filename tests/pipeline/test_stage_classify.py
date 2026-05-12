@@ -87,3 +87,72 @@ def test_low_confidence_learned_layer_ignored():
     beams_base = [e for e in elements_base if e.element_type == ElementType.BEAM]
 
     assert len(beams) == len(beams_base)
+
+
+def test_recovers_beam_layer_when_slab_text_has_strict_section():
+    level = LevelSegment(
+        level_name="TEST",
+        segments=[
+            SegmentEntity("H", y=10.00, x_min=0, x_max=6.0, layer="VIGAS"),
+            SegmentEntity("H", y=10.19, x_min=0, x_max=6.0, layer="VIGAS"),
+        ],
+        texts=[
+            TextEntity("L1", 3.0, 10.10, "TEXTO"),
+            TextEntity("60/19", 3.0, 10.20, "TEXTO"),
+        ],
+    )
+
+    elements = classify_elements(level, scale=1.0)
+
+    beams = [e for e in elements if e.element_type == ElementType.BEAM]
+    assert len(beams) == 1
+    assert beams[0].section_width_m == pytest.approx(0.19)
+    assert beams[0].section_height_m == pytest.approx(0.60)
+
+
+def test_keeps_slab_veto_for_section_with_spaced_slash():
+    level = LevelSegment(
+        level_name="TEST",
+        segments=[
+            SegmentEntity("H", y=10.00, x_min=0, x_max=6.0, layer="VIGAS"),
+            SegmentEntity("H", y=10.14, x_min=0, x_max=6.0, layer="VIGAS"),
+        ],
+        texts=[
+            TextEntity("L1", 3.0, 10.10, "TEXTO"),
+            TextEntity("14 / 60", 3.0, 10.20, "TEXTO"),
+        ],
+    )
+
+    elements = classify_elements(level, scale=1.0)
+
+    beams = [e for e in elements if e.element_type == ElementType.BEAM]
+    assert beams == []
+
+
+def test_slab_text_recovery_does_not_apply_to_non_explicit_beam_layer():
+    level = LevelSegment(
+        level_name="TEST",
+        segments=[
+            SegmentEntity("H", y=10.00, x_min=0, x_max=6.0, layer="VIGAS"),
+            SegmentEntity("H", y=10.19, x_min=0, x_max=6.0, layer="VIGAS"),
+            SegmentEntity("H", y=20.00, x_min=0, x_max=6.0, layer="PILARES"),
+            SegmentEntity("H", y=20.19, x_min=0, x_max=6.0, layer="PILARES"),
+        ],
+        texts=[
+            TextEntity("L1", 3.0, 10.10, "TEXTO"),
+            TextEntity("60/19", 3.0, 10.20, "TEXTO"),
+            TextEntity("L2", 3.0, 20.10, "TEXTO"),
+            TextEntity("60/19", 3.0, 20.20, "TEXTO"),
+        ],
+    )
+
+    elements = classify_elements(
+        level,
+        scale=1.0,
+        known_beam_layers={"PILARES": 1.0},
+    )
+
+    beams = [e for e in elements if e.element_type == ElementType.BEAM]
+    assert len(beams) == 1
+    assert beams[0].geometry[0] == pytest.approx((0, 10.095))
+    assert beams[0].geometry[1] == pytest.approx((6.0, 10.095))
