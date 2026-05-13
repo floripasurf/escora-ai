@@ -39,3 +39,6 @@ input/**/*.dxf
 input/**/*.DXF
 input/**/*.pdf
 input/**/*.docx
+
+# Sensitive data — never commit
+data/locadoras.json
