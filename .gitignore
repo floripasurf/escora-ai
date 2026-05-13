@@ -42,3 +42,31 @@ input/**/*.docx
 
 # Sensitive data — never commit
 data/locadoras.json
+
+# ============================================
+# PROPRIETARY ENGINE — DO NOT PUBLISH
+# ============================================
+
+# Core calculation engine
+src/engine/
+
+# ML models, training & inference
+src/ml/
+data/models/
+data/training/
+
+# Parser classifiers (proprietary classification logic)
+src/parser/text_classifier.py
+src/parser/segment_classifier.py
+src/parser/construction_classifier.py
+src/parser/scale_detector.py
+
+# Pipeline calculation & learning stages
+src/pipeline/stage_calculate.py
+src/pipeline/stage_learn.py
+src/pipeline/learning_store.py
+src/pipeline/learning/
+
+# Learning feedback data
+data/learning.json
+data/learning/
