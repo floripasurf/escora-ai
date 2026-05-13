@@ -70,3 +70,10 @@ src/pipeline/learning/
 # Learning feedback data
 data/learning.json
 data/learning/
+
+# Engine tests (test proprietary logic)
+tests/engine/
+tests/test_engine.py
+
+# ML training scripts
+scripts/train_models.py
