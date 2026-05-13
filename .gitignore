@@ -74,6 +74,13 @@ data/learning/
 # Engine tests (test proprietary logic)
 tests/engine/
 tests/test_engine.py
+tests/pipeline/test_learning.py
+tests/pipeline/test_learning_store_revision.py
+tests/pipeline/test_scale_detector.py
+tests/pipeline/test_segment_classifier.py
+tests/pipeline/test_stage_calculate.py
+tests/pipeline/test_text_classifier.py
+scripts/test_drawing_engine.py
 
 # ML training scripts
 scripts/train_models.py
