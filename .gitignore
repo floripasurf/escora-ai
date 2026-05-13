@@ -77,3 +77,10 @@ tests/test_engine.py
 
 # ML training scripts
 scripts/train_models.py
+
+# Proprietary architecture docs (reveal engine internals)
+docs/superpowers/plans/2026-03-25-calculation-pipeline.md
+docs/superpowers/plans/2026-03-25-fase1-mvp-implementation.md
+docs/superpowers/specs/2026-03-25-calculation-pipeline-design.md
+docs/superpowers/specs/2026-03-25-escora-ai-saas-design.md
+diagnostics/tacit_rules.md
