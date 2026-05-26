@@ -239,6 +239,7 @@ def build_report_data(
     # Accessories — cruzetas split: vigas (0.80 m rule), lajes (0.25 ratio),
     # torres (4 por torre). See Supplier Q5.
     try:
+        from src.engine.tower_selector import (
             compute_cruzeta_bom,
             count_cruzetas_laje,
             count_cruzetas_viga,

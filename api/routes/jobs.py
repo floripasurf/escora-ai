@@ -20,7 +20,6 @@ from api.services.revision_service import analyze_revision
 from api.models.schemas import JobCreateResponse, JobStatusResponse
 from api.deps import get_current_branch
 from src.auth.branches import Branch
-from src.pipeline.learning_store import LearningStore
 
 logger = logging.getLogger(__name__)
 
@@ -582,6 +581,8 @@ async def upload_revision(
         job_service.update_job(job_id, revision_data=diff)
 
         try:
+            from src.pipeline.learning_store import LearningStore
+
             store = LearningStore(branch_id=branch.id)
             store.update_record_with_revision(filename=job["filename"], diff=diff)
             store.save()

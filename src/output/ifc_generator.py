@@ -334,6 +334,7 @@ def generate_ifc(
 
     # 5b. Accessories — cruzetas as IfcBuildingElementProxy under one assembly
     try:
+        from src.engine.tower_selector import (
             compute_cruzeta_bom,
             count_cruzetas_laje,
             count_cruzetas_viga,

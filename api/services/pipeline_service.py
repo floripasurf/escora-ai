@@ -8,7 +8,6 @@ from typing import Optional
 
 import ezdxf
 
-from src.pipeline.runner import run_pipeline
 from src.models.pipeline_models import ElementType
 from src.output.report_data import build_report_data, ReportMetadata
 from src.output.pdf_generator import generate_pdf, generate_memoria_calculo, generate_orcamento
@@ -36,6 +35,8 @@ def process_dxf(
     branch_id scopes the learning store so each locadora branch keeps its
     own accumulated knowledge.
     """
+    from src.pipeline.runner import run_pipeline
+
     result = run_pipeline(
         input_path,
         mode=mode,
@@ -272,6 +273,7 @@ def _generate_bom_csv(calc, output_path: str, report_data=None):
 
     # Accessories — cruzetas
     try:
+        from src.engine.tower_selector import (
             compute_cruzeta_bom,
             count_cruzetas_laje,
             count_cruzetas_viga,
