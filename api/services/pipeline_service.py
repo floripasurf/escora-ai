@@ -8,7 +8,6 @@ from typing import Optional
 
 import ezdxf
 
-from src.pipeline.runner import run_pipeline
 from src.models.pipeline_models import ElementType
 from src.output.report_data import build_report_data, ReportMetadata
 from src.output.pdf_generator import generate_pdf, generate_memoria_calculo, generate_orcamento
@@ -18,6 +17,7 @@ from src.output.mermaid_generator import generate_all_diagrams
 from api.config import settings
 
 logger = logging.getLogger(__name__)
+run_pipeline = None
 
 
 def process_dxf(
@@ -36,7 +36,11 @@ def process_dxf(
     branch_id scopes the learning store so each locadora branch keeps its
     own accumulated knowledge.
     """
-    result = run_pipeline(
+    pipeline_runner = run_pipeline
+    if pipeline_runner is None:
+        from src.pipeline.runner import run_pipeline as pipeline_runner
+
+    result = pipeline_runner(
         input_path,
         mode=mode,
         inventory_name=inventory_name,
@@ -45,7 +49,18 @@ def process_dxf(
     calc = result.calculation
 
     if calc is None:
-        return {"error": "Pipeline falhou — nenhum resultado de calculo"}
+        diagnostics = [
+            w for w in result.warnings
+            if w.startswith("Cálculo falhou")
+            or w.startswith("Nenhum")
+            or "filtrad" in w.lower()
+            or "descartad" in w.lower()
+        ]
+        if not diagnostics:
+            diagnostics = result.warnings[-4:]
+        detail = "; ".join(diagnostics[:4]) or "nenhum resultado de calculo"
+        logger.error("Pipeline returned no calculation for %s: %s", input_path, detail)
+        return {"error": f"Pipeline falhou — {detail}"}
 
     # Generate output DXF
     output_dir = Path(settings.output_dir) / job_id
