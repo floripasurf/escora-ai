@@ -23,6 +23,22 @@ def load_catalog(catalog_path: Optional[str] = None) -> List[ShoreCatalogEntry]:
     return [ShoreCatalogEntry(**entry) for entry in data["shores"]]
 
 
+def _is_selectable(shore: ShoreCatalogEntry) -> bool:
+    """Retorna True se a escora pode ser selecionada pelo engine.
+
+    Filtros (manual §8 e §13.1):
+    - available=False: modelo nao disponivel.
+    - enabled=False: placeholder nao configurado (ex: ESC Estendida sem curve).
+    - for_sale_only=True: modelo de venda, nao deve ser default em locacao.
+    - not_standard_rental=True: nao usar como padrao sem confirmar estoque.
+    """
+    if not shore.available or not shore.enabled:
+        return False
+    if shore.for_sale_only or shore.not_standard_rental:
+        return False
+    return True
+
+
 def select_shore(
     catalog: List[ShoreCatalogEntry],
     required_height_m: float,
@@ -35,16 +51,20 @@ def select_shore(
     mode='price' (default): minimiza capacidade derateada (mais econômica).
     mode='inventory': prefere modelos em estoque na locadora informada,
         caindo de volta para 'price' se nada em estoque atende.
+
+    Filtra modelos nao-selecionaveis (ESC Junior somente-venda, placeholders
+    nao configurados, etc) via `_is_selectable`. Manual §13.1.
     """
+    selectable = [s for s in catalog if _is_selectable(s)]
     compatible = [
-        shore for shore in catalog
+        shore for shore in selectable
         if shore.height_min_m <= required_height_m <= shore.height_max_m
         and shore.effective_capacity(required_height_m) >= required_capacity_kn
     ]
 
     if not compatible:
         compatible = [
-            shore for shore in catalog
+            shore for shore in selectable
             if shore.effective_capacity(required_height_m) >= required_capacity_kn
         ]
 

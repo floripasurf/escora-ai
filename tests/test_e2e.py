@@ -89,9 +89,10 @@ class TestE2ESimpleSlab:
         assert result.slab.area_m2 == pytest.approx(24.0)
         assert result.slab.thickness_m == pytest.approx(0.12)
         assert result.self_weight_kn == pytest.approx(72.0)
-        assert result.live_load_kn == pytest.approx(36.0)
-        # Total = (72.0 + 12.0 forma + 36.0) × 1.4 = 168.0
-        assert result.total_load_kn == pytest.approx(168.0)
+        # NBR 15696 §4.2.e (2026-05-27): sobrecarga 2.0 kN/m² → 24m² × 2.0 = 48 kN
+        assert result.live_load_kn == pytest.approx(48.0)
+        # Total = (72.0 + 12.0 forma + 48.0) × 1.4 = 184.8
+        assert result.total_load_kn == pytest.approx(184.8)
 
         # Verificar escoramento
         assert len(result.shores) > 0

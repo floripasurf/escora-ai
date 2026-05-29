@@ -43,14 +43,16 @@ class TestLoadCalculator:
         assert weight == pytest.approx(72.0)
 
     def test_live_load(self, simple_slab):
-        # 24m² × 1.5 kN/m² = 36 kN
+        # NBR 15696 §4.2.e: sobrecarga minima 2.0 kN/m² (era 1.5; corrigido 2026-05-27).
+        # 24m² × 2.0 kN/m² = 48 kN
         load = calculate_live_load(simple_slab)
-        assert load == pytest.approx(36.0)
+        assert load == pytest.approx(48.0)
 
     def test_total_load(self, simple_slab):
-        # (72 concreto + 12 forma + 36 sobrecarga) × 1.4 = 168.0 kN
+        # (72 concreto + 12 forma + 48 sobrecarga) × 1.4 = 184.8 kN
+        # (sobrecarga: 24m² × 2.0 kN/m² per NBR 15696)
         total = calculate_total_load(simple_slab)
-        assert total == pytest.approx(168.0)
+        assert total == pytest.approx(184.8)
 
     def test_total_load_custom_sobrecarga(self, simple_slab):
         # (72 + 12 forma + 24×2.5) × 1.4 = (72 + 12 + 60) × 1.4 = 201.6 kN
@@ -58,9 +60,10 @@ class TestLoadCalculator:
         assert total == pytest.approx(201.6)
 
     def test_linear_load(self):
-        # (0.12 × 25 + 0.5 forma + 1.5) × 1.4 = (3.0 + 0.5 + 1.5) × 1.4 = 7.0 kN/m²
+        # (0.12 × 25 + 0.5 forma + 2.0) × 1.4 = (3.0 + 0.5 + 2.0) × 1.4 = 7.7 kN/m²
+        # NBR 15696 §4.2.e: sobrecarga minima 2.0 kN/m²
         q = calculate_linear_load(0.12)
-        assert q == pytest.approx(7.0)
+        assert q == pytest.approx(7.7)
 
     def test_thick_slab_self_weight(self, thick_slab):
         # 80m² × 0.25m × 25 kN/m³ = 500 kN
@@ -92,8 +95,10 @@ class TestShoreSelector:
     def test_select_most_economical(self, catalog):
         shore = select_shore(catalog, required_height_m=2.8, required_capacity_kn=5.0)
         assert shore is not None
-        # Should select lightest that fits
-        assert shore.load_capacity_kn == 15.0
+        # Catalog atualizado §13.1: capacidades convertidas de kgf reais Orguel.
+        # ESC2000-3100 a 2.80m capacidade 17.7 kN (legacy 15.0 era estimativa).
+        # ESC Junior tem 11.3 kN mas e for_sale_only - nao selecionada.
+        assert shore.load_capacity_kn >= 17.0  # tipo ESC2000-3100 ou similar
 
     def test_no_suitable_shore(self, catalog):
         shore = select_shore(catalog, required_height_m=2.8, required_capacity_kn=999.0)
@@ -165,9 +170,10 @@ class TestInventoryMode:
 
         # Heavy slab that would normally trigger MIXED (Rule 4, ≥20cm)
         # but no towers in inventory → falls back to TELESCOPIC.
-        # Height > 3.10m to bypass Rule 0 (baixo pé-direito → TELESCOPIC).
+        # Manual §8 (2026-05-27): pe-direito padrao expandido para 3.50m.
+        # Usar 3.60m para garantir bypass de Rule 0.
         support, fraction, reasons, _rule = decide_support_type(
-            required_height_m=3.50,
+            required_height_m=3.60,
             load_per_point_kn=10.0,
             slab_thickness_m=0.25,
             slab_area_m2=60.0,
@@ -235,17 +241,20 @@ class TestValidator:
 
 class TestDerating:
     def test_effective_capacity_interpolates(self, catalog):
-        esc310 = next(s for s in catalog if s.id == "ESC310")
+        # Manual §13.1 (2026-05-28): ESC310 renomeado para ESC2000-3100.
+        # Capacidades atualizadas para valores reais Orguel p.11:
+        # 2.00m = 3200 kgf = 31.4 kN; 2.50m = 2250 kgf = 22.1 kN; 3.10m = 1500 kgf = 14.7 kN
+        esc310 = next(s for s in catalog if s.matches_id("ESC310"))
         # Exact curve points
-        assert esc310.effective_capacity(2.00) == pytest.approx(15.0)
-        assert esc310.effective_capacity(2.50) == pytest.approx(12.0)
-        assert esc310.effective_capacity(3.10) == pytest.approx(8.0)
-        # Midpoint between 2.00 (15) and 2.50 (12): 2.25 → 13.5
-        assert esc310.effective_capacity(2.25) == pytest.approx(13.5, rel=1e-3)
+        assert esc310.effective_capacity(2.00) == pytest.approx(31.4)
+        assert esc310.effective_capacity(2.50) == pytest.approx(22.1)
+        assert esc310.effective_capacity(3.10) == pytest.approx(14.7)
+        # Midpoint between 2.00 (31.4) and 2.10 (28.0): 2.05 → 29.7
+        assert esc310.effective_capacity(2.05) == pytest.approx(29.7, rel=1e-3)
         # Clamping above range
-        assert esc310.effective_capacity(3.50) == pytest.approx(8.0)
+        assert esc310.effective_capacity(3.50) == pytest.approx(14.7)
         # Clamping below range
-        assert esc310.effective_capacity(1.50) == pytest.approx(15.0)
+        assert esc310.effective_capacity(1.50) == pytest.approx(31.4)
 
     def test_select_shore_respects_derating(self, catalog):
         # At 4.4 m with 15 kN load, ESC450 derated ≈ 9 kN → must not be returned.
@@ -305,9 +314,9 @@ class TestDerating:
         from src.models.shore import SupportType
 
         # Beam with thick slab (≥15cm) → MIXED ~35% towers
-        # Height > 3.10m to bypass Rule 0 (baixo pé-direito → TELESCOPIC)
+        # Manual §8 (2026-05-27): Rule 0 expandido para 3.50m, usar 3.60m.
         support, fraction, reasons, _rule = decide_support_type(
-            required_height_m=3.50,
+            required_height_m=3.60,
             load_per_point_kn=8.0,
             slab_thickness_m=0.18,
             span_m=5.0,
@@ -323,9 +332,9 @@ class TestDerating:
         from src.models.shore import SupportType
 
         # Thick slab ≥20cm → MIXED ~18% towers (not pure TOWER)
-        # Height > 3.10m to bypass Rule 0 (baixo pé-direito → TELESCOPIC)
+        # Manual §8 (2026-05-27): Rule 0 expandido para 3.50m, usar 3.60m.
         support, fraction, reasons, _rule = decide_support_type(
-            required_height_m=3.50,
+            required_height_m=3.60,
             load_per_point_kn=8.0,
             slab_thickness_m=0.22,
             element_type="slab",
@@ -341,9 +350,9 @@ class TestDerating:
         from src.models.shore import SupportType
 
         # Large slab ≥40m² with thin slab → MIXED ~15% towers
-        # Height > 3.10m to bypass Rule 0 (baixo pé-direito → TELESCOPIC)
+        # Manual §8 (2026-05-27): Rule 0 expandido para 3.50m, usar 3.60m.
         support, fraction, reasons, _rule = decide_support_type(
-            required_height_m=3.50,
+            required_height_m=3.60,
             load_per_point_kn=5.0,
             slab_thickness_m=0.12,
             element_type="slab",
@@ -358,9 +367,11 @@ class TestDerating:
         from src.engine.tower_selector import decide_support_type
         from src.models.shore import SupportType
 
-        # Height > 4.5m → still pure TOWER (physical limit)
+        # Manual §8 (2026-05-28): bloqueio acima de 4.50m e CONDICIONAL ao
+        # catalogo. ESC-PESADA (legado) cobre 5.0m; ESC-ESTENDIDA esta
+        # disabled. Usar 6.0m garante que nenhuma escora cobre -> TOWER.
         support, fraction, reasons, _rule = decide_support_type(
-            required_height_m=5.0,
+            required_height_m=6.0,
             load_per_point_kn=8.0,
             slab_thickness_m=0.12,
             element_type="slab",

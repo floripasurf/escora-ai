@@ -45,6 +45,10 @@ BEAM_INTERMEDIATE_TOWER_FRACTION = 0.20
 PERIMETER_BEAM_MAX_WIDTH_M = 0.30
 PERIMETER_BEAM_MAX_HEIGHT_M = 0.60
 PERIMETER_BEAM_MAX_LENGTH_M = 3.0
+# Envelope leve para viga INTERNA (manual §26 item 7 / §10.2).
+# Se qualquer um dos limites for ultrapassado (OR), escala para torres.
+BEAM_INTERNAL_MAX_WIDTH_M = 0.40
+BEAM_INTERNAL_MAX_HEIGHT_M = 0.70
 HEAVY_SLAB_THICKNESS_M = 0.30       # Above this → tower with dist. beam
 
 # Orguel-calibrated slab tower triggers (from 12-project analysis 2026-04-07)
@@ -108,16 +112,42 @@ def decide_support_type(
     29-44% towers at critical points and slabs use 13-22% towers scattered
     in a wider grid, with telescopic shores filling the rest.
 
-    Physics-based escalation (NBR 15696 + Orguel manual):
-    - Height > 4.5m → 100% tower (ESC450 physical limit) [rule-1-altura]
-    - Load exceeds all derated shores → 100% tower [rule-1b-carga]
-    - Perimeter beam, width≤0.30 h<0.60 L≤3.0 → telescopic only [rule-16-externa]
-    - Large internal beam span > 10m → 100% tower [rule-16c-viga-grande]
-    - Beam span 6-10m → MIXED with ~1 central tower [rule-16b-viga-media]
-    - Thick slab ≥ 20cm → MIXED ~18% tower (Orguel measured: 13-22%)
-    - Large slab ≥ 40m² → MIXED ~15% tower
-    - Beam with thick slab or moderate span → MIXED ~35% tower at intersections
-    - Otherwise → 100% telescopic
+    ----------------------------------------------------------------------
+    MAPEAMENTO CADEIA DE DECISAO DO MANUAL §9 (13 perguntas):
+    ----------------------------------------------------------------------
+    Q1 (H >= 4.50 m?)                         -> rule-1-altura
+                                                  Condicional ao catalogo
+                                                  (extended shores >4.50m).
+    Q2 (H <= 3.50 m, sem excepcionalidade?)   -> rule-0-baixo-pe-direito
+                                                  Manual §8 atualizado em
+                                                  2026-05-27 (era 3.10).
+    Q3 (Carga > capacidade derateada?)         -> rule-1b-carga
+                                                  Aplica fator de seguranca
+                                                  SHORE_SAFETY_FACTOR (1.4).
+    Q4 (Sem torres em estoque + altura ok?)    -> rule-sem-estoque-torre
+                                                  Modo "inventory".
+    Q5 (Viga externa fora dos limites?)        -> rule-16-externa
+                                                  envelope 30 x 60 cm, 3 m.
+    Q6 (Viga interna > 10 m OU > 40 cm larg
+        OU > 70 cm alt?)                       -> rule-16c-viga-grande
+                                                  cobertura via span_m.
+    Q7 (Viga interna 6-10 m, ate 40 x 70 cm?)  -> rule-16b-viga-media
+                                                  ~1 torre central.
+    Q8 (Viga interna ate 6 m, ate 40 x 70 cm?) -> rule-5-viga-mista
+                                                  (laje >=15cm ou span>6m).
+                                                  Quando nao satisfeito,
+                                                  cai para rule-default.
+    Q9 (Viga com laje >=15cm ou vao>6m?)       -> rule-5-viga-mista
+                                                  (mesma regra de Q8).
+    Q10 (Laje >= 20 cm?)                       -> rule-4-laje-espessa
+                                                  Manual §9.
+    Q11 (Painel laje >= 40 m²?)                -> rule-5-laje-grande
+                                                  Manual §9.
+    Q12 (Laje nervurada >= 25 cm?)             -> rule-6-nervurada
+                                                  Subset Mecaner.
+    Q13 (Nenhuma das regras acima?)            -> rule-default-telescopic
+                                                  Manual §9 default.
+    ----------------------------------------------------------------------
 
     Returns (support_type, tower_fraction, reasons, decision_rule):
       tower_fraction: 0.0 = all telescopic, 1.0 = all tower, 0 < x < 1 = mixed
@@ -133,31 +163,81 @@ def decide_support_type(
             if model_id.startswith("TWR-")
         )
 
-    # Rule 1: Height exceeds telescopic limit (ESC450 max = 4.50m)
-    if required_height_m > MAX_TELESCOPIC_HEIGHT_M:
+    # Q1: H >= 4.50 m?  →  Torre obrigatoria (manual §9).
+    # Rule 1: Height exceeds telescopic limit.
+    # Manual §8 / §13.1 (revisado 2026-05-27): bloqueio acima de 4.50 m e
+    # CONDICIONAL ao catalogo da locadora. Se houver modelo de escora
+    # telescopica estendida (>4.50 m) cadastrada E habilitada, a regra 1
+    # nao dispara; o engine cai em Rule 1b para verificar capacidade.
+    # Placeholders desabilitados (enabled=False ou available=False) sao
+    # ignorados.
+    catalog_max_telescopic_m = MAX_TELESCOPIC_HEIGHT_M
+    if shore_catalog:
+        for shore in shore_catalog:
+            if not getattr(shore, "available", True):
+                continue
+            if not getattr(shore, "enabled", True):
+                continue
+            shore_max = getattr(shore, "height_max_m", None)
+            if shore_max is not None and shore_max > catalog_max_telescopic_m:
+                catalog_max_telescopic_m = shore_max
+
+    if required_height_m > catalog_max_telescopic_m:
         reasons.append(
-            f"Altura {required_height_m:.1f}m > {MAX_TELESCOPIC_HEIGHT_M}m "
-            f"(limite ESC450)"
+            f"Altura {required_height_m:.1f}m > {catalog_max_telescopic_m:.2f}m "
+            f"(limite maximo das escoras cadastradas)"
         )
         return SupportType.TOWER, 1.0, reasons, "rule-1-altura"
 
-    # Rule 0: Low ceiling height — ESC310 handles everything.
-    # At ≤ 3.10m, telescopic shores (ESC310) are structurally adequate.
-    # Even if per-point load estimate seems high, the engine can always
-    # reduce spacing (add more shores) — towers are never needed here.
-    # This MUST fire before Rule 1b to prevent false tower escalation
-    # from aggressive load estimates on beams.
-    LOW_HEIGHT_TELESCOPIC_MAX_M = 3.10  # ESC310 max range
+    if (
+        required_height_m > MAX_TELESCOPIC_HEIGHT_M
+        and catalog_max_telescopic_m > MAX_TELESCOPIC_HEIGHT_M
+    ):
+        reasons.append(
+            f"FAIXA ALTA: altura {required_height_m:.2f}m acima de "
+            f"{MAX_TELESCOPIC_HEIGHT_M}m exige escora estendida; verificar "
+            f"contraventamento e base ampliada (manual §8 nota)"
+        )
+
+    # Q2: H <= 3.50 m, sem condicao excepcional?  →  100% escora (manual §9).
+    # Rule 0: Low ceiling height — escora telescopica padrao.
+    # Manual §8 (revisado): faixa de pe-direito ate 3.50 m e padrao para
+    # escoras simples (era 3.10 m antes; ajustado em 2026-05-27 conforme
+    # NBR 15696 §4.2 e manual Orguel p.9).
+    # Mesmo se a estimativa de carga por ponto parecer alta, o engine pode
+    # reduzir o espacamento — torres nao sao necessarias nesta faixa.
+    # Esta regra DEVE disparar antes de Rule 1b para evitar escalada
+    # falsa de torre por estimativas de carga agressivas em vigas.
+    LOW_HEIGHT_TELESCOPIC_MAX_M = 3.50  # manual §8 (era 3.10)
     if required_height_m <= LOW_HEIGHT_TELESCOPIC_MAX_M:
         reasons.append(
             f"Pé-direito {required_height_m:.2f}m ≤ {LOW_HEIGHT_TELESCOPIC_MAX_M}m: "
-            f"escora telescópica adequada (ESC310 cobre até 3.10m, "
+            f"escora telescópica adequada (manual §8, "
             f"espaçamento reduzido compensa cargas maiores)"
         )
         return SupportType.TELESCOPIC, 0.0, reasons, "rule-0-baixo-pe-direito"
 
+    # Rule 0b: faixa intermediaria 3.50-4.00 m — escora telescopica ainda
+    # eh viavel (ESC3000-4500), mas com alerta. Torre facultativa.
+    if required_height_m < 4.00:
+        reasons.append(
+            f"Pé-direito {required_height_m:.2f}m na faixa 3.50-4.00m: "
+            f"ESC3000-4500 viavel, torre facultativa por carga/geometria "
+            f"(manual §8)"
+        )
+
+    # Rule 0c: faixa alta 4.00-4.50 m — torre facultativa, escora ainda valida
+    if 4.00 <= required_height_m <= MAX_TELESCOPIC_HEIGHT_M:
+        reasons.append(
+            f"Pé-direito {required_height_m:.2f}m na faixa 4.00-4.50m: "
+            f"torres/andaimes FACULTATIVOS; emitir alerta de faixa alta "
+            f"(manual §8)"
+        )
+
+    # Q3: Carga majorada por ponto supera capacidade derateada de TODAS
+    #     as escoras compativeis?  →  Torre (manual §9).
     # Rule 1b: Load-based derating check.
-    # Only relevant for heights > 3.10m where shore capacity is limited.
+    # Only relevant for heights > 3.50m where shore capacity is limited.
     if shore_catalog and load_per_point_kn > 0:
         best_cap_kn = 0.0
         for shore in shore_catalog:
@@ -174,12 +254,15 @@ def decide_support_type(
             )
             return SupportType.TOWER, 1.0, reasons, "rule-1b-carga"
 
+    # Q4: Sem torres em estoque e altura/carga permitem escora?  →  Escora
+    #     telescopica (manual §9).
     if inventory_no_towers:
         reasons.append(
             f"Sem torres em estoque ({inventory.locadora}) — usando escora telescópica"
         )
         return SupportType.TELESCOPIC, 0.0, reasons, "rule-sem-estoque-torre"
 
+    # Q5: Viga externa fora dos limites de escora simples?  →  Torre/estaiamento.
     # Rule 16 externa: viga perimetral pequena usa só escora+cruzeta.
     if (
         element_type == "beam"
@@ -195,7 +278,36 @@ def decide_support_type(
         )
         return SupportType.TELESCOPIC, 0.0, reasons, "rule-16-externa"
 
-    # Rule 2: Large span (cimbramento) → 100% tower
+    # Q6: Viga interna > 10 m OU >40 cm larg OU >70 cm alt?  →  Torres.
+    # Manual §26 item 7 (2026-05-28): envelope leve definido por OR;
+    # qualquer estouro escala para sistema com torres.
+    if element_type == "beam" and not is_perimeter:
+        excede_envelope = (
+            span_m > CIMBRAMENTO_SPAN_M
+            or beam_width_m > BEAM_INTERNAL_MAX_WIDTH_M
+            or beam_height_m > BEAM_INTERNAL_MAX_HEIGHT_M
+        )
+        if excede_envelope:
+            partes = []
+            if span_m > CIMBRAMENTO_SPAN_M:
+                partes.append(f"L={span_m:.1f}m > {CIMBRAMENTO_SPAN_M}m")
+            if beam_width_m > BEAM_INTERNAL_MAX_WIDTH_M:
+                partes.append(
+                    f"b={beam_width_m*100:.0f}cm > "
+                    f"{BEAM_INTERNAL_MAX_WIDTH_M*100:.0f}cm"
+                )
+            if beam_height_m > BEAM_INTERNAL_MAX_HEIGHT_M:
+                partes.append(
+                    f"h={beam_height_m*100:.0f}cm > "
+                    f"{BEAM_INTERNAL_MAX_HEIGHT_M*100:.0f}cm"
+                )
+            reasons.append(
+                f"Viga interna fora do envelope leve "
+                f"({'; '.join(partes)}): torres/sistema especial "
+                f"(manual §26 item 7)"
+            )
+            return SupportType.TOWER, 1.0, reasons, "rule-16c-viga-grande"
+    # Rule 2 (fallback nao-viga): span > CIMBRAMENTO_SPAN_M ainda escala torre
     if span_m > CIMBRAMENTO_SPAN_M:
         reasons.append(
             f"Vão {span_m:.1f}m > {CIMBRAMENTO_SPAN_M}m "
@@ -208,6 +320,7 @@ def decide_support_type(
     # Beams: 29-44% towers (at pillar intersections), rest telescopic.
     # Slabs: 13-22% towers (wider grid), rest telescopic.
 
+    # Q7: Viga interna 6-10 m, ate 40 x 70 cm?  →  Misto: escoras + torre central.
     # Rule 16b: Viga interna 6-10 m → 1 torre central + escoras
     if (
         element_type == "beam"
@@ -220,6 +333,8 @@ def decide_support_type(
         )
         return SupportType.MIXED, fraction, reasons, "rule-16b-viga-media"
 
+    # Q8/Q9: Viga ate 6m com cruzetas, OU viga com laje >=15cm ou vao>6m?
+    #        →  Misto (cruzetas + escoras).
     # Rule 3: Beam with moderate load or span → mixed ~35% towers
     if element_type == "beam":
         # Beams with slab ≥ 15cm or span > 6m benefit from mixed support
@@ -231,6 +346,7 @@ def decide_support_type(
             )
             return SupportType.MIXED, fraction, reasons, "rule-5-viga-mista"
 
+    # Q10: Laje >= 20 cm?  →  Misto (excecao em pe-direito baixo, ja tratado em Q2).
     # Rule 4: Heavy/thick slab (≥20cm) → mixed ~18% towers
     if slab_thickness_m >= SLAB_TOWER_THICKNESS_M:
         fraction = SLAB_TOWER_FRACTION_THICK
@@ -240,6 +356,7 @@ def decide_support_type(
         )
         return SupportType.MIXED, fraction, reasons, "rule-4-laje-espessa"
 
+    # Q11: Painel de laje >= 40 m²?  →  Misto (excecao em pe-direito baixo).
     # Rule 5: Large slab panel → mixed ~15% towers
     if slab_area_m2 >= SLAB_TOWER_AREA_M2:
         fraction = SLAB_TOWER_FRACTION_LARGE
@@ -249,6 +366,7 @@ def decide_support_type(
         )
         return SupportType.MIXED, fraction, reasons, "rule-5-laje-grande"
 
+    # Q12: Laje nervurada >= 25 cm?  →  Misto ou Mecaner, com revisao.
     # Rule 6: Ribbed slab ≥ 25cm → mixed 20% towers
     if slab_type == "ribbed" and slab_thickness_m > 0.25:
         fraction = 0.20
@@ -258,7 +376,8 @@ def decide_support_type(
         )
         return SupportType.MIXED, fraction, reasons, "rule-6-nervurada"
 
-    # Default: telescopic shore (ESC310 or ESC450 by height)
+    # Q13: Nenhuma regra acionada  →  Escora telescopica (default manual §9).
+    # Default: telescopic shore (ESC2000-3100 or ESC3000-4500 by height)
     reasons.append(
         f"Escora telescópica adequada "
         f"(h={required_height_m:.1f}m, laje {slab_thickness_m*100:.0f}cm)"

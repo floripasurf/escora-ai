@@ -7,11 +7,17 @@ Dois tipos suportados:
 Referências:
 - NBR 6122:2019 — Projeto e execução de fundações
 - NBR 6118:2023 — Projeto de estruturas de concreto
+
+Verificacao de tensao no apoio (manual §4 / Orguel p.25):
+- Torre de escoramento:  >= 16.53 kgf/cm² na placa-base
+- ESC2000-3100:          >= 26.45 kgf/cm² na placa-base
+- ESC3000-4500:          >= 17.35 kgf/cm² na placa-base
 """
 
 import logging
 import math
-from typing import List
+from dataclasses import dataclass
+from typing import List, Literal, Optional
 
 from src.models.masonry import Foundation, FoundationType, FloorPlan, Wall
 from src.utils.masonry_constants import (
@@ -23,6 +29,130 @@ from src.utils.masonry_constants import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# Tensoes minimas no apoio (kgf/cm²) - manual §4 / Orguel p.25
+# Valores ja convertidos: 1 kN = 101.97 kgf, 1 m² = 10000 cm²
+SUPPORT_STRESS_MIN_KGF_CM2 = {
+    "torre": 16.53,
+    "ESC2000-3100": 26.45,
+    "ESC3000-4500": 17.35,
+    # Aliases legados (manual §13.1)
+    "ESC310": 26.45,
+    "ESC450": 17.35,
+    # Default conservador (usa o maior)
+    "DEFAULT": 26.45,
+}
+
+
+@dataclass(frozen=True)
+class SupportStressCheck:
+    """Resultado da verificacao de tensao no apoio de uma escora/torre."""
+    support_type: str           # "torre", "ESC2000-3100", etc.
+    model_id: str               # ID do modelo (ex: "ESC2000-3100")
+    load_kn: float              # Carga aplicada (kN, ja majorada)
+    base_area_cm2: float        # Area de contato da placa-base (cm²)
+    stress_kgf_cm2: float       # Tensao aplicada (kgf/cm²)
+    stress_min_kgf_cm2: float   # Tensao minima requerida (manual §4)
+    passes: bool                # True se solo/apoio resiste
+    margin: float               # stress_min - stress (negativo = falha)
+    note: str = ""              # Observacao para relatorio
+
+
+def _resolve_support_min_stress(support_type: str, model_id: str) -> float:
+    """Resolve a tensao minima requerida pelo tipo/modelo de apoio."""
+    if model_id and model_id in SUPPORT_STRESS_MIN_KGF_CM2:
+        return SUPPORT_STRESS_MIN_KGF_CM2[model_id]
+    if support_type and support_type.lower() in SUPPORT_STRESS_MIN_KGF_CM2:
+        return SUPPORT_STRESS_MIN_KGF_CM2[support_type.lower()]
+    # Default conservador
+    return SUPPORT_STRESS_MIN_KGF_CM2["DEFAULT"]
+
+
+def check_support_stress(
+    support_type: Literal["torre", "telescopic"],
+    model_id: str,
+    load_kn: float,
+    base_plate_mm: float,
+    base_shape: Literal["square", "circle"] = "square",
+    sapata_area_cm2: Optional[float] = None,
+) -> SupportStressCheck:
+    """Verifica se a tensao no apoio supera a minima requerida (manual §4).
+
+    Args:
+        support_type: "torre" ou "telescopic".
+        model_id: ID do modelo (ex: "ESC2000-3100", "ESC3000-4500", "TWR-TA150").
+        load_kn: Carga aplicada na escora/torre (kN, ja com gamma_f).
+        base_plate_mm: Lado da placa-base (ou diametro se circular), em mm.
+        base_shape: "square" (padrao Orguel) ou "circle".
+        sapata_area_cm2: Se fornecido, sobrescreve a area calculada da
+            placa-base (ex: quando se usa sapata distribuidora maior).
+
+    Returns:
+        SupportStressCheck com a tensao calculada, requerida e se passa.
+
+    Manual §4 / Orguel p.25:
+        torre = 16.53 kgf/cm²
+        ESC2000-3100 = 26.45 kgf/cm²
+        ESC3000-4500 = 17.35 kgf/cm²
+    """
+    # Area de contato (cm²)
+    if sapata_area_cm2 is not None:
+        area_cm2 = sapata_area_cm2
+        note = f"Area da sapata distribuidora: {area_cm2:.1f} cm²"
+    else:
+        side_cm = base_plate_mm / 10.0
+        if base_shape == "circle":
+            area_cm2 = math.pi * (side_cm / 2.0) ** 2
+            note = f"Placa circular φ={side_cm:.1f}cm → A={area_cm2:.1f} cm²"
+        else:
+            area_cm2 = side_cm * side_cm
+            note = f"Placa quadrada {side_cm:.1f}x{side_cm:.1f}cm → A={area_cm2:.1f} cm²"
+
+    # Converte carga: 1 kN = 101.97 kgf
+    load_kgf = load_kn * 101.97
+    stress_kgf_cm2 = load_kgf / area_cm2 if area_cm2 > 0 else float("inf")
+
+    stress_min = _resolve_support_min_stress(support_type, model_id)
+    passes = stress_kgf_cm2 <= stress_min  # tensao aplicada deve estar abaixo da maxima
+
+    margin = stress_min - stress_kgf_cm2
+
+    return SupportStressCheck(
+        support_type=support_type,
+        model_id=model_id,
+        load_kn=round(load_kn, 2),
+        base_area_cm2=round(area_cm2, 1),
+        stress_kgf_cm2=round(stress_kgf_cm2, 2),
+        stress_min_kgf_cm2=stress_min,
+        passes=passes,
+        margin=round(margin, 2),
+        note=note,
+    )
+
+
+def required_sapata_area_cm2(
+    support_type: str,
+    model_id: str,
+    load_kn: float,
+    safety_factor: float = 1.0,
+) -> float:
+    """Calcula a area minima de sapata distribuidora para atender §4.
+
+    A = (load_kgf * safety_factor) / stress_min_kgf_cm2
+
+    Args:
+        support_type: "torre" ou "telescopic".
+        model_id: ID do modelo de escora/torre.
+        load_kn: Carga aplicada (kN, ja com gamma_f).
+        safety_factor: Coeficiente adicional (1.0 = NBR; >1.0 = mais conservador).
+
+    Returns:
+        Area minima da sapata em cm².
+    """
+    load_kgf = load_kn * 101.97
+    stress_min = _resolve_support_min_stress(support_type, model_id)
+    return (load_kgf * safety_factor) / stress_min
 
 
 def design_sapata_corrida(

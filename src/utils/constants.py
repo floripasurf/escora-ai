@@ -14,12 +14,53 @@ GAMMA_CONCRETO = 25.0
 # Compensado 12mm + longarinas + vigas de escoramento ≈ 0.5 kN/m²
 Q_FORMA_DEFAULT = 0.50
 
-# Sobrecarga mínima de trabalho (kN/m²) — NBR 15696:2009
-# Inclui operários, equipamentos e impacto de lançamento
-Q_SOBRECARGA_DEFAULT = 1.5
+# Sobrecarga mínima de trabalho (kN/m²) — NBR 15696:2009 §4.2.e
+# Inclui operários, equipamentos e impacto de lançamento.
+# Manual §3 (corrigido em 2026-05-27): a NBR exige minimo 2.0 kN/m² para
+# concretagem. O valor 1.5 kN/m² corresponde a PLATAFORMA DE TRABALHO local
+# (Q_PLATAFORMA_LOCAL_DEFAULT), nao a sobrecarga distribuida geral.
+Q_SOBRECARGA_DEFAULT = 2.0
 
-# Coeficiente de majoração de ações — NBR 15696:2009
+# Sobrecarga local de plataforma de trabalho (kN/m²) — NBR 15696:2009 §4.2.k
+# Aplicada apenas quando ha passarela/plataforma modelada.
+Q_PLATAFORMA_LOCAL_DEFAULT = 1.5
+
+# Sobrecarga em reescoramento (kN/m²) — NBR 15696:2009 Anexo C.4.a
+# Sobrecarga minima durante construcao para escoras remanescentes.
+Q_REESCORAMENTO_DEFAULT = 1.0
+
+# Sobrecarga para verificacao de flecha (kN/m²) — NBR 15696:2009 §4.3.2
+# Aplicada sem coeficiente de seguranca, junto com peso proprio do concreto.
+Q_FLECHA_VERIFICACAO = 1.0
+
+# Carga estatica minima total (kN/m²) — NBR 15696:2009 §4.2.e
+# A soma de peso proprio + sobrecargas nao pode ser inferior a este valor
+# (verificada apos calculo de cargas).
+CARGA_ESTATICA_MIN_TOTAL = 4.0
+
+# Esforco horizontal lateral nas formas de laje — NBR 15696:2009 §4.2.l
+# Fracao da carga vertical aplicada nesse nivel, em cada sentido principal.
+ESFORCO_HORIZONTAL_FRACAO = 0.05  # 5%
+
+# Coeficiente de majoração de ações — NBR 15696:2009 §4.3.1
 GAMMA_F = 1.4
+
+# Coeficiente de majoracao especifico para escoras/torres em compressao
+# e flambagem — NBR 15696:2009 §4.3.1.2
+GAMMA_F_FLAMBAGEM = 1.5
+
+# Coeficiente de ponderacao do material aco (uso geral) — NBR 15696 §4.3.1.2
+GAMMA_M_ACO = 1.1
+
+# Coeficiente de seguranca minimo contra flambagem (escoras/torres)
+# NBR 15696:2009 Anexo A: deve ser >= 2.0 sobre a carga de ruptura ensaiada.
+COEF_SEGURANCA_FLAMBAGEM_MIN = 2.0
+
+# Prazo minimo (dias) para desforma/remanejamento - NBR 14931 + NBR 15696.
+# Manual §26 item 10 (2026-05-28): piso normativo padrao. Reducao abaixo
+# disso so com analise tecnica, comprovacao de fcj/Ec e aprovacao do
+# responsavel tecnico. Override deve vir acompanhado de justificativa.
+DESFORMA_MIN_DIAS = 14
 
 # Espaçamento máximo entre escoras de LAJE (m) — TETO / FALLBACK
 # Calibrado com medições de projetos Orguel reais (84678, 92056):

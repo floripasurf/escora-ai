@@ -16,7 +16,9 @@ def catalog():
 
 @pytest.fixture
 def esc310(catalog):
-    return next(s for s in catalog if s.id == "ESC310")
+    # Manual §13.1: ESC310 foi renomeado para ESC2000-3100; usar matches_id
+    # para aceitar ambos via alias.
+    return next(s for s in catalog if s.matches_id("ESC310"))
 
 
 class TestAdaptiveSpacingIntegration:

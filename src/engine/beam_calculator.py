@@ -280,3 +280,111 @@ def estimate_beam_shore_height(pe_direito_m: float, beam_height_m: float) -> flo
     A escora vai do piso até o fundo da viga.
     """
     return pe_direito_m - beam_height_m
+
+
+# Limites de flecha admissivel por faixa de vao — manual §22.3 (Orguel p.81)
+# Formula geral NBR 15696 §4.3.2: u_lim = 1 + L/500 (mm).
+# Tabela de denominadores adotados pela Orguel para vaos curtos a medios:
+DEFLECTION_LIMIT_RANGES = [
+    (2.00, 400),   # L <= 2.00 m
+    (2.50, 415),   # 2.00 < L <= 2.50 m
+    (2.75, 423),   # 2.50 < L <= 2.75 m
+    (3.00, 429),   # 2.75 < L <= 3.00 m
+]
+
+
+def deflection_limit_denominator(span_m: float) -> int:
+    """Retorna o denominador X tal que flecha admissivel = L/X.
+
+    Para vaos acima de 3.00 m adota o limite generico NBR 15696 (L/500).
+    Manual §22.3.
+    """
+    for upper, denom in DEFLECTION_LIMIT_RANGES:
+        if span_m <= upper:
+            return denom
+    return 500
+
+
+def compute_max_span_bar(m_adm_kgf_m: float, point_load_kgf: float) -> float:
+    """Vao maximo do barrote para carga concentrada no meio do vao.
+
+    Manual §22.2 (Orguel p.72):
+        M_max = P * L / 4
+        L_max = 4 * M_adm / P
+    """
+    if point_load_kgf <= 0:
+        return float("inf")
+    return 4.0 * m_adm_kgf_m / point_load_kgf
+
+
+def compute_max_span_by_moment(m_adm_kgf_m: float, q_kgf_m: float, n_apoios: int = 2) -> float:
+    """Vao maximo por momento, viga bi-apoiada ou continua (3+ apoios).
+
+    Manual §22.3:
+        Bi-apoiada:   L_max = sqrt(8 * M_adm / q)
+        3+ apoios:    L_max = sqrt(10 * M_adm / q)  (momento maximo no apoio)
+    """
+    if q_kgf_m <= 0:
+        return float("inf")
+    coef = 8.0 if n_apoios <= 2 else 10.0
+    return math.sqrt(coef * m_adm_kgf_m / q_kgf_m)
+
+
+def compute_max_span_by_deflection(
+    ei_kgf_m2: float,
+    q_kgf_m: float,
+    n_apoios: int = 2,
+    deflection_denominator: Optional[int] = None,
+) -> float:
+    """Vao maximo por verificacao de flecha.
+
+    Manual §22.3:
+        Bi-apoiada:   L_max = (384 * E.I / (5 * q * X))^(1/3)
+        3+ apoios:    L_max = (581 * E.I / (4 * q * X))^(1/3)
+
+    Onde X e o denominador do limite de flecha L/X. Se nao fornecido,
+    aplica iterativamente a tabela DEFLECTION_LIMIT_RANGES.
+    """
+    if q_kgf_m <= 0 or ei_kgf_m2 <= 0:
+        return float("inf")
+
+    if deflection_denominator is not None:
+        coef_num, coef_den = (384.0, 5.0) if n_apoios <= 2 else (581.0, 4.0)
+        return (coef_num * ei_kgf_m2 / (coef_den * q_kgf_m * deflection_denominator)) ** (1.0 / 3.0)
+
+    # Iterativo: comecar com L/500 e ajustar pelo denominador correto
+    L = 5.0  # chute inicial
+    for _ in range(6):
+        denom = deflection_limit_denominator(L)
+        coef_num, coef_den = (384.0, 5.0) if n_apoios <= 2 else (581.0, 4.0)
+        L_new = (coef_num * ei_kgf_m2 / (coef_den * q_kgf_m * denom)) ** (1.0 / 3.0)
+        if abs(L_new - L) < 0.01:
+            return L_new
+        L = L_new
+    return L
+
+
+def compute_max_beam_span(
+    m_adm_kgf_m: float,
+    ei_kgf_m2: float,
+    q_kgf_m: float,
+    n_apoios: int = 2,
+) -> Tuple[float, str]:
+    """Vao maximo verificando momento E flecha; adotar o menor.
+
+    Manual §22.3 / §22.6: a regra obriga verificar ambos e adotar o menor
+    resultado. Retorna (L_max, criterio_dominante).
+    """
+    L_moment = compute_max_span_by_moment(m_adm_kgf_m, q_kgf_m, n_apoios)
+    L_deflection = compute_max_span_by_deflection(ei_kgf_m2, q_kgf_m, n_apoios)
+    if L_moment <= L_deflection:
+        return L_moment, "momento"
+    return L_deflection, "flecha"
+
+
+def compute_guide_moment(q_kgf_m: float, span_m: float) -> float:
+    """Momento maximo de guia bi-apoiada submetida a carga distribuida.
+
+    Manual §22.5: M = q * L^2 / 8.
+    """
+    return q_kgf_m * span_m * span_m / 8.0

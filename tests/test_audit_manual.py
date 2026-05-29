@@ -166,26 +166,29 @@ class TestSlabNearClosedPolyline:
 
 class TestLoadFloor:
     def test_normal_slab_no_floor_effect(self):
-        """Laje 12cm: p_char = 0.12×25 + 0.50 + 1.5 = 5.0 > 4.0 → no floor."""
+        """Laje 12cm: p_char = 0.12×25 + 0.50 + 2.0 = 5.5 > 4.0 → no floor.
+        Sobrecarga atualizada para 2.0 kN/m² (NBR 15696 §4.2.e, 2026-05-27).
+        """
         result = calculate_linear_load(0.12)
-        expected = (0.12 * 25 + 0.50 + 1.5) * 1.4
+        expected = (0.12 * 25 + 0.50 + 2.0) * 1.4
         assert abs(result - expected) < 0.01
 
     def test_thin_slab_floor_applies(self):
-        """Laje 2cm: p_char = 0.02×25 + 0.50 + 1.5 = 2.5 < 4.0 → floor at 4.0."""
+        """Laje 2cm: p_char = 0.02×25 + 0.50 + 2.0 = 3.0 < 4.0 → floor at 4.0."""
         result = calculate_linear_load(0.02)
         expected = 4.0 * GAMMA_F
         assert abs(result - expected) < 0.01
 
     def test_zero_thickness_floor_applies(self):
-        """Espessura 0: p_char = 0 + 0.50 + 1.5 = 2.0 < 4.0 → floor."""
+        """Espessura 0: p_char = 0 + 0.50 + 2.0 = 2.5 < 4.0 → floor."""
         result = calculate_linear_load(0.0)
         assert abs(result - CARGA_PISO_MINIMO_KN_M2 * GAMMA_F) < 0.01
 
     def test_exact_floor_boundary(self):
-        """p_char exactly 4.0 → should not change."""
-        # e×25 + 0.50 + 1.5 = 4.0 → e = (4.0 - 2.0)/25 = 0.08
-        result = calculate_linear_load(0.08)
+        """p_char exactly 4.0 → should not change.
+        e×25 + 0.50 + 2.0 = 4.0 → e = (4.0 - 2.5)/25 = 0.06
+        """
+        result = calculate_linear_load(0.06)
         expected = 4.0 * GAMMA_F
         assert abs(result - expected) < 0.01
 
