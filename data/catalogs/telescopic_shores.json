@@ -1,43 +1,79 @@
 {
-  "catalog_version": "2.0",
+  "catalog_version": "3.0",
   "type": "telescopic_shore",
-  "updated": "2026-04-06",
-  "source": "Catálogo Mecanor / Orguel — modelos reais de locadoras",
+  "updated": "2026-05-28",
+  "source": "Catalogo Orguel manual p.11 (manual de normas §13.1)",
+  "notes": "v3 (2026-05-28): nomenclatura oficial Orguel alinhada ao manual. Mantidos IDs legados ESC310/ESC450/ESC-PESADA como aliases para retro-compatibilidade. ESC Junior adicionada (somente venda - not_standard_rental=true). ESC Estendida placeholder para SH LUME/Peri MP625/etc cadastraveis por locadora.",
   "shores": [
     {
-      "id": "ESC310",
-      "manufacturer": "Mecanor",
-      "model": "Escora Mecanor 2.00 a 3.10m",
+      "id": "ESC-JUNIOR",
+      "aliases": [],
+      "manufacturer": "Orguel",
+      "model": "ESC Junior (somente venda)",
       "type": "telescopic",
-      "height_min_m": 1.80,
+      "height_min_m": 2.00,
       "height_max_m": 3.10,
-      "load_capacity_kn": 15.0,
-      "capacity_curve": [[2.00, 15.0], [2.50, 12.0], [3.10, 8.0]],
-      "weight_kg": 8.5,
-      "tube_external_mm": 48.3,
-      "tube_internal_mm": 38.1,
-      "base_plate_mm": 120,
-      "price_reference_brl": 9.44,
-      "notes": "Tensão base: 26.45 kgf/cm². Padrão p/ pé-direito até 3.10m. Preço: 8.5kg × R$1.11/kg/mês."
+      "load_capacity_kn": 19.6,
+      "capacity_curve": [
+        [2.00, 19.6], [2.10, 18.6], [2.20, 17.7], [2.30, 16.7],
+        [2.40, 15.2], [2.50, 14.0], [2.60, 12.7], [2.70, 12.0],
+        [2.80, 11.3], [2.90, 11.0], [3.00, 10.3], [3.10, 9.8]
+      ],
+      "weight_kg": 8.0,
+      "tube_external_mm": 50.80,
+      "tube_internal_mm": 42.20,
+      "base_plate_mm": 110,
+      "price_reference_brl": 8.88,
+      "for_sale_only": true,
+      "not_standard_rental": true,
+      "notes": "ESC Junior - linha de VENDA Orguel. NAO usar como padrao de locacao sem confirmar estoque. Capacidades em kN convertidas de kgf (manual §13.1 / Orguel p.11): 2000-1000 kgf x 0.00981 = 19.6-9.8 kN."
     },
     {
-      "id": "ESC450",
-      "manufacturer": "Mecanor",
-      "model": "Escora Mecanor 3.00 a 4.50m",
+      "id": "ESC2000-3100",
+      "aliases": ["ESC310"],
+      "manufacturer": "Orguel/Mecanor",
+      "model": "ESC 2000 a 3100",
       "type": "telescopic",
-      "height_min_m": 2.60,
+      "height_min_m": 2.00,
+      "height_max_m": 3.10,
+      "load_capacity_kn": 31.4,
+      "capacity_curve": [
+        [2.00, 31.4], [2.10, 28.0], [2.20, 26.0], [2.30, 25.0],
+        [2.40, 23.5], [2.50, 22.1], [2.60, 20.6], [2.70, 18.6],
+        [2.80, 17.7], [2.90, 16.2], [3.00, 15.2], [3.10, 14.7]
+      ],
+      "weight_kg": 8.5,
+      "tube_external_mm": 50.80,
+      "tube_internal_mm": 42.20,
+      "base_plate_mm": 120,
+      "price_reference_brl": 9.44,
+      "notes": "ESC 2000-3100 (legado ESC310). Tensao base: 26.45 kgf/cm² (manual §4). Capacidades convertidas de kgf (manual §13.1 / Orguel p.11): 3200-1500 kgf x 0.00981. Padrao p/ pe-direito ate 3.10m."
+    },
+    {
+      "id": "ESC3000-4500",
+      "aliases": ["ESC450"],
+      "manufacturer": "Orguel/Mecanor",
+      "model": "ESC 3000 a 4500",
+      "type": "telescopic",
+      "height_min_m": 3.00,
       "height_max_m": 4.50,
-      "load_capacity_kn": 20.0,
-      "capacity_curve": [[3.00, 20.0], [3.75, 13.0], [4.50, 8.0]],
+      "load_capacity_kn": 20.6,
+      "capacity_curve": [
+        [3.00, 20.6], [3.10, 19.6], [3.20, 18.6], [3.30, 17.7],
+        [3.40, 16.7], [3.50, 16.2], [3.60, 15.2], [3.70, 14.7],
+        [3.80, 13.7], [3.90, 13.2], [4.00, 12.3], [4.10, 11.3],
+        [4.20, 10.3], [4.30, 9.3], [4.40, 8.3], [4.50, 7.4]
+      ],
       "weight_kg": 11.2,
-      "tube_external_mm": 60.3,
-      "tube_internal_mm": 48.3,
+      "tube_external_mm": 60.30,
+      "tube_internal_mm": 50.80,
       "base_plate_mm": 150,
       "price_reference_brl": 12.43,
-      "notes": "Tensão base: 17.35 kgf/cm². Para pé-direito 3.00-4.50m. Preço: 11.2kg × R$1.11/kg/mês."
+      "notes": "ESC 3000-4500 (legado ESC450). Tensao base: 17.35 kgf/cm² (manual §4). Capacidades convertidas de kgf (manual §13.1 / Orguel p.11): 2100-750 kgf x 0.00981. Para pe-direito 3.00-4.50m."
     },
     {
       "id": "ESC-PESADA",
+      "aliases": [],
       "manufacturer": "Mecanor",
       "model": "Escora Pesada 3.00 a 5.00m",
       "type": "telescopic",
@@ -50,7 +86,27 @@
       "tube_internal_mm": 60.3,
       "base_plate_mm": 180,
       "price_reference_brl": 18.65,
-      "notes": "Para cargas pesadas, vigas e lajes espessas. Preço: 16.8kg × R$1.11/kg/mês."
+      "notes": "Modelo legado Mecanor para cargas pesadas e vigas/lajes espessas. NAO esta no manual Orguel - manter por compatibilidade com projetos antigos."
+    },
+    {
+      "id": "ESC-ESTENDIDA",
+      "aliases": [],
+      "manufacturer": "Generico",
+      "model": "Escora Estendida >4.50m (placeholder)",
+      "type": "telescopic",
+      "height_min_m": 4.50,
+      "height_max_m": 6.00,
+      "load_capacity_kn": 0.0,
+      "capacity_curve": [],
+      "weight_kg": 0.0,
+      "tube_external_mm": 0,
+      "tube_internal_mm": 0,
+      "base_plate_mm": 0,
+      "price_reference_brl": 0.0,
+      "available": false,
+      "enabled": false,
+      "extended_shore": true,
+      "notes": "PLACEHOLDER para locadora cadastrar escoras estendidas >4.50m reais (SH LUME SH 3.20-6.00m / Peri MULTIPROP MP625 4.30-6.25m / ULMA ALUPROP / etc). Manual §8: bloqueio acima de 4.50m e CONDICIONAL ao catalogo - quando enabled=true e curve preenchida, engine permite selecao com alerta de faixa alta."
     }
   ]
 }

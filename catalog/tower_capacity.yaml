@@ -1,8 +1,17 @@
 # Tower capacity curve — Orguel p.86
 # Capacity decreases with number of 1.5m modules (Euler buckling).
-# Units: height in meters, capacity in kN.
 #
-# NOTE: Module 14 shows 1500 kN in the PDF but this breaks the
+# CORRECTION (manual §13.2, §23.9): The Orguel chart axis is labeled
+# "Carga no montante kN" but the plotted values (2000, 1900, ..., 1470) are
+# actually in kgf per montante (one of the 4 corner posts of the tower).
+# To obtain total tower capacity multiply by 4 montantes; to convert to kN
+# multiply by 9.80665e-3.
+#
+# Field naming convention:
+#   capacity_kgf_per_montante: original Orguel chart value
+#   capacity_kn_per_tower:     4 montantes × kgf × 9.80665e-3
+#
+# NOTE: Module 14 shows 1500 in the original PDF but this breaks the
 # monotonic curve. Almost certainly a typo for 1590. Flagged as
 # TODO(engineer-confirmation). Until confirmed, system flags any
 # 14-module placement for engineer review.
@@ -10,24 +19,26 @@
 description: "Torre de escoramento Orguel — curva de capacidade por módulos"
 module_height_m: 1.5
 
+# Reference fields (per montante / kgf) match Orguel chart exactly.
+# Engine consumers should use shoring_towers.json (already converted).
 curve:
-  - { modules: 1,  height_m: 1.5,  capacity_kn: 2000 }
-  - { modules: 2,  height_m: 3.0,  capacity_kn: 1900 }
-  - { modules: 3,  height_m: 4.5,  capacity_kn: 1850 }
-  - { modules: 4,  height_m: 6.0,  capacity_kn: 1800 }
-  - { modules: 5,  height_m: 7.5,  capacity_kn: 1770 }
-  - { modules: 6,  height_m: 9.0,  capacity_kn: 1750 }
-  - { modules: 7,  height_m: 10.5, capacity_kn: 1730 }
-  - { modules: 8,  height_m: 12.0, capacity_kn: 1710 }
-  - { modules: 9,  height_m: 13.5, capacity_kn: 1690 }
-  - { modules: 10, height_m: 15.0, capacity_kn: 1670 }
-  - { modules: 11, height_m: 16.5, capacity_kn: 1650 }
-  - { modules: 12, height_m: 18.0, capacity_kn: 1630 }
-  - { modules: 13, height_m: 19.5, capacity_kn: 1610 }
-  - { modules: 14, height_m: 21.0, capacity_kn: 1590 }  # PDF shows 1500 — suspected typo, using 1590 (TODO: confirm with Orguel)
-  - { modules: 15, height_m: 22.5, capacity_kn: 1570 }
-  - { modules: 16, height_m: 24.0, capacity_kn: 1550 }
-  - { modules: 17, height_m: 25.5, capacity_kn: 1530 }
-  - { modules: 18, height_m: 27.0, capacity_kn: 1510 }
-  - { modules: 19, height_m: 28.5, capacity_kn: 1490 }
-  - { modules: 20, height_m: 30.0, capacity_kn: 1470 }
+  - { modules: 1,  height_m: 1.5,  capacity_kgf_per_montante: 2000, capacity_kn_per_tower: 78.5 }
+  - { modules: 2,  height_m: 3.0,  capacity_kgf_per_montante: 1900, capacity_kn_per_tower: 74.5 }
+  - { modules: 3,  height_m: 4.5,  capacity_kgf_per_montante: 1850, capacity_kn_per_tower: 72.6 }
+  - { modules: 4,  height_m: 6.0,  capacity_kgf_per_montante: 1800, capacity_kn_per_tower: 70.6 }
+  - { modules: 5,  height_m: 7.5,  capacity_kgf_per_montante: 1770, capacity_kn_per_tower: 69.5 }
+  - { modules: 6,  height_m: 9.0,  capacity_kgf_per_montante: 1750, capacity_kn_per_tower: 68.6 }
+  - { modules: 7,  height_m: 10.5, capacity_kgf_per_montante: 1730, capacity_kn_per_tower: 67.9 }
+  - { modules: 8,  height_m: 12.0, capacity_kgf_per_montante: 1710, capacity_kn_per_tower: 67.1 }
+  - { modules: 9,  height_m: 13.5, capacity_kgf_per_montante: 1690, capacity_kn_per_tower: 66.3 }
+  - { modules: 10, height_m: 15.0, capacity_kgf_per_montante: 1670, capacity_kn_per_tower: 65.5 }
+  - { modules: 11, height_m: 16.5, capacity_kgf_per_montante: 1650, capacity_kn_per_tower: 64.7 }
+  - { modules: 12, height_m: 18.0, capacity_kgf_per_montante: 1630, capacity_kn_per_tower: 64.0 }
+  - { modules: 13, height_m: 19.5, capacity_kgf_per_montante: 1610, capacity_kn_per_tower: 63.2 }
+  - { modules: 14, height_m: 21.0, capacity_kgf_per_montante: 1590, capacity_kn_per_tower: 62.4 }  # PDF shows 1500 — suspected typo, using 1590
+  - { modules: 15, height_m: 22.5, capacity_kgf_per_montante: 1570, capacity_kn_per_tower: 61.6 }
+  - { modules: 16, height_m: 24.0, capacity_kgf_per_montante: 1550, capacity_kn_per_tower: 60.8 }
+  - { modules: 17, height_m: 25.5, capacity_kgf_per_montante: 1530, capacity_kn_per_tower: 60.0 }
+  - { modules: 18, height_m: 27.0, capacity_kgf_per_montante: 1510, capacity_kn_per_tower: 59.2 }
+  - { modules: 19, height_m: 28.5, capacity_kgf_per_montante: 1490, capacity_kn_per_tower: 58.5 }
+  - { modules: 20, height_m: 30.0, capacity_kgf_per_montante: 1470, capacity_kn_per_tower: 57.7 }

@@ -65,3 +65,27 @@ esc_3000_4500:
     - [4.30, 950]
     - [4.40, 850]
     - [4.50, 750]
+
+# Escoras telescopicas estendidas (>4.50 m).
+# Manual §8 e §13.1: alguns fabricantes ja desenvolveram modelos com
+# abertura maxima > 4.50 m. Quando cadastradas no catalogo da locadora,
+# o engine deve permitir selecao para H >= 4.50 m com verificacao
+# reforcada de estabilidade (contraventamento, base ampliada).
+#
+# Modelos de referencia disponiveis no mercado (2026):
+#   - SH LUME SH:        3.20 - 6.00 m  (Hunnebeck)
+#   - Peri MULTIPROP MP625: 4.30 - 6.25 m
+#   - ULMA ALUPROP:      ate 12 m (formacao em torre)
+#
+# A entrada abaixo e placeholder. Cada locadora deve cadastrar seu(s)
+# modelo(s) reais (com curva de capacidade real do fabricante) antes do
+# engine aceitar selecao acima de 4.50 m.
+esc_estendida:
+  description: "ESC Estendida (>4.50 m) - placeholder para locadora cadastrar modelo real"
+  range_m: null    # ex: [4.50, 6.00] quando cadastrado
+  tubes:
+    flauta_mm: null
+    capa_mm: null
+  enabled: false   # locadora ativa quando cadastrar curve real
+  source: "SH LUME SH / Peri MP625 / outros - cadastrar manualmente"
+  curve: []        # ex: [[4.50, 4550], [5.00, 3400], [6.00, 2000]]

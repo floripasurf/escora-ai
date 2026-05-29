@@ -3,11 +3,27 @@
 # Source: AGENTS.md v3 (2026-05-04), Orguel training pages 11-18, 69, 86.
 
 vm_beams:
-  - { type: VM-80,  material: metalica,  EI_kgf_m2: 14965,  M_adm_kgf_m: 212,  weight_kg_m: 6.41 }
-  - { type: VM-130, material: metalica,  EI_kgf_m2: 47094,  M_adm_kgf_m: 516,  weight_kg_m: 9.70 }
-  - { type: ALU-14, material: aluminio,  EI_kgf_m2: 20309,  M_adm_kgf_m: 409,  weight_kg_m: 4.00 }
-  - { type: ALU-20, material: aluminio,  EI_kgf_m2: null,    M_adm_kgf_m: 800,  weight_kg_m: 6.35 }
-  - { type: HT-20,  material: madeira,   EI_kgf_m2: 51758,  M_adm_kgf_m: 500,  weight_kg_m: 5.17 }
+  # Comprimentos disponíveis em mm — manual §13.3 (Orguel p.20).
+  # VM-80 e VM-130 são usadas em escoramento (principal/secundária).
+  # VM-50 é exclusiva de travamento lateral/pilares (não usar como guia).
+  - { type: VM-80,  material: metalica,  EI_kgf_m2: 14965,  M_adm_kgf_m: 212,  weight_kg_m: 6.41,
+      available_lengths_mm: [1000, 1550, 2050, 2550, 3100, 3600, 4100],
+      uso: "secundaria (barrote), travessas, apoio de forma" }
+  - { type: VM-130, material: metalica,  EI_kgf_m2: 47094,  M_adm_kgf_m: 516,  weight_kg_m: 9.70,
+      available_lengths_mm: [1550, 2050, 2550, 3100, 3600, 4100],
+      uso: "principal (guia), vigas de distribuicao" }
+  - { type: VM-50,  material: metalica,  EI_kgf_m2: null,   M_adm_kgf_m: null, weight_kg_m: null,
+      available_lengths_mm: [650, 1000, 1550, 2050, 2550, 3100, 3600, 4100],
+      uso: "EXCLUSIVA travamento lateral de vigas e pilares - NAO usar como guia/barrote" }
+  - { type: ALU-14, material: aluminio,  EI_kgf_m2: 20309,  M_adm_kgf_m: 409,  weight_kg_m: 4.00,
+      available_lengths_mm: null,
+      uso: "alternativa tecnica leve (principal/secundaria)" }
+  - { type: ALU-20, material: aluminio,  EI_kgf_m2: null,    M_adm_kgf_m: 800,  weight_kg_m: 6.35,
+      available_lengths_mm: null,
+      uso: "alternativa tecnica robusta" }
+  - { type: HT-20,  material: madeira,   EI_kgf_m2: 51758,  M_adm_kgf_m: 500,  weight_kg_m: 5.17,
+      available_lengths_mm: null,
+      uso: "alternativa tecnica/rampas" }
 
 tower_panels:
   - { width_mm: 1000, heights_mm: [1000, 1250, 1500] }
