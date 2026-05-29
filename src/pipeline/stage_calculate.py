@@ -34,6 +34,8 @@ from src.engine.beam_calculator import (
 from src.engine.grid_distributor import distribute_shores, PillarExclusion
 from src.engine.shore_capacity import compute_adaptive_spacing
 from src.engine.shore_selector import load_catalog, select_shore
+from src.engine.vm_grid_builder import ShorePoint, build_vm_grid
+from src.models.plywood import default_plywood_spec
 from src.engine.tower_selector import (
     load_tower_catalog, decide_support_type, select_tower,
     select_distribution_beam, SupportType,
@@ -1445,9 +1447,12 @@ def run_calculation(
     # boxes, offset by DISTANCIA_BORDA_MIN.  All slab grids snap to this origin
     # so shores align across adjacent compartments.
     _all_bounds = [p.bounds for p in slab_polygons]
-    _global_ox = min(b[0] for b in _all_bounds) + DISTANCIA_BORDA_MIN
-    _global_oy = min(b[1] for b in _all_bounds) + DISTANCIA_BORDA_MIN
-    _global_origin = (_global_ox, _global_oy)
+    if _all_bounds:
+        _global_ox = min(b[0] for b in _all_bounds) + DISTANCIA_BORDA_MIN
+        _global_oy = min(b[1] for b in _all_bounds) + DISTANCIA_BORDA_MIN
+        _global_origin = (_global_ox, _global_oy)
+    else:
+        _global_origin = None
 
     for i, polygon in enumerate(slab_polygons):
         is_cantilever = cantilever_flags[i] if i < len(cantilever_flags) else False
@@ -1828,6 +1833,25 @@ def run_calculation(
         is_valid, errors = validate_result(shores, sx, sy)
         validation_errors.extend(errors)
 
+        # --- Manual §28: grid completo de VMs (primarias + secundarias) ---
+        # Gera grid de vigas metalicas sobre TODAS as escoras posicionadas
+        # (escoras telescopicas + torres), conforme padrao Orguel/UTFPR.
+        # Pulado se o painel tiver <2 escoras (sem vao para definir VMs).
+        slab_vm_grid = None
+        try:
+            if len(shores) >= 2 and slab.area_m2 > 0:
+                bbox = slab.bounding_box
+                q_unit_kn_m2 = total_load / slab.area_m2 if slab.area_m2 > 0 else 7.7
+                slab_vm_grid = build_vm_grid(
+                    shore_points=[ShorePoint(x=s.x, y=s.y) for s in shores],
+                    polygon_bbox=(bbox.min_x, bbox.min_y, bbox.max_x, bbox.max_y),
+                    load_kn_m2=q_unit_kn_m2,
+                    plywood=default_plywood_spec(),
+                )
+        except Exception as exc:
+            logger.warning(f"Falha ao gerar VM grid para laje (area={slab.area_m2:.1f}m2): {exc}")
+            slab_vm_grid = None
+
         slab_results.append(SlabShoringResult(
             polygon=polygon,
             thickness_m=thickness,
@@ -1847,6 +1871,7 @@ def run_calculation(
             room_hint=panel_room_hint,
             shores_weight_kg=round(sum(s.shore.weight_kg for s in shores), 2),
             decision_rule=slab_decision_rule,
+            vm_grid=slab_vm_grid,
         ))
         solid_panel_count += 1
 
