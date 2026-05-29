@@ -25,6 +25,10 @@ class SlabPanel:
     shores: list  # List of PositionedShore
     label: str = ""
     is_cantilever: bool = False
+    # Manual §28: grid completo de VMs (primarias + secundarias) gerado
+    # pelo vm_grid_builder. Tipo real: src.engine.vm_grid_builder.VMGrid.
+    # None quando o painel nao gerou grid (nervura, cantilever, <2 shores).
+    vm_grid: Any = None
 
 
 @dataclass(frozen=True)
@@ -71,6 +75,44 @@ class LoadParams:
     pe_direito_m: float
 
 
+@dataclass(frozen=True)
+class ReescoramentoData:
+    """Dados opcionais de reescoramento/desforma (manual §26 items 9 e 10).
+
+    Fornecidos pelo engenheiro quando apresentar o projeto ao cliente. Quando
+    ausentes, os verificadores DECIDE-001/DECIDE-002 emitem pendencias.
+
+    Campos:
+    - fcj_aos_dias_mpa: resistencia caracteristica a compressao do concreto
+      na idade prevista para a desforma (MPa). Necessario para calcular o
+      fator alfa Doka (manual §23.6).
+    - eci_mpa: modulo de elasticidade do concreto na idade da desforma.
+    - carga_final_kn_m2: sobrecarga de uso final (kN/m²) do pavimento.
+    - carga_estado_construcao_kn_m2: sobrecarga durante construcao das
+      lajes superiores (default 1.50 kN/m² - NBR 15696 Anexo C).
+    - num_niveis_reescoramento: quantidade de niveis a manter reescorados.
+      Quando >= 1, marca projeto como multi-nivel (DECIDE-001).
+    - calculista_aprovacao: nome/CREA do calculista que aprovou os
+      parametros. Obrigatorio se desforma_dias for menor que o piso.
+    """
+
+    fcj_aos_dias_mpa: Optional[float] = None
+    eci_mpa: Optional[float] = None
+    carga_final_kn_m2: Optional[float] = None
+    carga_estado_construcao_kn_m2: float = 1.50
+    num_niveis_reescoramento: int = 0
+    calculista_aprovacao: str = ""
+
+    def is_complete(self) -> bool:
+        """True quando todos os dados criticos para alfa Doka estao presentes."""
+        return (
+            self.fcj_aos_dias_mpa is not None
+            and self.eci_mpa is not None
+            and self.carga_final_kn_m2 is not None
+            and self.calculista_aprovacao != ""
+        )
+
+
 @dataclass
 class RuleProject:
     """Read-only aggregate for rule verification."""
@@ -82,6 +124,17 @@ class RuleProject:
     total_volume_m3: float = 0.0
     total_shores_weight_kg: float = 0.0
     pe_direito_m: float = 2.80
+    # --- Manual §26 items 9 e 10: bloco opcional de reescoramento ---
+    reescoramento_data: Optional[ReescoramentoData] = None
+    desforma_dias: Optional[int] = None
+    desforma_justificativa: str = ""
+
+    @property
+    def multi_level(self) -> bool:
+        """True se ha mais de 1 nivel de reescoramento previsto."""
+        if self.reescoramento_data is None:
+            return False
+        return self.reescoramento_data.num_niveis_reescoramento >= 1
 
     @classmethod
     def from_pipeline_result(cls, result: Any) -> "RuleProject":
@@ -124,6 +177,7 @@ class RuleProject:
                 shores=shores,
                 label=getattr(sr, 'label', ''),
                 is_cantilever=getattr(sr, 'is_cantilever', False),
+                vm_grid=getattr(sr, 'vm_grid', None),
             ))
 
         beams = []
@@ -183,6 +237,15 @@ class RuleProject:
             getattr(br, 'shores_weight_kg', 0.0) for br in calc.beam_results
         )
 
+        # Bloco opcional de reescoramento (manual §26 items 9 e 10).
+        # Quando o pipeline propaga ``result.reescoramento_data`` e/ou
+        # ``result.desforma_dias``, eles fluem para o RuleProject; caso
+        # contrario ficam None e os verificadores DECIDE-001/002 emitem
+        # pendencia.
+        reescoramento = getattr(result, "reescoramento_data", None)
+        desforma_dias = getattr(result, "desforma_dias", None)
+        desforma_just = getattr(result, "desforma_justificativa", "")
+
         return cls(
             slab_panels=slab_panels,
             beams=beams,
@@ -192,4 +255,7 @@ class RuleProject:
             total_volume_m3=calc.total_volume_m3,
             total_shores_weight_kg=total_weight,
             pe_direito_m=calc.pe_direito_m,
+            reescoramento_data=reescoramento,
+            desforma_dias=desforma_dias,
+            desforma_justificativa=desforma_just,
         )

@@ -223,3 +223,111 @@ def _verify_tower_at_center(project: "RuleProject") -> list[Violation]:
 
 
 REGISTRY.register(_STRUCT_003, _verify_tower_at_center)
+
+
+# ===========================================================================
+# Manual §28: verificadores do grid de VMs (vm_grid_builder)
+# Nomeclatura: STRUCT-004 = momento, STRUCT-005 = flecha. Os IDs seguem
+# o padrao numerico do regex de schema; descricoes citam "VM-001/VM-002"
+# para correlacionar com o plano do manual §28.4.
+# ===========================================================================
+
+_STRUCT_004 = Rule(
+    id="STRUCT-004",
+    category="STRUCT",
+    source=Source(
+        type="manual",
+        ref="Manual §22.2 + §28.4 (STRUCT-VM-001)",
+    ),
+    description_pt=(
+        "Cada segmento de VM (primaria ou secundaria) do grid deve ter "
+        "M_aplicado <= M_admissivel do modelo. Manual §22.2 (M=qL²/8) e "
+        "catalogo equipment.yaml."
+    ),
+    severity="error",
+)
+
+
+def _verify_vm_grid_moment(project: "RuleProject") -> list[Violation]:
+    """Verifica momento aplicado de cada VMSegment do grid de cada laje."""
+    violations: list[Violation] = []
+    for slab in project.slab_panels:
+        grid = getattr(slab, "vm_grid", None)
+        if grid is None:
+            continue
+        segments = getattr(grid, "segments", [])
+        for seg in segments:
+            if seg.passes_moment:
+                continue
+            label = slab.label or "?"
+            violations.append(Violation(
+                rule_id="STRUCT-004",
+                severity="error",
+                message=(
+                    f"Laje '{label}': VM {seg.role} {seg.model} L={seg.length_mm}mm "
+                    f"vao={seg.span_m:.2f}m com M={seg.moment_kn_m:.2f} kN.m > "
+                    f"M_adm={seg.moment_adm_kn_m:.2f} kN.m (utilizacao "
+                    f"{seg.utilization*100:.0f}%)"
+                ),
+                element_id=label,
+                location=(
+                    (seg.start[0] + seg.end[0]) / 2,
+                    (seg.start[1] + seg.end[1]) / 2,
+                ),
+                actual_value=round(seg.moment_kn_m, 3),
+                limit_value=round(seg.moment_adm_kn_m, 3),
+            ))
+    return violations
+
+
+REGISTRY.register(_STRUCT_004, _verify_vm_grid_moment)
+
+
+_STRUCT_005 = Rule(
+    id="STRUCT-005",
+    category="STRUCT",
+    source=Source(
+        type="manual",
+        ref="Manual §22.3 + NBR 15696 §4.3.2 + §28.4 (STRUCT-VM-002)",
+    ),
+    description_pt=(
+        "Cada segmento de VM deve ter flecha calculada <= flecha admissivel "
+        "1 + L/500 mm (NBR 15696 §4.3.2). Manual §22.3 (f=5qL⁴/384EI)."
+    ),
+    severity="error",
+)
+
+
+def _verify_vm_grid_deflection(project: "RuleProject") -> list[Violation]:
+    """Verifica flecha de cada VMSegment contra limite admissivel."""
+    violations: list[Violation] = []
+    for slab in project.slab_panels:
+        grid = getattr(slab, "vm_grid", None)
+        if grid is None:
+            continue
+        segments = getattr(grid, "segments", [])
+        for seg in segments:
+            if seg.passes_deflection:
+                continue
+            label = slab.label or "?"
+            violations.append(Violation(
+                rule_id="STRUCT-005",
+                severity="error",
+                message=(
+                    f"Laje '{label}': VM {seg.role} {seg.model} L={seg.length_mm}mm "
+                    f"vao={seg.span_m:.2f}m com flecha={seg.flecha_mm:.2f}mm > "
+                    f"flecha_adm={seg.flecha_adm_mm:.2f}mm (utilizacao "
+                    f"{seg.utilization*100:.0f}%)"
+                ),
+                element_id=label,
+                location=(
+                    (seg.start[0] + seg.end[0]) / 2,
+                    (seg.start[1] + seg.end[1]) / 2,
+                ),
+                actual_value=round(seg.flecha_mm, 2),
+                limit_value=round(seg.flecha_adm_mm, 2),
+            ))
+    return violations
+
+
+REGISTRY.register(_STRUCT_005, _verify_vm_grid_deflection)

@@ -21,13 +21,13 @@ if TYPE_CHECKING:
 
 
 _RULE_ID_PATTERN = re.compile(
-    r"^(GEOM|SPACE|STRUCT|LOAD|EQUIP|ENV|DECIDE|OUTPUT)-\d{3,4}$"
+    r"^(GEOM|SPACE|STRUCT|LOAD|EQUIP|ENV|DECIDE|OUTPUT|OP)-\d{3,4}$"
 )
 
 SourceType = Literal["norm", "manual", "dxf_pattern", "engineer_qa"]
 Severity = Literal["error", "warning"]
 Category = Literal[
-    "GEOM", "SPACE", "STRUCT", "LOAD", "EQUIP", "ENV", "DECIDE", "OUTPUT"
+    "GEOM", "SPACE", "STRUCT", "LOAD", "EQUIP", "ENV", "DECIDE", "OUTPUT", "OP"
 ]
 
 

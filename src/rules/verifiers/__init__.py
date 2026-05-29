@@ -21,3 +21,5 @@ def register_all() -> None:
     from src.rules.verifiers import struct
     from src.rules.verifiers import equip
     from src.rules.verifiers import env
+    from src.rules.verifiers import operational  # OP-001 a OP-017 (manual §17)
+    from src.rules.verifiers import reescoramento  # DECIDE-001/002 (manual §26)
