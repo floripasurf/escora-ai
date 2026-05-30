@@ -1847,6 +1847,10 @@ def run_calculation(
                     polygon_bbox=(bbox.min_x, bbox.min_y, bbox.max_x, bbox.max_y),
                     load_kn_m2=q_unit_kn_m2,
                     plywood=default_plywood_spec(),
+                    # Manual §28.7 fix (2026-05-30): snap das secundarias ao
+                    # grid GLOBAL para eliminar barrotes sobrepostos entre
+                    # lajes adjacentes (bug 'VMs proximas demais').
+                    global_origin=_global_origin,
                 )
         except Exception as exc:
             logger.warning(f"Falha ao gerar VM grid para laje (area={slab.area_m2:.1f}m2): {exc}")

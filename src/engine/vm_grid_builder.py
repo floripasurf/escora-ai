@@ -255,6 +255,7 @@ def build_vm_grid(
     available_primaria_lengths_mm: Optional[Sequence[int]] = None,
     available_secundaria_lengths_mm: Optional[Sequence[int]] = None,
     row_tolerance_m: float = 0.30,
+    global_origin: Optional[Tuple[float, float]] = None,
 ) -> VMGrid:
     """Constroi o grid completo de VMs sobre um conjunto de escoras.
 
@@ -266,9 +267,18 @@ def build_vm_grid(
        Vao = espacamento entre escoras. Comprimento real = seleciona do
        catalogo (`select_vm_length_mm`).
     4. Calcula barrote espacamento = `seam_multiple_mm` do compensado.
-    5. Gera VM secundaria perpendicular, cobrindo o bbox da laje a cada
-       passo de barrote. Vao = espacamento entre linhas primarias.
+    5. Gera VM secundaria perpendicular, snap-ada a um grid GLOBAL
+       (manual §28.7 / 2026-05-30, fix do bug 'VMs proximas demais').
+       Sem ``global_origin``, cai no comportamento anterior (por painel,
+       que sobrepoe barrotes entre lajes adjacentes).
     6. Verifica momento e flecha por segmento.
+
+    Args:
+        global_origin: (ox, oy) em metros. Quando fornecido, todas as
+            posicoes de barrotes secundarios sao snap-adas a multiplos
+            de seam_m a partir desse ponto: y_k = oy + k * seam_m.
+            Isso garante que paineis adjacentes usam a MESMA grade,
+            eliminando barrotes sobrepostos nas bordas.
     """
     plywood = plywood or default_plywood_spec()
     seam_mm = plywood.effective_seam_multiple_mm()
@@ -355,12 +365,29 @@ def build_vm_grid(
     span_secundaria_m = avg_row_spacing  # apoia em duas primarias adjacentes
     q_secundaria_kn_m = load_kn_m2 * seam_m
 
+    # Helper: gera posicoes snap-adas ao grid global (ou local se origem nao dada)
+    def _snapped_positions(lo: float, hi: float, origin: float, step: float) -> List[float]:
+        """Posicoes >= lo, <= hi, snap-adas a `origin + k * step` (k inteiro)."""
+        if step <= 0 or hi - lo < step * 0.5:
+            # Painel muito estreito: cair no comportamento anterior (2 pontos)
+            return [lo, hi] if hi > lo else [lo]
+        k_first = math.ceil((lo - origin) / step)
+        k_last = math.floor((hi - origin) / step)
+        positions = [origin + k * step for k in range(k_first, k_last + 1)]
+        if not positions:
+            # Bbox menor que step: ainda colocar 1 barrote no centro
+            return [(lo + hi) / 2]
+        return positions
+
     if secondary_axis == "x":
         # Secundarias correm em X; uma a cada passo em Y
-        n_barrotes = max(2, int(round((max_y - min_y) / seam_m)) + 1)
-        actual_step = (max_y - min_y) / max(n_barrotes - 1, 1)
-        for i in range(n_barrotes):
-            y = min_y + i * actual_step
+        if global_origin is not None:
+            y_positions = _snapped_positions(min_y, max_y, global_origin[1], seam_m)
+        else:
+            n_barrotes = max(2, int(round((max_y - min_y) / seam_m)) + 1)
+            actual_step = (max_y - min_y) / max(n_barrotes - 1, 1)
+            y_positions = [min_y + i * actual_step for i in range(n_barrotes)]
+        for y in y_positions:
             length_geom_m = max_x - min_x
             L_mm = select_vm_length_mm(
                 span_secundaria_m, secundaria_model,
@@ -392,10 +419,13 @@ def build_vm_grid(
             )
             grid.add_segment(seg)
     else:  # secondary_axis == "y"
-        n_barrotes = max(2, int(round((max_x - min_x) / seam_m)) + 1)
-        actual_step = (max_x - min_x) / max(n_barrotes - 1, 1)
-        for i in range(n_barrotes):
-            x = min_x + i * actual_step
+        if global_origin is not None:
+            x_positions = _snapped_positions(min_x, max_x, global_origin[0], seam_m)
+        else:
+            n_barrotes = max(2, int(round((max_x - min_x) / seam_m)) + 1)
+            actual_step = (max_x - min_x) / max(n_barrotes - 1, 1)
+            x_positions = [min_x + i * actual_step for i in range(n_barrotes)]
+        for x in x_positions:
             L_mm = select_vm_length_mm(
                 span_secundaria_m, secundaria_model,
                 available_secundaria_lengths_mm,

@@ -164,6 +164,93 @@ class TestVMGridDataclasses:
         assert grid.total_length_m() == pytest.approx(4.6)
 
 
+class TestGlobalOriginAlignment:
+    """Manual §28.7 (2026-05-30) - barrotes secundarios alinham-se ao
+    grid global, evitando sobreposicao entre lajes adjacentes."""
+
+    def test_two_adjacent_panels_share_grid(self):
+        """Paineis adjacentes com global_origin devem usar mesma grade Y."""
+        # Painel A: 0-4m em X, 0-5m em Y
+        shores_a = [ShorePoint(x=ix, y=iy) for ix in range(5) for iy in range(6)]
+        # Painel B: 4.1-8m em X, 0-5m em Y (adjacente, gap 0.1m)
+        shores_b = [ShorePoint(x=4.1 + ix*0.975, y=iy) for ix in range(5) for iy in range(6)]
+
+        plywood = PlywoodSpec(width_mm=1220, length_mm=2440)
+        origin = (0.0, 0.0)
+
+        grid_a = build_vm_grid(
+            shores_a, polygon_bbox=(0, 0, 4, 5),
+            plywood=plywood, global_origin=origin,
+        )
+        grid_b = build_vm_grid(
+            shores_b, polygon_bbox=(4.1, 0, 8, 5),
+            plywood=plywood, global_origin=origin,
+        )
+
+        # Coletar Y das secundarias horizontais (axis="x")
+        ys_a = sorted({round(s.start[1], 4) for s in grid_a.secundarias() if s.axis == "x"})
+        ys_b = sorted({round(s.start[1], 4) for s in grid_b.secundarias() if s.axis == "x"})
+
+        # Posicoes Y devem ser MULTIPLOS de 0.244 (snap)
+        seam_m = 0.244
+        for y in ys_a + ys_b:
+            assert abs(y / seam_m - round(y / seam_m)) < 0.01, (
+                f"Y={y} nao e multiplo de {seam_m}m"
+            )
+
+    def test_global_origin_eliminates_close_barrotes(self):
+        """COM global_origin: gaps entre barrotes >= seam_m (244mm)."""
+        # Painel A grande (16m em Y) para gerar primarias e detectar eixo X
+        shores_a = [
+            ShorePoint(x=ix, y=iy*0.512)
+            for ix in range(5) for iy in range(11)
+        ]
+        # Painel B adjacente, comeca a 7mm da borda de A
+        shores_b = [
+            ShorePoint(x=4 + ix, y=5.130 + iy*0.5)
+            for ix in range(5) for iy in range(8)
+        ]
+        plywood = PlywoodSpec(width_mm=1220, length_mm=2440)
+
+        # SEM global_origin
+        g_a_local = build_vm_grid(
+            shores_a, polygon_bbox=(0, 0, 4, 5.123), plywood=plywood,
+        )
+        g_b_local = build_vm_grid(
+            shores_b, polygon_bbox=(4, 5.130, 9, 8.630), plywood=plywood,
+        )
+        ys_local = sorted({
+            round(s.start[1], 4)
+            for s in g_a_local.secundarias() + g_b_local.secundarias()
+            if s.axis == "x"
+        })
+
+        # COM global_origin
+        g_a = build_vm_grid(
+            shores_a, polygon_bbox=(0, 0, 4, 5.123), plywood=plywood,
+            global_origin=(0.0, 0.0),
+        )
+        g_b = build_vm_grid(
+            shores_b, polygon_bbox=(4, 5.130, 9, 8.630), plywood=plywood,
+            global_origin=(0.0, 0.0),
+        )
+        ys_global = sorted({
+            round(s.start[1], 4)
+            for s in g_a.secundarias() + g_b.secundarias()
+            if s.axis == "x"
+        })
+
+        def min_gap(positions):
+            gaps = [positions[i+1] - positions[i] for i in range(len(positions)-1)]
+            return min(gaps) if gaps else 999.0
+
+        gap_global = min_gap(ys_global)
+        # Com snap global, gaps minimos devem ser ~seam_m (0.244m)
+        assert gap_global >= 0.20, (
+            f"global_origin gap minimo={gap_global:.3f}m, esperado >=0.20m"
+        )
+
+
 class TestUTFPRProject2Reference:
     """Verifica geometria proxima ao Projeto 2 UTFPR (p.52-53).
 
