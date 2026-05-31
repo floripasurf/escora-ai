@@ -164,6 +164,57 @@ class TestVMGridDataclasses:
         assert grid.total_length_m() == pytest.approx(4.6)
 
 
+class TestOrthogonalPrimarias:
+    """Manual §28.7 (2026-05-31) - VM primarias devem ser sempre
+    perfeitamente ortogonais ao eixo (0° ou 90°), mesmo quando as
+    escoras na row tem coordenadas ligeiramente diferentes."""
+
+    def test_row_with_y_jitter_produces_axis_aligned_primaria(self):
+        """Escoras com Y variando ~5cm devem gerar primaria horizontal."""
+        # Painel largo em X (primary_axis = "y" ... espera)
+        # Painel largo em X (width > height) -> primaria axis "y"
+        # Quero testar primaria axis "x" -> painel alto em Y (height > width)
+        # Mas tambem quero row com escoras horizontais (mesma Y aproximada)
+        # Vou usar painel alto em Y para ter primaria axis "x"
+        shores = [
+            ShorePoint(x=ix, y=iy)
+            for ix in range(5)
+            for iy in range(8)
+        ]
+        # Adicionar jitter Y em algumas escoras da primeira row
+        shores[0] = ShorePoint(x=0, y=0.05)
+        shores[1] = ShorePoint(x=1, y=-0.02)
+        # Painel 4x7m -> width=4 < height=7 -> primary_axis="x" (primaria em X)
+        grid = build_vm_grid(
+            shores, polygon_bbox=(0, 0, 4, 7), load_kn_m2=7.7,
+        )
+        assert grid.primaria_axis == "x"
+        # Cada primaria deve ter start.y == end.y (perfeitamente horizontal)
+        for seg in grid.primarias():
+            assert abs(seg.start[1] - seg.end[1]) < 1e-9, (
+                f"primaria nao-horizontal: start={seg.start} end={seg.end}"
+            )
+
+    def test_row_with_x_jitter_in_vertical_panel(self):
+        """Painel largo (primary_axis='y'): primarias verticais, X fixo."""
+        shores = [
+            ShorePoint(x=ix, y=iy)
+            for ix in range(8)
+            for iy in range(4)
+        ]
+        # Jitter X
+        shores[0] = ShorePoint(x=0.05, y=0)
+        shores[8] = ShorePoint(x=-0.02, y=1)
+        grid = build_vm_grid(
+            shores, polygon_bbox=(0, 0, 7, 4), load_kn_m2=7.7,
+        )
+        assert grid.primaria_axis == "y"
+        for seg in grid.primarias():
+            assert abs(seg.start[0] - seg.end[0]) < 1e-9, (
+                f"primaria nao-vertical: start={seg.start} end={seg.end}"
+            )
+
+
 class TestGlobalOriginAlignment:
     """Manual §28.7 (2026-05-30) - barrotes secundarios alinham-se ao
     grid global, evitando sobreposicao entre lajes adjacentes."""

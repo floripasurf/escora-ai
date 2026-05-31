@@ -314,8 +314,24 @@ def build_vm_grid(
     for row in rows:
         if len(row) < 2:
             continue
+        # Manual §28.7 fix (2026-05-31): forcar primaria ORTOGONAL ao eixo,
+        # snap-ando a coordenada perpendicular para a media da row. Antes,
+        # escoras de uma 'row' com Y ligeiramente diferentes (densificacao
+        # de capitel, alinhamento adaptativo) produziam primarias diagonais.
+        if primary_axis == "x":
+            # Primaria corre em X -> Y fixo na media
+            row_y_avg = sum(s.y for s in row) / len(row)
+        else:
+            # Primaria corre em Y -> X fixo na media
+            row_x_avg = sum(s.x for s in row) / len(row)
         for s1, s2 in zip(row, row[1:]):
-            span_m = math.hypot(s2.x - s1.x, s2.y - s1.y)
+            if primary_axis == "x":
+                start_pt = (s1.x, row_y_avg)
+                end_pt = (s2.x, row_y_avg)
+            else:
+                start_pt = (row_x_avg, s1.y)
+                end_pt = (row_x_avg, s2.y)
+            span_m = math.hypot(end_pt[0] - start_pt[0], end_pt[1] - start_pt[1])
             L_mm = select_vm_length_mm(
                 span_m, primaria_model, available_primaria_lengths_mm,
             )
@@ -327,8 +343,8 @@ def build_vm_grid(
                 role="primaria",
                 model=primaria_model,
                 length_mm=L_mm,
-                start=(s1.x, s1.y),
-                end=(s2.x, s2.y),
+                start=start_pt,
+                end=end_pt,
                 axis=primary_axis,
                 load_kn_m=round(q_primaria_kn_m, 2),
                 span_m=round(span_m, 3),
@@ -342,12 +358,12 @@ def build_vm_grid(
             grid.add_segment(seg)
             if not passM:
                 grid.issues.append(
-                    f"VM primaria ({s1.x:.2f},{s1.y:.2f})->({s2.x:.2f},{s2.y:.2f}): "
+                    f"VM primaria ({start_pt[0]:.2f},{start_pt[1]:.2f})->({end_pt[0]:.2f},{end_pt[1]:.2f}): "
                     f"momento {M:.2f} > {Madm:.2f} kN.m"
                 )
             if not passF:
                 grid.issues.append(
-                    f"VM primaria ({s1.x:.2f},{s1.y:.2f})->({s2.x:.2f},{s2.y:.2f}): "
+                    f"VM primaria ({start_pt[0]:.2f},{start_pt[1]:.2f})->({end_pt[0]:.2f},{end_pt[1]:.2f}): "
                     f"flecha {f:.1f}mm > {fadm:.1f}mm"
                 )
 
