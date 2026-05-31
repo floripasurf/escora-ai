@@ -242,8 +242,15 @@ def _filter_isolated_slabs(
     beam boundaries, touching or very close). Slabs from detail views /
     secondary drawings are spatially isolated.
 
-    Two slabs are "connected" if they intersect when buffered by 2m
-    (typical pillar width + tolerance).
+    Two slabs are "connected" if they intersect when buffered. Buffer
+    aumentado de 3.0 -> 5.0m em 2026-05-31 (bug "areas X verde sem
+    escoras"): lajes pequenas dentro da planta principal eram descartadas
+    porque o buffer de 3m nao alcancava o grupo principal em casos de
+    aberturas internas (atrios, shafts).
+
+    Adicionalmente: lajes cujo CENTROIDE cai dentro do bounding box
+    expandido do grupo principal sao SEMPRE mantidas, mesmo que
+    aparentemente isoladas - sao lajes legitimas dentro da planta.
     """
     if len(polygons) <= 1:
         return polygons
@@ -252,7 +259,7 @@ def _filter_isolated_slabs(
     buffered = []
     for p in polygons:
         try:
-            buffered.append(p.buffer(3.0))
+            buffered.append(p.buffer(5.0))
         except Exception:
             buffered.append(p)
 
@@ -301,7 +308,33 @@ def _filter_isolated_slabs(
         )
         return polygons
 
-    filtered = [polygons[i] for i in group_members[main_root]]
+    main_indices = set(group_members[main_root])
+    # Safety net (manual §28.7, 2026-05-31): lajes cujo CENTROIDE cai
+    # dentro do bbox do grupo principal sao mantidas mesmo se nao
+    # conectadas via buffer. Isso protege lajes pequenas legitimas em
+    # atrios/aberturas que o filtro por conectividade nao alcanca.
+    from shapely.ops import unary_union
+    try:
+        main_union = unary_union([polygons[i] for i in main_indices])
+        mb = main_union.bounds  # (minx, miny, maxx, maxy)
+        # Pequena tolerancia para nao reescorar do lado de fora
+        TOL = 0.5
+        for i in range(n):
+            if i in main_indices:
+                continue
+            try:
+                c = polygons[i].centroid
+                if (
+                    mb[0] - TOL <= c.x <= mb[2] + TOL
+                    and mb[1] - TOL <= c.y <= mb[3] + TOL
+                ):
+                    main_indices.add(i)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    filtered = [polygons[i] for i in sorted(main_indices)]
     removed = n - len(filtered)
 
     if removed > 0:
