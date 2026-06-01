@@ -242,17 +242,16 @@ def distribute_shores(
     # adjacent slabs share exactly the same grid lines.
     if global_origin is not None:
         # Manual §28.7 fix (2026-05-31): snap o effective_spacing ao
-        # valor padrao mais proximo de um conjunto pequeno (0.80, 1.00,
-        # 1.10, 1.20, 1.30 m). Lajes adjacentes com spacing similar
-        # caem no mesmo valor, garantindo fileiras alinhadas.
-        # Bug 'fileiras nao alinhadas em diferentes lajes'.
-        STANDARD_SPACINGS = [0.60, 0.80, 1.00, 1.10, 1.20, 1.30]
-        # Escolher o maior padrao <= effective_spacing (mais conservador)
+        # valor padrao mais proximo de um conjunto pequeno. Lajes
+        # adjacentes com spacing similar caem no mesmo valor.
+        # Conjunto pequeno = mais alinhamento; conjunto grande = mais
+        # otimizacao adaptativa. [0.80, 1.00, 1.20] e um compromisso:
+        # mantem seguranca para lajes pesadas E maximiza alinhamento.
+        STANDARD_SPACINGS = [0.80, 1.00, 1.20]
         candidates = [s for s in STANDARD_SPACINGS if s <= effective_spacing + 0.05]
         if candidates:
             spacing_x = max(candidates)
         else:
-            # effective_spacing menor que 0.60 -> usar minimo padrao
             spacing_x = STANDARD_SPACINGS[0]
         spacing_y = spacing_x
         ox, oy = global_origin
