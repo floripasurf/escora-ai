@@ -91,12 +91,33 @@ def _axis_aligned_offsets(densified_spacing: float) -> List[Tuple[float, float]]
     return offsets
 
 
+def _snap_to_global_grid(
+    x: float,
+    y: float,
+    global_origin: Tuple[float, float],
+    spacing: float,
+) -> Tuple[float, float]:
+    """Snap (x, y) a uma posicao da grade global mais proxima.
+
+    Manual §28.7 (2026-06-01): escoras de capitel densificadas eram
+    posicionadas livremente ao redor de pilares, gerando padrao visual
+    desalinhado do grid principal. Snap garante que cada escora cai num
+    nó da grade global enquanto continua dentro do anel de capitel.
+    """
+    ox, oy = global_origin
+    kx = round((x - ox) / spacing)
+    ky = round((y - oy) / spacing)
+    return (ox + kx * spacing, oy + ky * spacing)
+
+
 def capitel_densification_shores(
     polygon: Polygon,
     shore_entry: ShoreCatalogEntry,
     pillar_positions: List[Tuple[float, float]],
     existing_shores: List[PositionedShore],
     max_spacing: float,
+    global_origin: Optional[Tuple[float, float]] = None,
+    grid_spacing: Optional[float] = None,
 ) -> List[PositionedShore]:
     """Gera escoras extras em zonas de capitel ao redor de cada pilar.
 
@@ -112,12 +133,20 @@ def capitel_densification_shores(
         pillar_positions: lista (x, y) de centros de pilares.
         existing_shores: escoras já colocadas pelo grid regular.
         max_spacing: espaçamento máximo do grid regular (m).
+        global_origin: (ox, oy) do grid global da laje. Quando fornecido,
+            cada escora densificada e snap-ada ao no mais proximo da grade
+            global, mantendo alinhamento visual com o grid regular.
+            Manual §28.7 (2026-06-01, fix do bug 'capitel desalinhado').
+        grid_spacing: espacamento da grade global. Requerido quando
+            global_origin esta presente.
     """
     if not pillar_positions:
         return []
 
     densified_spacing = max(0.50, max_spacing * CAPITEL_SPACING_FACTOR)
     offsets = _axis_aligned_offsets(densified_spacing)
+
+    use_snap = global_origin is not None and grid_spacing is not None and grid_spacing > 0
 
     extra: List[PositionedShore] = []
     for cx, cy in pillar_positions:
@@ -129,6 +158,12 @@ def capitel_densification_shores(
         for dx, dy in offsets:
             x = cx + dx
             y = cy + dy
+            if use_snap:
+                x, y = _snap_to_global_grid(x, y, global_origin, grid_spacing)
+                # Apos snap, validar que ainda esta no anel de capitel
+                r = math.hypot(x - cx, y - cy)
+                if r < DISTANCIA_PILAR_MIN - 1e-6 or r > CAPITEL_OUTER_RADIUS_M + 1e-6:
+                    continue
             if not _is_clear(x, y, polygon, existing_shores, extra, pillar_positions):
                 continue
             extra.append(PositionedShore(

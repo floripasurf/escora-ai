@@ -1860,12 +1860,18 @@ def run_calculation(
                 for p in pillars
                 if p.element_type == ElementType.PILLAR and p.geometry
             ]
+            # Manual §28.7 (2026-06-01): passar global_origin + spacing
+            # para snap das escoras de capitel ao grid global, eliminando
+            # padrao visual desalinhado. sx vem do distribute_shores e
+            # representa o spacing efetivo (1.00, 1.20...) ja snap-ado.
             extra_shores = capitel_densification_shores(
                 polygon=polygon,
                 shore_entry=selected_shore,
                 pillar_positions=pillar_xy,
                 existing_shores=shores,
                 max_spacing=max_spacing,
+                global_origin=_global_origin,
+                grid_spacing=sx,
             )
             shores.extend(extra_shores)
 
