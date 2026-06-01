@@ -1124,11 +1124,40 @@ def run_calculation(
                     f"área total {total_area:.0f}m²"
                 )
 
-    # NOTE (manual §28.7, 2026-05-31): a deteccao de lajes pre-moldadas TQS
-    # via clustering de textos (detect_precast_slab_clusters em slab_builder)
-    # foi implementada mas REVERTIDA temporariamente da integracao: precisa
-    # interagir melhor com merge_slab_sources para nao reduzir densidade
-    # de escoras das lajes existentes. Investigacao pendente.
+    # Manual §28.7 (2026-06-01): integracao de lajes pre-moldadas TQS.
+    # Estrategia: adicionar APENAS polygons cuja maior parte (>60%) esta
+    # FORA de slabs existentes. Evita sobreposicao com lajes ja detectadas
+    # que reduziria densidade de escoras.
+    if shaft_texts:
+        from src.engine.slab_builder import detect_precast_slab_clusters
+        precast_slabs = detect_precast_slab_clusters(shaft_texts)
+        if precast_slabs and slab_polygons:
+            from shapely.ops import unary_union as _uu
+            existing_union = _uu(slab_polygons)
+            kept = []
+            for p in precast_slabs:
+                try:
+                    overlap = p.intersection(existing_union)
+                    overlap_ratio = overlap.area / p.area if p.area > 0 else 0
+                except Exception:
+                    overlap_ratio = 0
+                if overlap_ratio < 0.40:  # >60% area nova
+                    kept.append(p)
+            if kept:
+                slab_polygons = slab_polygons + kept
+                total_area = sum(p.area for p in kept)
+                warnings.append(
+                    f"Lajes pre-moldadas TQS (areas novas): {len(kept)} painel(eis), "
+                    f"area total {total_area:.0f}m²"
+                )
+        elif precast_slabs:
+            # Sem slabs existentes: adicionar todos
+            slab_polygons = list(precast_slabs)
+            total_area = sum(p.area for p in precast_slabs)
+            warnings.append(
+                f"Lajes pre-moldadas TQS: {len(precast_slabs)} painel(eis), "
+                f"area total {total_area:.0f}m²"
+            )
 
     # Tier 3: Direct boundary extraction from DXF hatches/polylines
     # Catches slabs that beam grid misses entirely (e.g., when beams
