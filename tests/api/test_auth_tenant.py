@@ -96,7 +96,7 @@ def test_me_returns_locadora_and_branches(client):
     assert data["username"] == "eng_a"
     assert data["locadora_id"] == "loc-a"
     assert data["selected_branch"]["id"] == "test-a"
-    assert data["selected_branch"]["inventory_name"] == "supplier_sjc"
+    assert data["selected_branch"]["inventory_name"] == "orguel_sjc"
 
 
 def test_logout_revokes_session(client_unauth):

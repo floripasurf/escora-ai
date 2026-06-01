@@ -4,6 +4,8 @@ from enum import Enum
 from typing import Any, List, Optional, Tuple
 from pydantic import BaseModel, Field, computed_field
 
+from src.rules.schema import Violation
+
 
 class ElementType(str, Enum):
     BEAM = "beam"
@@ -64,3 +66,4 @@ class PipelineResult(BaseModel):
     warnings: List[str] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
     calculation: Optional[Any] = Field(default=None, description="CalculationResult when engine stage runs")
+    violations: List[Violation] = Field(default_factory=list, description="Rule violations detected by the rule registry")

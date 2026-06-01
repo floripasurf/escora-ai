@@ -81,6 +81,104 @@ class TestBoundingRectangleDetection:
 
 
 class TestDetailExclusionRadius:
-    def test_radius_is_5m(self):
-        """DETAIL_EXCLUSION_RADIUS should be 5.0m (reduced from 8.0)."""
-        assert DETAIL_EXCLUSION_RADIUS == 5.0
+    def test_radius_is_8m(self):
+        """DETAIL_EXCLUSION_RADIUS should be 8.0m.
+
+        Manual §28.7 (2026-05-30): aumentado de 5.0 para 8.0 porque
+        detalhes brasileiros como "DETALHE DE IMPERMEABILIZAÇÃO DO P.S.T"
+        e "ESQUEMA DE NIVEIS" frequentemente tem 6-8m de extensao e o
+        texto-titulo fica no centro; raio menor deixava entidades nas
+        bordas escaparem.
+        """
+        assert DETAIL_EXCLUSION_RADIUS == 8.0
+
+
+class TestDetailKeywords:
+    """Manual §28.7 (2026-05-30) - novos keywords para bug 3."""
+
+    def _text(self, content: str, x: float = 50.0, y: float = 50.0) -> TextEntity:
+        return TextEntity(content=content, x=x, y=y, layer="")
+
+    def test_pst_detail_caught(self):
+        """'DETALHE DE IMPERMEABILIZACAO DO P.S.T' deve ser detectado."""
+        texts = [self._text("DETALHE DE IMPERMEABILIZACAO DO P.S.T")]
+        # Entity dentro do raio 8m
+        assert _is_in_detail_zone(50.0 + 6.0, 50.0, texts) is True
+        # Entity fora do raio
+        assert _is_in_detail_zone(50.0 + 12.0, 50.0, texts) is False
+
+    def test_esquema_de_niveis_caught(self):
+        texts = [self._text("ESQUEMA DE NIVEIS")]
+        assert _is_in_detail_zone(53.0, 50.0, texts) is True
+
+    def test_impermeabilizacao_caught(self):
+        texts = [self._text("IMPERMEABILIZAÇÃO COM MANTA")]
+        assert _is_in_detail_zone(52.0, 51.0, texts) is True
+
+    def test_armadura_caught(self):
+        texts = [self._text("ARMADURA POSITIVA")]
+        assert _is_in_detail_zone(53.0, 50.0, texts) is True
+
+    def test_scale_1_25_caught(self):
+        texts = [self._text("ESCALA 1:25")]
+        assert _is_in_detail_zone(50.0, 51.0, texts) is True
+
+    def test_planta_principal_not_treated_as_detail(self):
+        """Texto sem keyword nao dispara filtro."""
+        texts = [self._text("V120a")]  # nome de viga - planta principal
+        assert _is_in_detail_zone(50.0, 50.0, texts) is False
+
+
+class TestImplicitRectFrame:
+    """Frames implicitos formados por 4 linhas (nao LWPOLYLINE fechada)."""
+
+    def _h(self, y, x0, x1):
+        return SegmentEntity(type="H", y=y, x_min=x0, x_max=x1, x=0, y_min=0, y_max=0)
+
+    def _v(self, x, y0, y1):
+        return SegmentEntity(type="V", x=x, y_min=y0, y_max=y1, y=0, x_min=0, x_max=0)
+
+    def _text(self, content, x, y):
+        return TextEntity(content=content, x=x, y=y, layer="")
+
+    def test_4_lines_with_anchor_form_frame(self):
+        """4 linhas formando retangulo + texto anchor devem ser detectados."""
+        from src.parser.region_filter import _detect_implicit_rect_frames
+        # Frame de 5x4m com texto de detalhe no centro
+        segs = [
+            self._h(0.0, 0.0, 5.0),    # bottom
+            self._h(4.0, 0.0, 5.0),    # top
+            self._v(0.0, 0.0, 4.0),    # left
+            self._v(5.0, 0.0, 4.0),    # right
+        ]
+        texts = [self._text("DETALHE 01", 2.5, 2.0)]  # centro
+        rects = _detect_implicit_rect_frames(segs, texts)
+        assert len(rects) == 1
+        assert rects[0].x_min == 0.0
+        assert rects[0].x_max == 5.0
+
+    def test_4_lines_without_anchor_ignored(self):
+        """Mesma geometria mas SEM texto de detalhe -> nao e frame."""
+        from src.parser.region_filter import _detect_implicit_rect_frames
+        segs = [
+            self._h(0.0, 0.0, 5.0),
+            self._h(4.0, 0.0, 5.0),
+            self._v(0.0, 0.0, 4.0),
+            self._v(5.0, 0.0, 4.0),
+        ]
+        texts = [self._text("V120a", 2.5, 2.0)]  # planta principal
+        rects = _detect_implicit_rect_frames(segs, texts)
+        assert len(rects) == 0
+
+    def test_open_rectangle_not_detected(self):
+        """Sem 4o lado vertical nao forma frame."""
+        from src.parser.region_filter import _detect_implicit_rect_frames
+        segs = [
+            self._h(0.0, 0.0, 5.0),
+            self._h(4.0, 0.0, 5.0),
+            self._v(0.0, 0.0, 4.0),
+            # missing right side
+        ]
+        texts = [self._text("DETALHE", 2.5, 2.0)]
+        rects = _detect_implicit_rect_frames(segs, texts)
+        assert len(rects) == 0

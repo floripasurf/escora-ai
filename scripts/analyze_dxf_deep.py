@@ -9,9 +9,8 @@ Scale 1:50 => real_meters = DXF_value * 0.5
 import ezdxf
 import re
 from collections import defaultdict
-from pathlib import Path
 
-DXF_PATH = str(Path(__file__).parent.parent / "input" / "CVS-COB-FOR-006-R00.DXF")
+DXF_PATH = "/Users/raphaellages/Desktop/escora-ai/input/CVS-COB-FOR-006-R00.DXF"
 SCALE = 0.5  # DXF units -> real meters
 
 # Plan area bounds (DXF units)

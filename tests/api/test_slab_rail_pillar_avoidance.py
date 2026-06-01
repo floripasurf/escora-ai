@@ -16,6 +16,7 @@ import pytest
 from shapely.geometry import box
 
 from api.services.pipeline_service import _generate_output_dxf
+from src.engine.grid_distributor import PillarExclusion
 from src.models.calculation_models import CalculationResult, SlabShoringResult
 from src.models.shore import (
     PositionedShore, ShoreCatalogEntry, SupportType, TowerCatalogEntry,
@@ -34,7 +35,7 @@ def _shore_entry(sid="ESC310"):
 
 def _tower_entry():
     return TowerCatalogEntry(
-        id="TWR-TA150", manufacturer="Supplier", model="TA-150",
+        id="TWR-TA150", manufacturer="Orguel", model="TA-150",
         load_capacity_kn=120.0, module_height_m=1.5, base_dimension_m=1.54,
         max_height_m=20.0, weight_per_module_kg=38.0, includes_bracing=True,
         price_per_module_brl=15.0,

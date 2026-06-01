@@ -1,4 +1,4 @@
-"""Tests for perimeter beam detection (Supplier A3, regra 16).
+"""Tests for perimeter beam detection (Orguel A3, regra 16).
 
 Regra da locadora (manual, Regra 16): vigas externas/perimetrais têm
 limites dimensionais (b≤30cm, h<60cm, L≤3m). A detecção de "externa" é

@@ -263,7 +263,7 @@ class TestBuildReportData:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd ./Desktop/escora-ai && python3 -m pytest tests/output/test_report_data.py -v`
+Run: `cd /Users/raphaellages/Desktop/escora-ai && python3 -m pytest tests/output/test_report_data.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'src.output'`
 
 - [ ] **Step 3: Create package inits and report_data.py**
@@ -469,12 +469,12 @@ def build_report_data(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd ./Desktop/escora-ai && python3 -m pytest tests/output/test_report_data.py -v`
+Run: `cd /Users/raphaellages/Desktop/escora-ai && python3 -m pytest tests/output/test_report_data.py -v`
 Expected: PASS (13 tests)
 
 - [ ] **Step 5: Run all tests**
 
-Run: `cd ./Desktop/escora-ai && python3 -m pytest tests/ -v`
+Run: `cd /Users/raphaellages/Desktop/escora-ai && python3 -m pytest tests/ -v`
 Expected: All pass
 
 - [ ] **Step 6: Commit**
@@ -612,7 +612,7 @@ class TestExcelGenerator:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd ./Desktop/escora-ai && python3 -m pytest tests/output/test_excel_generator.py -v`
+Run: `cd /Users/raphaellages/Desktop/escora-ai && python3 -m pytest tests/output/test_excel_generator.py -v`
 Expected: FAIL — `ModuleNotFoundError`
 
 - [ ] **Step 3: Implement excel_generator.py**
@@ -720,7 +720,7 @@ def generate_excel(report: ReportData, output_path: str) -> str:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd ./Desktop/escora-ai && python3 -m pytest tests/output/test_excel_generator.py -v`
+Run: `cd /Users/raphaellages/Desktop/escora-ai && python3 -m pytest tests/output/test_excel_generator.py -v`
 Expected: PASS (7 tests)
 
 - [ ] **Step 5: Commit**
@@ -828,7 +828,7 @@ class TestPdfGenerator:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd ./Desktop/escora-ai && python3 -m pytest tests/output/test_pdf_generator.py -v`
+Run: `cd /Users/raphaellages/Desktop/escora-ai && python3 -m pytest tests/output/test_pdf_generator.py -v`
 Expected: FAIL — `ModuleNotFoundError`
 
 - [ ] **Step 3: Implement pdf_generator.py**
@@ -1022,12 +1022,12 @@ def generate_pdf(report: ReportData, output_path: str) -> str:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd ./Desktop/escora-ai && python3 -m pytest tests/output/test_pdf_generator.py -v`
+Run: `cd /Users/raphaellages/Desktop/escora-ai && python3 -m pytest tests/output/test_pdf_generator.py -v`
 Expected: PASS (3 tests)
 
 - [ ] **Step 5: Run all tests**
 
-Run: `cd ./Desktop/escora-ai && python3 -m pytest tests/ -v`
+Run: `cd /Users/raphaellages/Desktop/escora-ai && python3 -m pytest tests/ -v`
 Expected: All pass
 
 - [ ] **Step 6: Commit**

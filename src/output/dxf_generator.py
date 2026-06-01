@@ -1,7 +1,7 @@
 """DXF output generator — creates a clean structural plan with shore positions.
 
-Layer naming follows the **Supplier engineer convention** observed in real
-locadora projects (input/supplier/*.dxf), so the engineer opening our output
+Layer naming follows the **Orguel engineer convention** observed in real
+locadora projects (input/orguel/*.dxf), so the engineer opening our output
 sees the exact same layer tree they're already used to:
 
     ESC310_Viga, ESC360_Viga, ESC450_Viga       — beam shores by model
@@ -41,10 +41,10 @@ COLOR_SLABS = 7         # White
 COLOR_TEXT = 8          # Gray
 COLOR_INFO = 4          # Cyan
 
-# Color map calibrated on Supplier-authored DXFs (input/supplier/*.dxf).
+# Color map calibrated on Orguel-authored DXFs (input/orguel/*.dxf).
 # Falls back to a deterministic hash when an unknown model appears so layers
 # always have *some* color and never collide with the "0" default.
-SUPPLIER_LAYER_COLORS = {
+ORGUEL_LAYER_COLORS = {
     "ESC310_Viga": 5,    "ESC310_Laje": 5,
     "ESC360_Viga": 96,   "ESC360_Laje": 96,
     "ESC450_Viga": 1,    "ESC450_Laje": 1,
@@ -56,13 +56,20 @@ SUPPLIER_LAYER_COLORS = {
     "ALU14_Viga": 132,   "ALU14_Laje": 132,
     "Tirante": 82,       "Tirante_Viga": 5,
     "Trav-Pilar": 7,     "Listamat": 7,
+    # Manual §28: layers do vm_grid_builder (primarias + secundarias)
+    "VM130_Primaria": 170,
+    "VM80_Secundaria": 1,
+    "VM50_Secundaria": 6,
+    "ALU14_Primaria": 132,
+    "HT20_Primaria": 30,
+    "VM_FALHA": 6,  # vermelho/magenta para segmentos que nao passam M ou flecha
 }
 
 
 def _layer_color(name: str) -> int:
-    """Return the calibrated color for a known Supplier layer or a stable hash."""
-    if name in SUPPLIER_LAYER_COLORS:
-        return SUPPLIER_LAYER_COLORS[name]
+    """Return the calibrated color for a known Orguel layer or a stable hash."""
+    if name in ORGUEL_LAYER_COLORS:
+        return ORGUEL_LAYER_COLORS[name]
     # Deterministic 1-255 (0 = ByBlock, never use)
     return (sum(ord(c) for c in name) % 254) + 1
 
@@ -73,11 +80,11 @@ def _ensure_layer(doc, name: str, color: Optional[int] = None) -> None:
 
 
 def _shore_layer_name(positioned_shore, target: str) -> str:
-    """Map a PositionedShore + target ('Viga'|'Laje') to its Supplier layer.
+    """Map a PositionedShore + target ('Viga'|'Laje') to its Orguel layer.
 
     target='Viga' for shores under beams, 'Laje' for shores under slabs.
     Towers collapse to TORRE_VIGA / TORRE_LAJE regardless of model since
-    that's how Supplier engineers organize them in real projects.
+    that's how Orguel engineers organize them in real projects.
     """
     if getattr(positioned_shore, "support_type", None) == SupportType.TOWER:
         return f"TORRE_{target.upper()}"
@@ -114,7 +121,7 @@ def generate_dxf(
 
     msp = doc.modelspace()
 
-    # Structural geometry layers (always present, Supplier uses these names too)
+    # Structural geometry layers (always present, Orguel uses these names too)
     _ensure_layer(doc, "PILARES", COLOR_PILLARS)
     _ensure_layer(doc, "VIGAS", COLOR_BEAMS)
     _ensure_layer(doc, "LAJES", COLOR_SLABS)
@@ -129,7 +136,7 @@ def generate_dxf(
         _draw_pillars(msp, [e for e in elements if e.element_type == ElementType.PILLAR])
         _draw_beams(msp, [e for e in elements if e.element_type == ElementType.BEAM])
 
-    # Draw beam shores — Supplier naming: ESC{model}_Viga / TORRE_VIGA
+    # Draw beam shores — Orguel naming: ESC{model}_Viga / TORRE_VIGA
     for br in calc.beam_results:
         beam = br.beam
 
@@ -197,7 +204,7 @@ def generate_dxf(
                 _ensure_layer(doc, vm_layer)
                 break
 
-    # Draw slab shores — Supplier naming: ESC{model}_Laje / TORRE_LAJE
+    # Draw slab shores — Orguel naming: ESC{model}_Laje / TORRE_LAJE
     for sr in calc.slab_results:
         # Slab outline
         if hasattr(sr.polygon, "exterior"):
@@ -218,70 +225,104 @@ def generate_dxf(
                 _draw_slab_shore(msp, s.x, s.y, layer)
             slab_shore_count += 1
 
-        # Draw VM lines connecting adjacent slab towers
-        slab_towers = [
-            s for s in sr.shores
-            if getattr(s, "support_type", None) == SupportType.TOWER
-            and getattr(s, "distribution_beam", None) is not None
-        ]
-        if len(slab_towers) >= 2:
-            sdb = slab_towers[0].distribution_beam
-            svm_layer = f"{sdb.id.split('-')[1] if '-' in sdb.id else sdb.id}_Laje"
-            if "VM" in sdb.id:
-                svm_token = next((t for t in sdb.id.split("-") if t.startswith("VM")), sdb.id)
-                svm_layer = f"{svm_token}_Laje"
-            _ensure_layer(doc, svm_layer)
-
-            # Group towers by row (similar Y within tolerance) and draw horizontal VMs
-            _ROW_TOL = 0.3  # m
-            sorted_by_y = sorted(slab_towers, key=lambda t: t.y)
-            rows = []
-            current_row = [sorted_by_y[0]]
-            for t in sorted_by_y[1:]:
-                if abs(t.y - current_row[0].y) <= _ROW_TOL:
-                    current_row.append(t)
-                else:
-                    rows.append(current_row)
-                    current_row = [t]
-            rows.append(current_row)
-
-            for row in rows:
-                row.sort(key=lambda t: t.x)
-                for t1, t2 in zip(row, row[1:]):
-                    msp.add_line(
-                        (t1.x, t1.y), (t2.x, t2.y),
-                        dxfattribs={"layer": svm_layer},
-                    )
-
-            # Group towers by column (similar X) and draw vertical VMs
-            sorted_by_x = sorted(slab_towers, key=lambda t: t.x)
-            cols = []
-            current_col = [sorted_by_x[0]]
-            for t in sorted_by_x[1:]:
-                if abs(t.x - current_col[0].x) <= _ROW_TOL:
-                    current_col.append(t)
-                else:
-                    cols.append(current_col)
-                    current_col = [t]
-            cols.append(current_col)
-
-            for col in cols:
-                col.sort(key=lambda t: t.y)
-                for t1, t2 in zip(col, col[1:]):
-                    msp.add_line(
-                        (t1.x, t1.y), (t2.x, t2.y),
-                        dxfattribs={"layer": svm_layer},
-                    )
-
-            # VM label at centroid
-            if hasattr(sr.polygon, "centroid"):
+        # --- Manual §28: desenhar grid de VMs (primarias + secundarias) ---
+        # Quando o pipeline anexa sr.vm_grid, usa o grid completo gerado
+        # por src/engine/vm_grid_builder.py. Caso contrario, cai no
+        # comportamento legado (so torres com distribution_beam).
+        vm_grid = getattr(sr, "vm_grid", None)
+        if vm_grid is not None and len(getattr(vm_grid, "segments", [])) > 0:
+            # Garantir que as layers existam
+            seen_layers = set()
+            for seg in vm_grid.segments:
+                role_suffix = "Primaria" if seg.role == "primaria" else "Secundaria"
+                layer_name = f"{seg.model}_{role_suffix}"
+                if not seg.passes_moment or not seg.passes_deflection:
+                    layer_name = "VM_FALHA"
+                if layer_name not in seen_layers:
+                    _ensure_layer(doc, layer_name)
+                    seen_layers.add(layer_name)
+                msp.add_line(
+                    (seg.start[0], seg.start[1]),
+                    (seg.end[0], seg.end[1]),
+                    dxfattribs={"layer": layer_name},
+                )
+            # Label com modelo das primarias no centroide
+            primarias = vm_grid.primarias()
+            if primarias and hasattr(sr.polygon, "centroid"):
+                model_label = primarias[0].model
+                _ensure_layer(doc, f"{model_label}_Primaria")
                 cx = sr.polygon.centroid.x
                 cy = sr.polygon.centroid.y
                 msp.add_text(
-                    sdb.model if hasattr(sdb, "model") else sdb.id,
+                    model_label,
                     height=TEXT_HEIGHT * 0.6,
-                    dxfattribs={"layer": svm_layer},
+                    dxfattribs={"layer": f"{model_label}_Primaria"},
                 ).set_placement((cx + 0.1, cy + 0.1))
+        else:
+            # Fallback legado: desenhar VMs entre torres adjacentes (sem vm_grid)
+            slab_towers = [
+                s for s in sr.shores
+                if getattr(s, "support_type", None) == SupportType.TOWER
+                and getattr(s, "distribution_beam", None) is not None
+            ]
+            if len(slab_towers) >= 2:
+                sdb = slab_towers[0].distribution_beam
+                svm_layer = f"{sdb.id.split('-')[1] if '-' in sdb.id else sdb.id}_Laje"
+                if "VM" in sdb.id:
+                    svm_token = next((t for t in sdb.id.split("-") if t.startswith("VM")), sdb.id)
+                    svm_layer = f"{svm_token}_Laje"
+                _ensure_layer(doc, svm_layer)
+
+                # Group towers by row (similar Y within tolerance) and draw horizontal VMs
+                _ROW_TOL = 0.3  # m
+                sorted_by_y = sorted(slab_towers, key=lambda t: t.y)
+                rows = []
+                current_row = [sorted_by_y[0]]
+                for t in sorted_by_y[1:]:
+                    if abs(t.y - current_row[0].y) <= _ROW_TOL:
+                        current_row.append(t)
+                    else:
+                        rows.append(current_row)
+                        current_row = [t]
+                rows.append(current_row)
+
+                for row in rows:
+                    row.sort(key=lambda t: t.x)
+                    for t1, t2 in zip(row, row[1:]):
+                        msp.add_line(
+                            (t1.x, t1.y), (t2.x, t2.y),
+                            dxfattribs={"layer": svm_layer},
+                        )
+
+                # Group towers by column (similar X) and draw vertical VMs
+                sorted_by_x = sorted(slab_towers, key=lambda t: t.x)
+                cols = []
+                current_col = [sorted_by_x[0]]
+                for t in sorted_by_x[1:]:
+                    if abs(t.x - current_col[0].x) <= _ROW_TOL:
+                        current_col.append(t)
+                    else:
+                        cols.append(current_col)
+                        current_col = [t]
+                cols.append(current_col)
+
+                for col in cols:
+                    col.sort(key=lambda t: t.y)
+                    for t1, t2 in zip(col, col[1:]):
+                        msp.add_line(
+                            (t1.x, t1.y), (t2.x, t2.y),
+                            dxfattribs={"layer": svm_layer},
+                        )
+
+                # VM label at centroid
+                if hasattr(sr.polygon, "centroid"):
+                    cx = sr.polygon.centroid.x
+                    cy = sr.polygon.centroid.y
+                    msp.add_text(
+                        sdb.model if hasattr(sdb, "model") else sdb.id,
+                        height=TEXT_HEIGHT * 0.6,
+                        dxfattribs={"layer": svm_layer},
+                    ).set_placement((cx + 0.1, cy + 0.1))
 
         # Info label at slab center
         if hasattr(sr.polygon, "centroid"):
@@ -392,7 +433,7 @@ def _draw_slab_shore(msp, x: float, y: float, layer: str):
 def _draw_tower_marker(msp, x: float, y: float, layer: str):
     """Draw a tower footprint as a 20x20cm square with a diagonal cross.
 
-    Mirrors the way Supplier engineers symbolize tower bases — a larger filled
+    Mirrors the way Orguel engineers symbolize tower bases — a larger filled
     square with an X to distinguish it from telescopic shore circles.
     """
     s = TOWER_HALF

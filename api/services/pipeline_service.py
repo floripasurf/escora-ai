@@ -17,6 +17,7 @@ from src.output.mermaid_generator import generate_all_diagrams
 from api.config import settings
 
 logger = logging.getLogger(__name__)
+run_pipeline = None
 
 
 def process_dxf(
@@ -35,9 +36,11 @@ def process_dxf(
     branch_id scopes the learning store so each locadora branch keeps its
     own accumulated knowledge.
     """
-    from src.pipeline.runner import run_pipeline
+    pipeline_runner = run_pipeline
+    if pipeline_runner is None:
+        from src.pipeline.runner import run_pipeline as pipeline_runner
 
-    result = run_pipeline(
+    result = pipeline_runner(
         input_path,
         mode=mode,
         inventory_name=inventory_name,
@@ -46,7 +49,18 @@ def process_dxf(
     calc = result.calculation
 
     if calc is None:
-        return {"error": "Pipeline falhou — nenhum resultado de calculo"}
+        diagnostics = [
+            w for w in result.warnings
+            if w.startswith("Cálculo falhou")
+            or w.startswith("Nenhum")
+            or "filtrad" in w.lower()
+            or "descartad" in w.lower()
+        ]
+        if not diagnostics:
+            diagnostics = result.warnings[-4:]
+        detail = "; ".join(diagnostics[:4]) or "nenhum resultado de calculo"
+        logger.error("Pipeline returned no calculation for %s: %s", input_path, detail)
+        return {"error": f"Pipeline falhou — {detail}"}
 
     # Generate output DXF
     output_dir = Path(settings.output_dir) / job_id
@@ -326,14 +340,14 @@ def _generate_output_dxf(
     scale: float = 1.0,
     report_data=None,
 ):
-    """Overlay shores onto the original DXF using Supplier layer naming.
+    """Overlay shores onto the original DXF using Orguel layer naming.
 
-    Symbology (Supplier convention):
+    Symbology (Orguel convention):
     - Telescopic shore — filled hexagon (~0.30 m across) + label on first
       occurrence per cluster.
     - Tower — double square (outer 0.40 m, inner 0.28 m) + 4 corner ticks.
     - VM distribution beam — TWO parallel rails alongside the concrete beam,
-      one each side of the web (real Supplier plans never draw a single
+      one each side of the web (real Orguel plans never draw a single
       centerline). Towers under those rails are nudged perpendicular to the
       beam axis so they sit on the rails, not on the concrete centerline.
     - Slab VM rails — each row gets a thin rectangle (paired lines).
@@ -478,8 +492,8 @@ def _generate_output_dxf(
             _draw_tower(cx, cy, layer)
 
         # Draw VM50 travamento (lateral bracing) perpendicular to beam axis
-        # between consecutive telescopic shores — this creates the Supplier-style
-        # grid pattern. Supplier places VM50-TRAV every ~0.45m perpendicular.
+        # between consecutive telescopic shores — this creates the Orguel-style
+        # grid pattern. Orguel places VM50-TRAV every ~0.45m perpendicular.
         if len(telescopic_shores) >= 2:
             vm50_layer = "VM50_Viga"
             _ensure_layer(doc, vm50_layer, 6)
@@ -567,7 +581,7 @@ def _generate_output_dxf(
                     )
 
         # Draw VM50 travamento perpendicular to slab rows (vertical connectors)
-        # This creates the Supplier-style grid connecting shore rows. Conectores
+        # This creates the Orguel-style grid connecting shore rows. Conectores
         # que cruzariam a exclusão de pilar são omitidos.
         if len(sr.shores) >= 4:
             vm50_slab_layer = "VM50_Laje"

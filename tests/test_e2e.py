@@ -8,6 +8,10 @@ from pathlib import Path
 from src.parser.dxf_reader import read_dxf, find_slab_layers, get_polylines_by_layer
 from src.parser.geometry_extractor import extract_polygons
 from src.parser.metadata_extractor import extract_thickness_from_layer
+from src.engine.load_calculator import calculate_self_weight, calculate_live_load, calculate_total_load
+from src.engine.shore_selector import load_catalog, select_shore
+from src.engine.grid_distributor import distribute_shores
+from src.engine.validator import validate_result
 from src.generator.dxf_writer import generate_output_dxf
 from src.generator.bom_generator import write_bom_csv
 from src.models.slab import Slab
@@ -85,9 +89,10 @@ class TestE2ESimpleSlab:
         assert result.slab.area_m2 == pytest.approx(24.0)
         assert result.slab.thickness_m == pytest.approx(0.12)
         assert result.self_weight_kn == pytest.approx(72.0)
-        assert result.live_load_kn == pytest.approx(36.0)
-        # Total = (72.0 + 12.0 forma + 36.0) × 1.4 = 168.0
-        assert result.total_load_kn == pytest.approx(168.0)
+        # NBR 15696 §4.2.e (2026-05-27): sobrecarga 2.0 kN/m² → 24m² × 2.0 = 48 kN
+        assert result.live_load_kn == pytest.approx(48.0)
+        # Total = (72.0 + 12.0 forma + 48.0) × 1.4 = 184.8
+        assert result.total_load_kn == pytest.approx(184.8)
 
         # Verificar escoramento
         assert len(result.shores) > 0

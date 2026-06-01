@@ -219,7 +219,8 @@ def run_pipeline(
     inventory = None
     if mode == "inventory":
         try:
-            inventory = load_inventory(inventory_name or "supplier_sjc")
+            from src.engine.inventory import load_inventory
+            inventory = load_inventory(inventory_name or "orguel_sjc")
         except Exception as e:
             logger.warning(f"Inventory load failed (falling back to price mode): {e}")
 
@@ -318,7 +319,7 @@ def run_pipeline(
 
     # Stage 5: Calculation
     calculation = None
-    if all_elements:
+    if levels:
         pe_direito = levels[0].pe_direito_m or ALTURA_DEFAULT
         pe_direito_is_default = levels[0].pe_direito_m is None
 
@@ -397,6 +398,12 @@ def run_pipeline(
                 })
 
         try:
+            if not (all_elements or all_beam_layer_segs or all_hatches or all_polylines):
+                raise ValueError(
+                    "nenhum elemento estrutural, eixo de viga, hatch ou contorno de laje "
+                    "foi classificado na planta principal"
+                )
+
             calculation = run_calculation(
                 elements=all_elements,
                 pe_direito_m=pe_direito,
@@ -446,7 +453,10 @@ def run_pipeline(
             warnings[:0] = diagnostic_lines
             warnings.extend(calculation.warnings)
         except Exception as e:
+            logger.exception("Calculation stage failed")
             warnings.append(f"Cálculo falhou: {e}")
+    else:
+        warnings.append("Nenhum nível/planta principal foi identificado no DXF")
 
     result = PipelineResult(
         filename=parse.filename,
@@ -458,7 +468,18 @@ def run_pipeline(
         calculation=calculation,
     )
 
-    # Stage 6: Learning — save what we learned from this run
+    # Stage 6: Rule verification (feature flag: ESCORA_RUN_RULES, default on)
+    import os
+    if os.environ.get("ESCORA_RUN_RULES", "1") != "0" and result.calculation is not None:
+        try:
+            from src.rules import REGISTRY
+            from src.rules.project import RuleProject
+            rule_project = RuleProject.from_pipeline_result(result)
+            result.violations = REGISTRY.check_all(rule_project)
+        except Exception as e:
+            logger.warning(f"Rule verification failed (non-fatal): {e}")
+
+    # Stage 7: Learning — save what we learned from this run
     try:
         learn_and_save(result, level_segments=level_segments, store=store, source_dxf_path=filepath)
     except Exception as e:

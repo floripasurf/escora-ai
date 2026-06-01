@@ -1,4 +1,4 @@
-"""Tests for `_beam_intersections_without_pillar` (Supplier Q3, A4).
+"""Tests for `_beam_intersections_without_pillar` (Orguel Q3, A4).
 
 Regra da locadora (Q3): "Toda interseção de viga sem pilar deve ter
 torre/escora". Este módulo testa o helper geométrico que localiza

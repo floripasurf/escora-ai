@@ -10,7 +10,7 @@ from src.utils.labels import CATEGORY_DEFAULT, CATEGORY_LABELS_PT
 
 
 # Aproximação de vigas vazadas (distribution beams) por torre.
-# Razão prática medida em projetos Supplier:
+# Razão prática medida em projetos Orguel:
 # - Vigas (beam): 2 trilhos × (n_towers−1) gaps ⇒ ~1.5/torre
 # - Lajes em grid quadrado nx×ny: 2nx(ny−1) ⇒ ~1.3-1.5/torre
 # Valor usado: 2.0 (lado conservador para orçamento de peso).
@@ -20,17 +20,17 @@ VIGAS_VAZADAS_POR_TORRE = 2.0
 ACCESSORY_ID_PREFIXES = ("CRZ-", "VD-", "TRAV-")
 
 # ID sintético do trilho VM50 canônico usado para travamento (lateral/pilar/fundo).
-# Escolha: VM50-155 é a variante mais comum no catálogo Supplier.
+# Escolha: VM50-155 é a variante mais comum no catálogo Orguel.
 VM50_BRACING_REFERENCE_ID = "VD-VM50-155"
 VM50_BRACING_BOM_ID = "TRAV-VM50-155"
 VM50_BRACING_BOM_MODEL = "VM50 (travamento: lateral+pilar+fundo)"
 
-# Barras de ancoragem com porca para travamento de pilares (Supplier Q4).
+# Barras de ancoragem com porca para travamento de pilares (Orguel Q4).
 # Valores de referência — não existem no JSON do catálogo ainda; ajustáveis
 # quando a locadora informar SKU real.
 BARRA_ANCORAGEM_BOM_ID = "TRAV-BARRA-ANC"
 BARRA_ANCORAGEM_MODEL = "Barra de ancoragem c/ porca (travamento pilar)"
-BARRA_ANCORAGEM_MANUFACTURER = "Supplier"
+BARRA_ANCORAGEM_MANUFACTURER = "Orguel"
 BARRA_ANCORAGEM_WEIGHT_KG = 1.2
 BARRA_ANCORAGEM_PRICE_BRL = 1.33
 SHORE_TOWER_ID_PREFIX = "TWR-"
@@ -237,7 +237,7 @@ def build_report_data(
         ))
 
     # Accessories — cruzetas split: vigas (0.80 m rule), lajes (0.25 ratio),
-    # torres (4 por torre). See Supplier Q5.
+    # torres (4 por torre). See Orguel Q5.
     try:
         from src.engine.tower_selector import (
             compute_cruzeta_bom,
@@ -285,7 +285,7 @@ def build_report_data(
     bom_rows.extend(_build_distribution_beam_bom_rows(calc))
 
     # Accessories — VM50 travamento (lateral viga + pilar + fundo) + barras
-    # de ancoragem. Supplier Q4.
+    # de ancoragem. Orguel Q4.
     bom_rows.extend(_build_vm50_bracing_bom_rows(calc))
 
     # Volume breakdown → linhas da aba Volumes
@@ -392,7 +392,7 @@ def _build_distribution_beam_bom_rows(calc: CalculationResult) -> List[BomRow]:
 
 
 def _build_vm50_bracing_bom_rows(calc: CalculationResult) -> List[BomRow]:
-    """BOM de VM50 para travamento (Supplier Q4) + barras de ancoragem.
+    """BOM de VM50 para travamento (Orguel Q4) + barras de ancoragem.
 
     Usa `compute_vm50_bracing_bom` para obter contagens por categoria e
     traduz em duas linhas de BOM:
@@ -403,12 +403,14 @@ def _build_vm50_bracing_bom_rows(calc: CalculationResult) -> List[BomRow]:
     (max_span_m × weight_per_m_kg / price_per_m_brl). Se o catálogo não
     expõe VM50-155, a linha é omitida.
     """
+    from src.engine.vm50_bracing import compute_vm50_bracing_bom
 
     bom = compute_vm50_bracing_bom(calc.beam_results, calc.pillar_count)
     rows: List[BomRow] = []
 
     if bom.total_vm50 > 0:
         try:
+            from src.engine.tower_selector import load_tower_catalog
             _, beams, _ = load_tower_catalog()
             ref = next(
                 (b for b in beams if b.id == VM50_BRACING_REFERENCE_ID), None
@@ -466,7 +468,7 @@ def _safe_div(num: float, den: float) -> float:
     return num / den
 
 
-# Supplier rule A6 / Q8: taxa kg/m³ esperada 12-16 (faixa usual),
+# Orguel rule A6 / Q8: taxa kg/m³ esperada 12-16 (faixa usual),
 # 8-20 (faixa aceitável). Fora disso, warning.
 CONSUMPTION_RATE_USUAL_MIN_KG_M3 = 12.0
 CONSUMPTION_RATE_USUAL_MAX_KG_M3 = 16.0
@@ -477,7 +479,7 @@ CONSUMPTION_RATE_ACCEPTABLE_MAX_KG_M3 = 20.0
 def _consumption_rate_warnings(
     rows: List[ConsumptionByHeightRow],
 ) -> List[str]:
-    """Validate rate_kg_m3_bruto vs Supplier expected ranges.
+    """Validate rate_kg_m3_bruto vs Orguel expected ranges.
 
     Two levels:
     - Critical (rate ∉ [8, 20]): likely wrong inputs (pé-direito, espessura).

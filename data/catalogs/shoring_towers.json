@@ -2,11 +2,11 @@
   "catalog_version": "2.0",
   "type": "shoring_tower",
   "updated": "2026-04-06",
-  "source": "Catálogo Supplier / Mecanor — painéis e vigas reais",
+  "source": "Catálogo Orguel / Mecanor — painéis e vigas reais",
   "towers": [
     {
       "id": "TWR-TA100",
-      "manufacturer": "Supplier/Mecanor",
+      "manufacturer": "Orguel/Mecanor",
       "model": "TA-100",
       "system": "tubular",
       "load_capacity_kn": 100.0,
@@ -23,7 +23,7 @@
     },
     {
       "id": "TWR-TA150",
-      "manufacturer": "Supplier/Mecanor",
+      "manufacturer": "Orguel/Mecanor",
       "model": "TA-150",
       "system": "tubular",
       "load_capacity_kn": 200.0,
@@ -148,7 +148,7 @@
       "max_span_m": 1.55,
       "weight_per_m_kg": 4.0,
       "price_per_m_brl": 4.44,
-      "notes": "Viga Mecanor VM80 L=1.55m — most common in Supplier plans"
+      "notes": "Viga Mecanor VM80 L=1.55m — most common in Orguel plans"
     },
     {
       "id": "VD-VM80-205",
@@ -305,11 +305,11 @@
       "weight_per_m_kg": 4.5,
       "price_per_m_brl": 5.00,
       "available": false,
-      "notes": "Viga H20 madeira/alumínio (500 kgf.m). Supplier Q7: oferta técnica — hoje sem estoque na locadora. Preço: 4.5kg/m × R$1.11/kg/mês."
+      "notes": "Viga H20 madeira/alumínio (500 kgf.m). Orguel Q7: oferta técnica — hoje sem estoque na locadora. Preço: 4.5kg/m × R$1.11/kg/mês."
     },
     {
       "id": "VD-ALU14",
-      "manufacturer": "Supplier",
+      "manufacturer": "Orguel",
       "model": "ALU14",
       "height_mm": 140,
       "moment_capacity_knm": 5.80,
@@ -318,11 +318,11 @@
       "weight_per_m_kg": 5.0,
       "price_per_m_brl": 5.55,
       "available": false,
-      "notes": "Viga ALU14 alumínio (Supplier Q7: principal com VM80 secundária). Hoje sem estoque — só ofertada como alternativa técnica. Preço: 5.0kg/m × R$1.11/kg/mês."
+      "notes": "Viga ALU14 alumínio (Orguel Q7: principal com VM80 secundária). Hoje sem estoque — só ofertada como alternativa técnica. Preço: 5.0kg/m × R$1.11/kg/mês."
     },
     {
       "id": "VD-ALU20",
-      "manufacturer": "Supplier",
+      "manufacturer": "Orguel",
       "model": "ALU20",
       "height_mm": 200,
       "moment_capacity_knm": 9.60,
@@ -331,7 +331,7 @@
       "weight_per_m_kg": 6.5,
       "price_per_m_brl": 7.22,
       "available": false,
-      "notes": "Viga ALU20 alumínio (Supplier Q7: principal, vãos maiores). Hoje sem estoque — só ofertada como alternativa técnica. Preço: 6.5kg/m × R$1.11/kg/mês."
+      "notes": "Viga ALU20 alumínio (Orguel Q7: principal, vãos maiores). Hoje sem estoque — só ofertada como alternativa técnica. Preço: 6.5kg/m × R$1.11/kg/mês."
     },
     {
       "id": "VD-SF250",
@@ -381,7 +381,7 @@
     {
       "id": "CRZ-TORRE",
       "category": "cruzeta",
-      "manufacturer": "Supplier",
+      "manufacturer": "Orguel",
       "model": "Cruzeta TA",
       "associated_model_ids": ["TWR-TA100", "TWR-TA150", "TWR-SH-LTT"],
       "weight_kg": 5.8,

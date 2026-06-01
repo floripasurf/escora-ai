@@ -1,0 +1,76 @@
+# Equipment catalog — Orguel (comprehensive)
+# Single source of truth for all equipment dimensions, capacities, and weights.
+# Source: AGENTS.md v3 (2026-05-04), Orguel training pages 11-18, 69, 86.
+
+vm_beams:
+  # Comprimentos disponíveis em mm — manual §13.3 (Orguel p.20).
+  # VM-80 e VM-130 são usadas em escoramento (principal/secundária).
+  # VM-50 é exclusiva de travamento lateral/pilares (não usar como guia).
+  - { type: VM-80,  material: metalica,  EI_kgf_m2: 14965,  M_adm_kgf_m: 212,  weight_kg_m: 6.41,
+      available_lengths_mm: [1000, 1550, 2050, 2550, 3100, 3600, 4100],
+      uso: "secundaria (barrote), travessas, apoio de forma" }
+  - { type: VM-130, material: metalica,  EI_kgf_m2: 47094,  M_adm_kgf_m: 516,  weight_kg_m: 9.70,
+      available_lengths_mm: [1550, 2050, 2550, 3100, 3600, 4100],
+      uso: "principal (guia), vigas de distribuicao" }
+  - { type: VM-50,  material: metalica,  EI_kgf_m2: null,   M_adm_kgf_m: null, weight_kg_m: null,
+      available_lengths_mm: [650, 1000, 1550, 2050, 2550, 3100, 3600, 4100],
+      uso: "EXCLUSIVA travamento lateral de vigas e pilares - NAO usar como guia/barrote" }
+  - { type: ALU-14, material: aluminio,  EI_kgf_m2: 20309,  M_adm_kgf_m: 409,  weight_kg_m: 4.00,
+      available_lengths_mm: null,
+      uso: "alternativa tecnica leve (principal/secundaria)" }
+  - { type: ALU-20, material: aluminio,  EI_kgf_m2: null,    M_adm_kgf_m: 800,  weight_kg_m: 6.35,
+      available_lengths_mm: null,
+      uso: "alternativa tecnica robusta" }
+  - { type: HT-20,  material: madeira,   EI_kgf_m2: 51758,  M_adm_kgf_m: 500,  weight_kg_m: 5.17,
+      available_lengths_mm: null,
+      uso: "alternativa tecnica/rampas" }
+
+tower_panels:
+  - { width_mm: 1000, heights_mm: [1000, 1250, 1500] }
+  - { width_mm: 1540, heights_mm: [1000, 1250, 1500] }
+
+diagonal_tubular:
+  - { model: 1, length_mm: 1415 }
+  - { model: 2, length_mm: 1840 }
+  - { model: 3, length_mm: 2180 }
+  - { model: 4, length_mm: 2280 }
+  - { model: 5, length_mm: 2540 }
+
+diagonal_x:
+  - { model: 1, length_mm: 1200 }
+  - { model: 2, length_mm: 1410 }
+  - { model: 3, length_mm: 1680 }
+  - { model: 4, length_mm: 1840 }
+  - { model: 5, length_mm: 2150 }
+  - { model: 6, length_mm: 2280 }
+
+dt_selection_table:
+  # Orguel p.17: given diagonal_x size and panel width, select DT length
+  - { diagonal_x: 155, panel: 154, dt_length_mm: 2180 }
+  - { diagonal_x: 155, panel: 100, dt_length_mm: 1840 }
+  - { diagonal_x: 205, panel: 154, dt_length_mm: 2540 }
+  - { diagonal_x: 205, panel: 100, dt_length_mm: 2280 }
+  - { diagonal_x: 100, panel: 154, dt_length_mm: 1840 }
+  - { diagonal_x: 100, panel: 100, dt_length_mm: 1415 }
+
+accessories:
+  - { name: "Sapata Simples",                 dimension: "110 x 110 mm" }
+  - { name: "Sapata Ajustável",               regulagem_mm: 300 }
+  - { name: "Forcado Fixo Simples",           height_mm: 65, opening_mm: 85 }
+  - { name: "Forcado Fixo Duplo",             height_mm: 70, opening_mm: 205 }
+  - { name: "Forcado Fixo H20",               height_mm: 180, opening_mm: 170 }
+  - { name: "Forcado Ajustável Duplo H20",    regulagem_mm: 300, height_mm: 180 }
+  - { name: "Forcado Ajuste Simples",         height_mm: 65, opening_mm: 85 }
+  - { name: "Forcado p/ Vigas Metálicas",     height_mm: 65, opening_mm: 85 }
+  - { name: "Console (Mão Francesa)",         base_mm: 540, length_mm: 710, height_mm: 250 }
+  - { name: "Barra de Ligação",               lengths_mm: [300, 500] }
+
+# Height calculation: H_torre = pe_direito - espessura_laje - ajuste_topo_base
+# ajuste_topo_base is typically 0.224 m (sapata + forcado combined) — Orguel p.89
+ajuste_topo_base_m: 0.224
+
+# Substrate stress requirements (Orguel p.25)
+substrate_stress_kgf_cm2:
+  torre: 16.53
+  esc_2000_3100: 26.45
+  esc_3000_4500: 17.35

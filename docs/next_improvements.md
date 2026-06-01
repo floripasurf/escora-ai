@@ -1,7 +1,7 @@
 # Escora.AI — Próximas Melhorias (Consolidado)
 
 **Data:** 2026-04-07
-**Status do produto:** MVP SaaS multi-tenant em produção em `https://escora-ai.fly.dev`, com login/senha por locadora, seleção de unidade (branch), pipeline completo (DXF → BOM/IFC/PDFs), feedback loop automático por revisão, modos de otimização (`price` / `inventory`) e catálogo calibrado com dados reais da Supplier SJC.
+**Status do produto:** MVP SaaS multi-tenant em produção em `https://escora-ai.fly.dev`, com login/senha por locadora, seleção de unidade (branch), pipeline completo (DXF → BOM/IFC/PDFs), feedback loop automático por revisão, modos de otimização (`price` / `inventory`) e catálogo calibrado com dados reais da Orguel SJC.
 
 Este documento consolida `docs/production_upgrade_plan.md`, `docs/roadmap/milestone_plan.md` e os research notes, removendo o que já foi entregue e marcando o que ainda entrega valor claro.
 
@@ -11,9 +11,9 @@ Este documento consolida `docs/production_upgrade_plan.md`, `docs/roadmap/milest
 
 Itens dos planos que já foram implementados em sessões recentes e **não** precisam mais ser tratados:
 
-- **M3 — Torres de escoramento:** `tower_selector` decide escora vs torre, seleção por custo/estoque, calibrado com 12 projetos reais Supplier (~95% match em 110749).
+- **M3 — Torres de escoramento:** `tower_selector` decide escora vs torre, seleção por custo/estoque, calibrado com 12 projetos reais Orguel (~95% match em 110749).
 - **M4 — Vigas de distribuição (VM130, VD):** integradas no `tower_selector` com catálogo real.
-- **M9 — Otimização de estoque:** `optimization_mode=inventory` + `data/inventory/supplier_sjc.json` com fallback + warning quando item esgotado.
+- **M9 — Otimização de estoque:** `optimization_mode=inventory` + `data/inventory/orguel_sjc.json` com fallback + warning quando item esgotado.
 - **M10.1 — Learning loop com revisão:** `LearningStore.update_record_with_revision`, `get_shore_density_correction`, `get_validated_layer_map`, stores particionados por branch.
 - **Regeneração a partir da revisão:** `regenerate_from_revision` produz `*_validated.{dxf,csv,ifc,pdf}` a partir do DXF editado.
 - **Auth multi-tenant:** login/senha por locadora, session tokens, branch picker, isolamento de jobs por `branch_id` (não estava no plano original — foi adicionado depois).
@@ -44,7 +44,7 @@ Tudo isto vem do `production_upgrade_plan.md` e continua válido. Com o login em
 - Health check após 30min idle tem que responder < 2s.
 
 **P4. Máquina com headroom de memória**
-- Bumpar para 2GB / 2 shared CPUs. Os 4 arquivos Supplier que ainda travam (CVS, 59428, 97661) provavelmente são OOM silencioso.
+- Bumpar para 2GB / 2 shared CPUs. Os 4 arquivos Orguel que ainda travam (CVS, 59428, 97661) provavelmente são OOM silencioso.
 
 **P5. Job IDs não adivinháveis**
 - Hoje `uuid.uuid4()[:8]` → 4B combinações, scrapeável.

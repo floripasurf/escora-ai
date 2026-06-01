@@ -3,12 +3,12 @@
 Usage:
     python3 scripts/dxf_inspector.py render <dxf_path> [--out <png_path>]
     python3 scripts/dxf_inspector.py summary <dxf_path> [--out <json_path>]
-    python3 scripts/dxf_inspector.py compare <our_dxf> <supplier_dxf> [--out <png_path>]
+    python3 scripts/dxf_inspector.py compare <our_dxf> <orguel_dxf> [--out <png_path>]
 
 The goal is to give Claude a feedback loop on the generated output by:
   1. Rendering the DXF to PNG (readable via the Read tool)
   2. Dumping a per-layer entity/color/bbox summary (JSON)
-  3. Producing a side-by-side PNG against an Supplier reference file
+  3. Producing a side-by-side PNG against an Orguel reference file
 """
 from __future__ import annotations
 
@@ -135,11 +135,11 @@ def summarize_dxf(dxf_path: str) -> Dict[str, Any]:
     }
 
 
-def compare_dxfs(our_dxf: str, supplier_dxf: str, png_path: str, dpi: int = 180) -> str:
+def compare_dxfs(our_dxf: str, orguel_dxf: str, png_path: str, dpi: int = 180) -> str:
     fig, axes = plt.subplots(1, 2, figsize=(24, 12), dpi=dpi)
     for ax, path, title in (
         (axes[0], our_dxf, f"OUR: {Path(our_dxf).name}"),
-        (axes[1], supplier_dxf, f"SUPPLIER: {Path(supplier_dxf).name}"),
+        (axes[1], orguel_dxf, f"ORGUEL: {Path(orguel_dxf).name}"),
     ):
         ax.set_aspect("equal")
         ax.set_axis_off()
@@ -177,7 +177,7 @@ def main(argv=None):
 
     c = sub.add_parser("compare")
     c.add_argument("our_dxf")
-    c.add_argument("supplier_dxf")
+    c.add_argument("orguel_dxf")
     c.add_argument("--out", default=None)
     c.add_argument("--dpi", type=int, default=180)
 
@@ -196,8 +196,8 @@ def main(argv=None):
             json.dump(summary, sys.stdout, indent=2)
             print()
     elif args.cmd == "compare":
-        out = args.out or _default_out(args.our_dxf, "_vs_supplier.png")
-        path = compare_dxfs(args.our_dxf, args.supplier_dxf, out, dpi=args.dpi)
+        out = args.out or _default_out(args.our_dxf, "_vs_orguel.png")
+        path = compare_dxfs(args.our_dxf, args.orguel_dxf, out, dpi=args.dpi)
         print(path)
 
 

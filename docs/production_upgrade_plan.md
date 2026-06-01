@@ -69,7 +69,7 @@ All four are fixed in a single deploy.
   ```
 - **Cost impact:** roughly doubles the per-hour price of the machine when
   running, still in cents/day at current load.
-- **Acceptance:** the four currently-timing-out Supplier files either finish or
+- **Acceptance:** the four currently-timing-out Orguel files either finish or
   fail with a real error, not a silent OOM.
 
 ### A4. Orphan-job sweeper on startup

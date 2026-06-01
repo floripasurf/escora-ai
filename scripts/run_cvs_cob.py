@@ -18,11 +18,16 @@ from shapely.geometry import Polygon
 from src.models.slab import Slab
 from src.models.shore import PositionedShore
 from src.models.project import ShoringResult
+from src.engine.load_calculator import (
     calculate_self_weight, calculate_live_load, calculate_total_load,
 )
+from src.engine.beam_calculator import (
     calculate_beam_self_weight, calculate_beam_total_linear_load,
     distribute_beam_shores, estimate_beam_shore_height,
 )
+from src.engine.shore_selector import load_catalog, select_shore
+from src.engine.grid_distributor import distribute_shores, PillarExclusion
+from src.engine.validator import validate_result
 from src.generator.dxf_writer import generate_output_dxf
 from src.generator.bom_generator import write_bom_csv, generate_bom
 

@@ -1,17 +1,22 @@
 """Tests: capitel densification shores must be TELESCOPIC (never TOWER).
 
 Bug observed in production (2026-04-16): in MIXED slab support (towers +
-telescopic), the capitel densification (Supplier Q6) added dense shores
+telescopic), the capitel densification (Orguel Q6) added dense shores
 around pillars (0.70-1.50m ring). But because the MIXED tower-swap ran
 AFTER densification and picked evenly-spaced indices, some of those
 capitel shores were converted to TOWER. Result: torres grudadas nos
-pilares em pé-direito baixo — contrary to Supplier practice.
+pilares em pé-direito baixo — contrary to Orguel practice.
 
 Fix: capitel ring shores must stay TELESCOPIC. Either run densification
 AFTER the MIXED swap, OR exclude capitel indices from the swap set.
+
+NOTA (2026-05-28): Apos manual §8, faixa de escora padrao foi ampliada
+de 3.10m para 3.50m. Fixture recalibrado para pe=3.80m + slab=0.25m +
+geometria 15x12 (180m²) - garante MIXED com tower swap no pipeline.
 """
 import math
 
+from src.engine.tower_selector import SupportType
 from src.models.pipeline_models import ClassifiedElement, ElementType
 from src.pipeline.stage_calculate import run_calculation
 
@@ -36,22 +41,23 @@ def _pillar(cx, cy, w=0.20, h=0.40):
 
 
 def _large_slab_elements():
-    """Single-panel slab ≥40m² — triggers rule-5-laje-grande (MIXED).
+    """Painel 15x12 (180m²) com 5 pilares - garante MIXED no pipeline.
 
-    Usar 4 vigas de contorno (sem viga central) para formar 1 painel de
-    aprox. 63 m², acima do limite SLAB_TOWER_AREA_M2 (40m²).
+    Manual §8 (2026-05-28): pe-direito >3.50m + laje >=20cm + area
+    grande dispara rule-4-laje-espessa MIXED e o pipeline executa o
+    tower swap completo.
     """
     beams = [
-        _beam(0, 0, 9, 0),
-        _beam(0, 7, 9, 7),
-        _beam(0, 0, 0, 7),
-        _beam(9, 0, 9, 7),
+        _beam(0, 0, 15, 0),
+        _beam(0, 12, 15, 12),
+        _beam(0, 0, 0, 12),
+        _beam(15, 0, 15, 12),
     ]
     pillars = [
-        _pillar(0, 0), _pillar(9, 0),
-        _pillar(0, 7), _pillar(9, 7),
+        _pillar(0, 0), _pillar(15, 0),
+        _pillar(0, 12), _pillar(15, 12),
         # Pilar interno para gerar capitel claro no meio
-        _pillar(4.5, 3.5),
+        _pillar(7.5, 6.0),
     ]
     return beams + pillars, [(p.geometry[0][0], p.geometry[0][1]) for p in pillars]
 
@@ -60,9 +66,10 @@ class TestCapitelNeverBecomesTower:
     def test_tower_shores_not_in_capitel_ring(self):
         """No TOWER shore may lie within 1.50m of any pillar."""
         elements, pillar_xy = _large_slab_elements()
-        # pe_direito > 3.10m to bypass Rule 0 (baixo pé-direito → TELESCOPIC)
-        result = run_calculation(elements, pe_direito_m=3.50,
-                                 slab_thickness_m=0.12)
+        # Manual §8 (2026-05-28): pe=3.80m + laje 25cm + 180m² area
+        # forca MIXED com tower swap real no pipeline.
+        result = run_calculation(elements, pe_direito_m=3.80,
+                                 slab_thickness_m=0.25)
 
         # Only MIXED slabs exercise the bug; at least one must be MIXED
         mixed_slabs = [
@@ -92,9 +99,10 @@ class TestCapitelNeverBecomesTower:
     def test_capitel_densification_produces_telescopic_shores(self):
         """Shores in capitel ring (0.70-1.50m) exist and are telescopic."""
         elements, pillar_xy = _large_slab_elements()
-        # pe_direito > 3.10m to bypass Rule 0 (baixo pé-direito → TELESCOPIC)
-        result = run_calculation(elements, pe_direito_m=3.50,
-                                 slab_thickness_m=0.12)
+        # Manual §8 (2026-05-28): pe=3.80m + laje 25cm + 180m² area
+        # forca MIXED com tower swap real no pipeline.
+        result = run_calculation(elements, pe_direito_m=3.80,
+                                 slab_thickness_m=0.25)
 
         capitel_shores = 0
         for slab in result.slab_results:

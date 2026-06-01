@@ -1,4 +1,4 @@
-"""Tests for consumption rate warnings (Supplier rule A6, Q8).
+"""Tests for consumption rate warnings (Orguel rule A6, Q8).
 
 Locadora: "12-16 kg/m³ é a faixa usual". Two warning levels:
 - Fora de 8-20 kg/m³: critical warning (inputs likely wrong).

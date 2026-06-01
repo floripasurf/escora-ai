@@ -9,6 +9,10 @@ from typing import Optional
 from src.parser.dxf_reader import read_dxf, find_slab_layers, get_document_info, get_polylines_by_layer
 from src.parser.geometry_extractor import extract_polygons
 from src.parser.metadata_extractor import extract_thickness_from_layer
+from src.engine.load_calculator import calculate_self_weight, calculate_live_load, calculate_total_load
+from src.engine.shore_selector import load_catalog, select_shore
+from src.engine.grid_distributor import distribute_shores
+from src.engine.validator import validate_result
 from src.generator.dxf_writer import generate_output_dxf
 from src.generator.report_generator import print_report
 from src.generator.bom_generator import write_bom_csv
@@ -453,6 +457,7 @@ def inspecionar(
     """
     from src.pipeline.stage_parse import parse_dxf
     from src.pipeline.runner import _detect_coordinate_scale
+    from src.engine.slab_builder import derive_slabs_from_boundaries
     from src.utils.labels import classify_layer, CATEGORY_DEFAULT, CATEGORY_LABELS_PT
 
     input_path = Path(arquivo)

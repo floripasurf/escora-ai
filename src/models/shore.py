@@ -15,6 +15,10 @@ class SupportType(str, Enum):
 class ShoreCatalogEntry(BaseModel):
     """Entrada do catálogo de escoras telescópicas."""
     id: str
+    aliases: List[str] = Field(
+        default_factory=list,
+        description="IDs legados aceitos como sinonimos para retro-compatibilidade",
+    )
     manufacturer: str
     model: str
     type: str = "telescopic"
@@ -31,6 +35,37 @@ class ShoreCatalogEntry(BaseModel):
         default=None,
         description="List of [height_m, capacity_kn] pairs for Euler derating",
     )
+    # Flags de selecao (manual §8 e §13.1)
+    available: bool = Field(
+        default=True,
+        description="Se False, modelo nao deve ser selecionado pelo engine",
+    )
+    enabled: bool = Field(
+        default=True,
+        description="Para placeholders (ex: ESC Estendida) - locadora ativa quando cadastrar curve real",
+    )
+    for_sale_only: bool = Field(
+        default=False,
+        description="Modelo de venda; nao deve ser default em locacao (ex: ESC Junior)",
+    )
+    not_standard_rental: bool = Field(
+        default=False,
+        description="Nao usar como padrao de locacao se nao confirmado em estoque",
+    )
+    extended_shore: bool = Field(
+        default=False,
+        description="Escora telescopica estendida (>4.50 m) - permite selecao em pe-direito alto",
+    )
+
+    def matches_id(self, query: str) -> bool:
+        """True quando ``query`` corresponde ao id principal OU a um alias.
+
+        Manual §13.1: nomenclatura migrou de ESC310 -> ESC2000-3100 e
+        ESC450 -> ESC3000-4500; aliases mantem retro-compatibilidade.
+        """
+        if query == self.id:
+            return True
+        return query in self.aliases
 
     def effective_capacity(self, height_m: float) -> float:
         """Return derated load capacity at the given extension height.
@@ -127,9 +162,9 @@ class DistributionBeamEntry(BaseModel):
     notes: str = ""
     # Disponibilidade padrão da locadora. Se False, só é ofertada no modo
     # "preço" como alternativa técnica, nunca sugerida no modo "estoque"
-    # (ADR Supplier B1 — ALU14/ALU20/H20 entram como opções técnicas).
+    # (ADR Orguel B1 — ALU14/ALU20/H20 entram como opções técnicas).
     available: bool = True
-    # Rigidez à flexão (kNm²) — manual Supplier p.45-55.
+    # Rigidez à flexão (kNm²) — manual Orguel p.45-55.
     # Usado para verificação de deflexão (dual check: momento + flecha).
     EI_knm2: Optional[float] = Field(
         default=None,

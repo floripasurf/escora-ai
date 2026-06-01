@@ -80,7 +80,7 @@ def _shore_entry(shore_id="ESC310", capacity=20.0):
 
 def _tower_entry():
     return TowerCatalogEntry(
-        id="TWR-TA150", manufacturer="Supplier", model="TA-150",
+        id="TWR-TA150", manufacturer="Orguel", model="TA-150",
         load_capacity_kn=120.0, module_height_m=1.5, base_dimension_m=1.54,
         max_height_m=20.0, weight_per_module_kg=38.0, includes_bracing=True,
         price_per_module_brl=15.0,
@@ -234,7 +234,7 @@ def test_bom_csv_includes_vigas_vazadas_rows(tmp_path):
             is_valid=True,
         ),
         bom_rows=[
-            BomRow(id="VD-VM80-3M", model="VM80 3m", manufacturer="Supplier",
+            BomRow(id="VD-VM80-3M", model="VM80 3m", manufacturer="Orguel",
                    quantity=8, capacity_kn=0.0, height_min_m=0.0,
                    height_max_m=0.0, weight_kg=24.0, total_weight_kg=192.0,
                    price_brl=180.0, total_price_brl=1440.0),

@@ -1,4 +1,4 @@
-"""Integration tests — VM50 travamento deve aparecer no BOM (Supplier Q4)."""
+"""Integration tests — VM50 travamento deve aparecer no BOM (Orguel Q4)."""
 from src.models.calculation_models import CalculationResult, BeamShoringResult
 from src.models.pipeline_models import ClassifiedElement, ElementType
 from src.models.shore import ShoreCatalogEntry, PositionedShore
@@ -12,7 +12,7 @@ from src.output.report_data import (
 
 def _shore_entry(sid="ESC310"):
     return ShoreCatalogEntry(
-        id=sid, manufacturer="Supplier", model=sid,
+        id=sid, manufacturer="Orguel", model=sid,
         height_min_m=2.0, height_max_m=3.10,
         load_capacity_kn=30.0, weight_kg=18.6,
         tube_external_mm=60.0, tube_internal_mm=50.0,
@@ -87,7 +87,7 @@ class TestVm50BracingBomIntegration:
     def test_tower_beam_excluded_from_fundo(self):
         """Viga com torre (TWR-) não gera fundo VM50."""
         tower_shore = ShoreCatalogEntry(
-            id="TWR-TA150", manufacturer="Supplier", model="TA-150",
+            id="TWR-TA150", manufacturer="Orguel", model="TA-150",
             height_min_m=0.0, height_max_m=25.0,
             load_capacity_kn=120.0, weight_kg=38.0,
             tube_external_mm=0.0, tube_internal_mm=0.0, base_plate_mm=0.0,

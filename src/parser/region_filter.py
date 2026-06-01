@@ -20,7 +20,10 @@ from src.pipeline.stage_parse import (
 
 logger = logging.getLogger(__name__)
 
-# Text patterns that indicate a detail/section view (secondary pass)
+# Text patterns that indicate a detail/section view (secondary pass).
+# Expandido em 2026-05-30 (bug 3 manual): detalhes como
+# "DETALHE DE IMPERMEABILIZACAO DO P.S.T" e "ESQUEMA DE NIVEIS" ficavam
+# escapando pela falta de palavras como P.S.T / ESQUEMA / IMPERMEABILI.
 DETAIL_KEYWORDS = [
     "DETALHE", "DET.", "DET ",
     "CORTE", "SEÇÃO", "SECAO", "SEC.",
@@ -30,14 +33,36 @@ DETAIL_KEYWORDS = [
     "LEGENDA", "QUADRO",
     "PLANTA", "ESC ",
     "A-A", "B-B", "C-C", "D-D", "E-E",
+    # NOVOS (2026-05-30) — manual §28.7
+    "P.S.T",                  # Piso Sobre Terreno (titulo de detalhe BR)
+    "ESQUEMA",                # "ESQUEMA DE NIVEIS", "ESQUEMA VERTICAL"
+    "IMPERMEABILI",           # IMPERMEABILIZACAO / IMPERMEABILIZAÇÃO
+    "REESCORAMENTO",          # quando usado como titulo em detalhe
+    "REESCOR.",
+    "ARMADURA",               # ARMADURA POSITIVA/NEGATIVA (esquemas)
+    "AMARRA",                 # PLANTA DE AMARRAÇÃO
+    "TABELA",                 # tabelas de quantitativos
+    "QUANTITATIVO",
+    "CONSUMO",                # CONSUMO POR PE-DIREITO
+    "FUNDA",                  # FUNDACAO / FUNDAÇÃO (detalhe)
+    "NÍVEL", "NIVEL ",        # "NIVEL +35,01", "NIVEL TERREO"
+    # Escalas comuns de detalhes (1:20 a 1:200)
+    "1:20", "1:25", "1:50", "1:75",
+    "1:100", "1:125", "1:150", "1:200",
 ]
 
-DETAIL_EXCLUSION_RADIUS = 5.0  # meters (detail views typically span 3-8m)
+# Raio de exclusao da zona de detalhe (metros).
+# Aumentado de 5 -> 8 em 2026-05-30: detalhes BR tipicamente tem
+# 3-8m de largura, e textos de titulo costumam ficar centralizados;
+# 5m deixava entidades nas BORDAS do frame escaparem.
+DETAIL_EXCLUSION_RADIUS = 8.0
 
 # Layer name patterns that indicate detail/section views (not main plan)
 DETAIL_LAYER_KEYWORDS = [
     "detalhe", "corte", "secao", "seção", "vista",
     "elevacao", "elevação", "carimbo",
+    # Novos (2026-05-30)
+    "esquema", "tabela", "quantita", "carimb",
 ]
 REGION_MARGIN = 1.0  # meters of margin around main plan
 
@@ -205,6 +230,88 @@ def _detect_bounding_rectangles(
     return rects
 
 
+def _detect_implicit_rect_frames(
+    segments: List[SegmentEntity],
+    texts: List[TextEntity],
+) -> List[Region]:
+    """Detect rectangular frames formed by 4 axis-aligned line segments.
+
+    Brazilian DXFs frequently draw detail/section frames as 4 separate
+    LINE entities instead of a single closed LWPOLYLINE. This function
+    pairs horizontal and vertical segments that close at corners.
+
+    Heuristica: somente retorna frames cujo CENTRO esta proximo (raio
+    DETAIL_EXCLUSION_RADIUS) de algum texto com palavra-chave de detalhe.
+    Isso evita falso-positivo de qualquer retangulo aleatorio.
+
+    Manual §28.7 (bug 3, 2026-05-30).
+    """
+    # Coletar centros de textos com keyword (anchors)
+    anchors: List[Tuple[float, float]] = []
+    for t in texts:
+        content_upper = t.content.upper().strip()
+        if any(kw in content_upper for kw in DETAIL_KEYWORDS):
+            anchors.append((t.x, t.y))
+    if not anchors:
+        return []
+
+    # Separar segmentos horizontais e verticais
+    h_segs = [s for s in segments if s.type == "H"]
+    v_segs = [s for s in segments if s.type == "V"]
+    if len(h_segs) < 2 or len(v_segs) < 2:
+        return []
+
+    # Tentar formar retangulos: pares de horizontais (top/bottom) e
+    # pares de verticais (left/right) que compartilham os mesmos extremos
+    # com tolerancia 0.10m.
+    TOL = 0.10
+    found: List[Tuple[float, float, float, float]] = []
+    for i, s1 in enumerate(h_segs):
+        for s2 in h_segs[i + 1:]:
+            # Mesmo X mas Y diferente
+            if abs(s1.x_min - s2.x_min) > TOL or abs(s1.x_max - s2.x_max) > TOL:
+                continue
+            if abs(s1.y - s2.y) < 1.0:  # muito proximos -> nao e frame
+                continue
+            x_min = min(s1.x_min, s2.x_min)
+            x_max = max(s1.x_max, s2.x_max)
+            y_min = min(s1.y, s2.y)
+            y_max = max(s1.y, s2.y)
+            w, h = x_max - x_min, y_max - y_min
+            if w < 1.0 or h < 1.0 or w > 50.0 or h > 50.0:
+                continue
+            # Procurar 2 verticais que fecham o quadro
+            v_left = any(
+                abs(v.x - x_min) < TOL
+                and v.y_min < y_min + TOL
+                and v.y_max > y_max - TOL
+                for v in v_segs
+            )
+            v_right = any(
+                abs(v.x - x_max) < TOL
+                and v.y_min < y_min + TOL
+                and v.y_max > y_max - TOL
+                for v in v_segs
+            )
+            if v_left and v_right:
+                found.append((x_min, x_max, y_min, y_max))
+
+    if not found:
+        return []
+
+    # Filtrar: apenas frames cujo centro esta proximo de um anchor de detalhe
+    result: List[Region] = []
+    for x_min, x_max, y_min, y_max in found:
+        cx, cy = (x_min + x_max) / 2, (y_min + y_max) / 2
+        if any(
+            abs(cx - ax) < DETAIL_EXCLUSION_RADIUS
+            and abs(cy - ay) < DETAIL_EXCLUSION_RADIUS
+            for ax, ay in anchors
+        ):
+            result.append(Region(x_min, x_max, y_min, y_max, count=0))
+    return result
+
+
 def filter_main_plan(
     texts: List[TextEntity],
     segments: List[SegmentEntity],
@@ -272,19 +379,39 @@ def filter_main_plan(
 
     m = REGION_MARGIN
 
-    # Step 2.5: Detect bounding rectangles that frame detail views
+    # Step 2.5: Detect bounding rectangles that frame detail views.
+    # Combina LWPOLYLINE explicitas + frames implicitos (4 linhas fechando).
     detail_rects = _detect_bounding_rectangles(polylines)
-    # Remove rectangles that overlap with the main region (they ARE the plan)
-    detail_rects = [
-        dr for dr in detail_rects
-        if not _point_in_region(
-            (dr.x_min + dr.x_max) / 2, (dr.y_min + dr.y_max) / 2, main, m
+    implicit_rects = _detect_implicit_rect_frames(segments, texts)
+    detail_rects.extend(implicit_rects)
+
+    # Manter apenas frames CONTIDOS na regiao principal (sao detalhes
+    # incorporados a planta) OU em regioes secundarias proximas.
+    # Frames totalmente fora da bbox plotada sao ignorados.
+    def _frame_overlaps_main(r: Region) -> bool:
+        # Frame cujo CENTRO cai dentro da main region: e um detalhe
+        # incorporado (pequeno) - manter para filtrar.
+        cx, cy = (r.x_min + r.x_max) / 2, (r.y_min + r.y_max) / 2
+        return _point_in_region(cx, cy, main, m)
+
+    # Filtrar duplicatas (mesmo bbox detectado via 2 metodos)
+    deduped: List[Region] = []
+    for dr in detail_rects:
+        is_dup = any(
+            abs(dr.x_min - ex.x_min) < 0.5
+            and abs(dr.x_max - ex.x_max) < 0.5
+            and abs(dr.y_min - ex.y_min) < 0.5
+            and abs(dr.y_max - ex.y_max) < 0.5
+            for ex in deduped
         )
-    ]
+        if not is_dup:
+            deduped.append(dr)
+    detail_rects = deduped
     if detail_rects:
+        in_main_count = sum(1 for r in detail_rects if _frame_overlaps_main(r))
         logger.info(
             f"Region filter: {len(detail_rects)} bounding rectangles "
-            f"detected as detail/section frames"
+            f"detected as detail/section frames ({in_main_count} dentro da planta principal)"
         )
 
     # Step 3: Filter entities — keep only those in main plan region

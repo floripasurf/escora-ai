@@ -1,0 +1,53 @@
+{
+  "support_type": {
+    "model_path": "/Users/raphaellages/Desktop/escora-ai/data/models/support_type_clf.joblib",
+    "n_samples": 670,
+    "n_features": 7,
+    "feature_names": [
+      "beam_length_m",
+      "beam_angle_deg",
+      "nearest_pillar_dist_m",
+      "pillar_count_3m",
+      "nearby_beam_count",
+      "nearby_beam_avg_length_m",
+      "is_perimeter"
+    ],
+    "feature_importances": {
+      "beam_length_m": 0.031087491257803097,
+      "beam_angle_deg": 0.026494105163363972,
+      "nearest_pillar_dist_m": 0.32096629213142025,
+      "pillar_count_3m": 0.09725669467550127,
+      "nearby_beam_count": 0.40228337513183565,
+      "nearby_beam_avg_length_m": 0.11771220988348666,
+      "is_perimeter": 0.004199831756589203
+    },
+    "cv_accuracy_mean": 0.760509838998211,
+    "cv_accuracy_std": 0.2427305753761547,
+    "class_distribution": {
+      "none": 74,
+      "telescopic": 284,
+      "tower": 312
+    }
+  },
+  "spacing": {
+    "model_path": "/Users/raphaellages/Desktop/escora-ai/data/models/spacing_reg.joblib",
+    "n_samples": 303,
+    "cv_r2_mean": 0.43775882438609026,
+    "cv_r2_std": 0.5133057988688154,
+    "spacing_range": [
+      0.21,
+      6.28
+    ],
+    "spacing_mean": 0.8757095709570957
+  },
+  "equipment": {
+    "model_path": "/Users/raphaellages/Desktop/escora-ai/data/models/equipment_clf.joblib",
+    "n_samples": 670,
+    "cv_accuracy_mean": 0.7477611940298508,
+    "class_distribution": {
+      "none": 357,
+      "VM130": 204,
+      "VM80": 109
+    }
+  }
+}

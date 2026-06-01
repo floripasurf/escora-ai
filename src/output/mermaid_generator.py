@@ -176,6 +176,7 @@ def generate_spacing_diagram(calc: CalculationResult) -> str:
     lines.append('    TITLE["📊 Espaçamento Adaptativo por Carga"]')
     lines.append(f"    style TITLE {STYLE_HEADER}")
 
+    from src.engine.shore_capacity import get_max_spacing_by_thickness
 
     for i, sr in enumerate(calc.slab_results):
         sid = f"SL{i}"

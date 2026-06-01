@@ -13,6 +13,8 @@ from typing import Dict, Any, Optional
 from src.models.masonry import ProjectInput, MasonryProject
 from src.layout.solver import solve_layout
 from src.layout.modular_grid import get_module, blocks_in_wall
+from src.engine.masonry_calculator import calculate_masonry_project
+from src.engine.foundation_calculator import design_foundations
 from src.output.arch_dxf_generator import generate_architectural_dxf
 from src.output.structural_dxf_generator import generate_structural_dxf
 from src.output.project_assembler import assemble_project

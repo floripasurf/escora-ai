@@ -1,0 +1,33 @@
+# Compensado (plywood) properties — Orguel p.78 + manual §26 item 5
+#
+# Formato deve ser PARAMETRO DE ENTRADA. O mercado trabalha com:
+#   - 1220 x 2440 mm (padrao internacional, Orguel)
+#   - 1100 x 2200 mm (mercado brasileiro)
+# Variacoes por fabricante (Qualiplas, Sudati, etc) devem ser aceitas.
+#
+# O motor nao deve assumir formato unico: usar o que o usuario cadastrar.
+# Quando nao informado, default = 1220 x 2440 (compatibilidade com calculos
+# historicos Orguel). Espacamento de barrote = multiplo da largura util da
+# chapa (1220 mm -> 244 mm; 1100 mm -> 220 mm).
+
+material_properties:
+  sigma_adm_kgf_cm2: 110      # Admissible flexural stress
+  E_m_kgf_cm2: 68200          # Average modulus of elasticity
+  default_format_mm: [1220, 2440]
+  seam_multiples_mm: [220, 244]
+
+# Formatos comuns de mercado (manual §26 item 5). Locadora/projeto deve
+# cadastrar o formato real do compensado usado.
+available_formats_mm:
+  - { width_mm: 1220, length_mm: 2440, seam_multiple_mm: 244, note: "Padrao internacional / Orguel" }
+  - { width_mm: 1100, length_mm: 2200, seam_multiple_mm: 220, note: "Padrao mercado brasileiro" }
+  - { width_mm: 1500, length_mm: 3000, seam_multiple_mm: 250, note: "Formato extra (alguns fabricantes)" }
+
+thicknesses:
+  - { e_mm: 12, M_adm_kgf_m_m: 26,  EI_kgf_m2_m: 98,   self_weight_kg_m2: 7.0 }
+  - { e_mm: 14, M_adm_kgf_m_m: 36,  EI_kgf_m2_m: 156,  self_weight_kg_m2: 8.0 }
+  - { e_mm: 15, M_adm_kgf_m_m: 41,  EI_kgf_m2_m: 192,  self_weight_kg_m2: 9.0 }
+  - { e_mm: 17, M_adm_kgf_m_m: 53,  EI_kgf_m2_m: 279,  self_weight_kg_m2: 10.0 }
+  - { e_mm: 18, M_adm_kgf_m_m: 60,  EI_kgf_m2_m: 331,  self_weight_kg_m2: 10.5 }
+  - { e_mm: 20, M_adm_kgf_m_m: 73,  EI_kgf_m2_m: 455,  self_weight_kg_m2: 12.0 }
+  - { e_mm: 21, M_adm_kgf_m_m: 81,  EI_kgf_m2_m: 526,  self_weight_kg_m2: 12.5 }

@@ -1,9 +1,6 @@
 """Generate Escora.AI presentation in PPTX format."""
 import sys
-from pathlib import Path
-
-_PROJECT_ROOT = str(Path(__file__).parent.parent)
-sys.path.insert(0, _PROJECT_ROOT)
+sys.path.insert(0, "/Users/raphaellages/Desktop/escora-ai")
 
 from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
@@ -628,7 +625,7 @@ set_text(tx3, "Raphael Lages | escora.ai | Marco 2026", size=14, color=TEXT_MUTE
 
 
 # ── Save ──
-output_dir = os.path.join(_PROJECT_ROOT, "output")
+output_dir = "/Users/raphaellages/Desktop/escora-ai/output"
 os.makedirs(output_dir, exist_ok=True)
 output_path = os.path.join(output_dir, "Escora.AI-Apresentacao.pptx")
 prs.save(output_path)

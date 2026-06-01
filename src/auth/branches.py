@@ -1,8 +1,8 @@
 """Locadora / branch / user registry with password login and session tokens.
 
 Data model:
-    Locadora (employer / customer, e.g. "Supplier")
-        ├── Branches (units, e.g. "Supplier São José dos Campos")
+    Locadora (employer / customer, e.g. "Orguel")
+        ├── Branches (units, e.g. "Orguel São José dos Campos")
         │     → own inventory JSON, own learning store
         └── Users (engineer accounts that log in with username/password)
               → at login, the engineer picks which branch of their locadora

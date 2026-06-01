@@ -199,7 +199,7 @@ In the DXF/drawing, the engineer typically specifies:
 | **SH** | Brazil | Torres LTT, Trelicas, VM beams, Formas | Rental + Sales |
 | **ROHR** | Brazil | ETEM towers, scaffolding | Rental + Sales |
 | **Mills** | Brazil (14,000+ equipments, 1,400 cities) | Full range shoring/scaffolding | Rental |
-| **Supplier** | Brazil | Access, energy, forms, shoring | Rental |
+| **Orguel** | Brazil | Access, energy, forms, shoring | Rental |
 | **Locguel** | Brazil (MG/SP focus) | Construction equipment | Rental |
 | **PERI** | Germany (Brazil subsidiary) | PEP Ergo, UP Flex, ST100, GT24 | Rental + Sales |
 | **Doka** | Austria (Brazil subsidiary) | H20 beams, Ringlock, formwork | Rental + Sales |
@@ -1258,7 +1258,7 @@ Order Management / Logistics
 - [ABRASFE - NBR 15696 Overview](https://abrasfe.org.br/wp-content/uploads/2015/11/norma-nbr-15696.pdf)
 - [EngSette - NBR 15696 Guide](https://engsette.com.br/nbr15696/)
 - [Mills Brasil](https://www.mills.com.br/)
-- [Supplier](https://supplier.com.br/)
+- [Orguel](https://orguel.com.br/)
 - [ArcelorMittal - Blindagem de Vala](https://brasil.arcelormittal.com/produtos-solucoes/construcao-civil/blindagem-de-vala)
 - [Pro Escoramentos - Trench Shoring](https://proescoramentos.com/)
 

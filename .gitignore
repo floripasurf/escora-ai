@@ -25,7 +25,7 @@ input/*.dwg
 input/Sergio1/
 input/Sergio1_stripped/
 input/Cesar/
-input/supplier/
+input/orguel/
 input/teste*/
 input/*.key
 output/
@@ -39,55 +39,11 @@ input/**/*.dxf
 input/**/*.DXF
 input/**/*.pdf
 input/**/*.docx
+input/Prints/
 
-# Sensitive data — never commit
-data/locadoras.json
+# Archives
+*.zip
 
-# ============================================
-# PROPRIETARY ENGINE — DO NOT PUBLISH
-# ============================================
-
-# Core calculation engine
-src/engine/
-
-# ML models, training & inference
-src/ml/
-data/models/
-data/training/
-
-# Parser classifiers (proprietary classification logic)
-src/parser/text_classifier.py
-src/parser/segment_classifier.py
-src/parser/construction_classifier.py
-src/parser/scale_detector.py
-
-# Pipeline calculation & learning stages
-src/pipeline/stage_calculate.py
-src/pipeline/stage_learn.py
-src/pipeline/learning_store.py
-src/pipeline/learning/
-
-# Learning feedback data
-data/learning.json
-data/learning/
-
-# Engine tests (test proprietary logic)
-tests/engine/
-tests/test_engine.py
-tests/pipeline/test_learning.py
-tests/pipeline/test_learning_store_revision.py
-tests/pipeline/test_scale_detector.py
-tests/pipeline/test_segment_classifier.py
-tests/pipeline/test_stage_calculate.py
-tests/pipeline/test_text_classifier.py
-scripts/test_drawing_engine.py
-
-# ML training scripts
-scripts/train_models.py
-
-# Proprietary architecture docs (reveal engine internals)
-docs/superpowers/plans/2026-03-25-calculation-pipeline.md
-docs/superpowers/plans/2026-03-25-fase1-mvp-implementation.md
-docs/superpowers/specs/2026-03-25-calculation-pipeline-design.md
-docs/superpowers/specs/2026-03-25-escora-ai-saas-design.md
-diagnostics/tacit_rules.md
+# Analysis data (local only)
+data/analysis/
+diagnostics/
