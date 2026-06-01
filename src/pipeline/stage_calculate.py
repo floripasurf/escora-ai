@@ -1124,6 +1124,12 @@ def run_calculation(
                     f"área total {total_area:.0f}m²"
                 )
 
+    # NOTE (manual §28.7, 2026-05-31): a deteccao de lajes pre-moldadas TQS
+    # via clustering de textos (detect_precast_slab_clusters em slab_builder)
+    # foi implementada mas REVERTIDA temporariamente da integracao: precisa
+    # interagir melhor com merge_slab_sources para nao reduzir densidade
+    # de escoras das lajes existentes. Investigacao pendente.
+
     # Tier 3: Direct boundary extraction from DXF hatches/polylines
     # Catches slabs that beam grid misses entirely (e.g., when beams
     # don't form closed polygons, or slab boundaries are explicit in DXF)

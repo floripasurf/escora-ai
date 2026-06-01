@@ -10,10 +10,13 @@ Algorithm:
 Also supports direct slab extraction from:
 - DXF HATCH entities (boundary polygons)
 - Closed LWPOLYLINE/POLYLINE entities
+- Clusters of TQS pre-cast slab text labels (19x25, 19/40, h=15, etc.)
+  Manual §28.7 (2026-05-31).
 """
 
 import logging
-from typing import List, Tuple, Dict, Any
+import re
+from typing import List, Tuple, Dict, Any, Sequence
 from shapely.geometry import LineString, Point, MultiPoint
 from shapely.ops import polygonize, unary_union, snap
 from shapely.geometry.polygon import Polygon
@@ -443,6 +446,118 @@ def derive_slabs_from_beams(beams: List[ClassifiedElement]) -> List[Polygon]:
     merged = unary_union(lines)
     polygons = list(polygonize(merged))
     return [p for p in polygons if p.area >= MIN_SLAB_AREA]
+
+
+# ──────────────────────────────────────────────────────────────
+# Manual §28.7 (2026-05-31): deteccao de lajes pre-moldadas TQS
+# por clustering de notacao especifica (19x25, 19/40, h=15, etc.)
+# ──────────────────────────────────────────────────────────────
+
+# Padroes TQS de identificacao de laje pre-moldada/trelicada:
+#   - "19x25" / "19X25" = vigota_spacing x laje_thickness
+#   - "19/40" / "19/50" = vigota_spacing / inter-axes
+#   - "h=15" / "h=20" / "h=12" = espessura
+#   - "L1a", "L2b" / 1-letter sufixos = identificador de painel
+_TQS_PRECAST_PATTERNS = [
+    re.compile(r"^\s*\d{1,2}\s*[xX]\s*\d{1,3}\s*$"),    # 19x25
+    re.compile(r"^\s*\d{1,2}\s*/\s*\d{1,3}\s*$"),       # 19/40
+    re.compile(r"^\s*h\s*=\s*\d{1,2}\s*$", re.IGNORECASE),  # h=15
+]
+
+
+def detect_precast_slab_clusters(
+    text_entities: Sequence[Any],
+    min_cluster_size: int = 3,
+    cluster_radius_m: float = 2.5,
+    max_polygon_area: float = 200.0,
+) -> List[Polygon]:
+    """Detecta lajes pre-moldadas via clustering de textos TQS.
+
+    Lajes pre-moldadas (trelicadas, painel pre-moldado) sao identificadas
+    em projetos TQS por notacao como '19x25', '19/40', 'h=15'. O motor
+    nao consegue fechar essas areas pelo grid de vigas (sao indicadas
+    pela notacao, nao por geometria fechada).
+
+    Args:
+        text_entities: lista de TextEntity com .content, .x, .y
+        min_cluster_size: numero minimo de textos para formar cluster
+        cluster_radius_m: raio max entre textos para serem agrupados
+
+    Returns:
+        Lista de Polygon (convex hull dos clusters) representando areas
+        de laje pre-moldada detectadas.
+    """
+    # Filtrar textos com padrao TQS pre-moldada
+    precast_points: List[Tuple[float, float]] = []
+    for t in text_entities:
+        content = getattr(t, "content", "") or ""
+        for pat in _TQS_PRECAST_PATTERNS:
+            if pat.match(content.strip()):
+                precast_points.append((t.x, t.y))
+                break
+
+    if len(precast_points) < min_cluster_size:
+        return []
+
+    # Clustering ingenuo: union-find por proximidade
+    n = len(precast_points)
+    parent = list(range(n))
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+    for i in range(n):
+        for j in range(i + 1, n):
+            dx = precast_points[i][0] - precast_points[j][0]
+            dy = precast_points[i][1] - precast_points[j][1]
+            if dx * dx + dy * dy <= cluster_radius_m * cluster_radius_m:
+                union(i, j)
+
+    # Agrupar
+    groups: Dict[int, List[Tuple[float, float]]] = {}
+    for i, p in enumerate(precast_points):
+        groups.setdefault(find(i), []).append(p)
+
+    # Para cada cluster com >= min_cluster_size, criar polygon (convex hull)
+    polygons: List[Polygon] = []
+    for group_pts in groups.values():
+        if len(group_pts) < min_cluster_size:
+            continue
+        try:
+            mp = MultiPoint(group_pts)
+            hull = mp.convex_hull
+            # Buffer pequeno para garantir area minima e bordas suaves
+            buffered = hull.buffer(0.50)
+            if not buffered.is_valid:
+                buffered = buffered.buffer(0)
+            if not isinstance(buffered, Polygon):
+                continue
+            if buffered.area < MIN_SLAB_AREA:
+                continue
+            # Filtro de tamanho maximo: cluster excessivamente grande
+            # geralmente indica falso positivo (varios paineis fundidos
+            # ou texto espalhado por sub-areas distintas).
+            if buffered.area > max_polygon_area:
+                logger.info(
+                    f"TQS cluster com area {buffered.area:.0f}m² > "
+                    f"{max_polygon_area}m² descartado (provavel falso positivo)"
+                )
+                continue
+            polygons.append(buffered)
+        except Exception as exc:
+            logger.warning(f"Falha ao criar polygon do cluster TQS: {exc}")
+
+    if polygons:
+        logger.info(
+            f"TQS precast detection: {len(polygons)} cluster(s) -> "
+            f"{sum(p.area for p in polygons):.0f}m² de lajes pre-moldadas"
+        )
+    return polygons
 
 
 def derive_slabs_from_axes(
