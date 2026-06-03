@@ -18,6 +18,62 @@ from src.models.shore import (
 )
 
 
+def test_dwg_conversion_timeout_is_non_fatal(monkeypatch, tmp_path: Path):
+    output_dxf = tmp_path / "out.dxf"
+    output_dxf.write_text("0\nEOF\n", encoding="utf-8")
+
+    def fake_export(*_args, **_kwargs):
+        raise TimeoutError("ODA File Converter exceeded 1s")
+
+    monkeypatch.setattr(pipeline_service, "_export_dwg_with_timeout", fake_export)
+
+    result = pipeline_service._try_generate_dwg(
+        str(output_dxf),
+        str(tmp_path / "out.dwg"),
+        timeout_seconds=1,
+    )
+
+    assert result is None
+
+
+def test_dwg_conversion_error_is_non_fatal(monkeypatch, tmp_path: Path):
+    output_dxf = tmp_path / "out.dxf"
+    output_dxf.write_text("0\nEOF\n", encoding="utf-8")
+
+    def fake_export(*_args, **_kwargs):
+        raise RuntimeError("converter failed")
+
+    monkeypatch.setattr(pipeline_service, "_export_dwg_with_timeout", fake_export)
+
+    result = pipeline_service._try_generate_dwg(
+        str(output_dxf),
+        str(tmp_path / "out.dwg"),
+        timeout_seconds=1,
+    )
+
+    assert result is None
+
+
+def test_dwg_conversion_success_returns_path(monkeypatch, tmp_path: Path):
+    output_dxf = tmp_path / "out.dxf"
+    output_dxf.write_text("0\nEOF\n", encoding="utf-8")
+    output_dwg = tmp_path / "out.dwg"
+
+    def fake_export(*_args, **_kwargs):
+        output_dwg.write_text("dwg", encoding="utf-8")
+        return str(output_dwg)
+
+    monkeypatch.setattr(pipeline_service, "_export_dwg_with_timeout", fake_export)
+
+    result = pipeline_service._try_generate_dwg(
+        str(output_dxf),
+        str(output_dwg),
+        timeout_seconds=1,
+    )
+
+    assert result == str(output_dwg)
+
+
 def test_regenerate_from_revision_writes_validated_files(tmp_path: Path):
     """regenerate_from_revision must call process_dxf with output_suffix='_validated'."""
     captured = {}

@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     # Must be shorter than job_service.PROCESSING_TIMEOUT_SECONDS so the
     # subprocess kill happens *before* the watchdog flips the job to error.
     pipeline_timeout_seconds: int = 8 * 60
+    # ODA File Converter can hang on valid DXFs in production. DWG is optional;
+    # keep this much shorter than the full pipeline timeout so DXF/PDF/CSV still
+    # finish when the converter gets stuck.
+    dwg_conversion_timeout_seconds: int = 60
 
     class Config:
         env_file = ".env"
