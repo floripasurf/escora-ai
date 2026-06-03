@@ -6,7 +6,14 @@ the same DXF that was previously handled by hardcoded scripts.
 
 import pytest
 from pathlib import Path
+from shapely.geometry import LineString
+
+from src.models.plywood import default_plywood_spec
 from src.pipeline.runner import run_pipeline
+from src.pipeline.stage_calculate import (
+    _axis_aligned_perimeter_ratio,
+    _secondary_vm_spacing_m,
+)
 from src.models.pipeline_models import ElementType
 
 DXF_PATH = Path(__file__).parent.parent / "fixtures" / "CVS-COB-FOR-006-R00.DXF"
@@ -42,6 +49,62 @@ class TestCVSCOBRegression:
         result = run_pipeline(str(DXF_PATH))
         assert result.calculation is not None
         assert result.calculation.total_shores > 0
+
+    def test_final_vm_grid_has_no_failed_segments(self):
+        result = run_pipeline(str(DXF_PATH), mode="price")
+        assert result.calculation is not None
+
+        failed = []
+        for slab_idx, sr in enumerate(result.calculation.slab_results, 1):
+            grid = getattr(sr, "vm_grid", None)
+            if not grid:
+                continue
+            for seg in grid.segments:
+                if not seg.passes_moment or not seg.passes_deflection:
+                    failed.append((slab_idx, seg))
+
+        assert failed == []
+
+    def test_final_vm_grid_segments_stay_inside_slab_polygons(self):
+        result = run_pipeline(str(DXF_PATH), mode="price")
+        assert result.calculation is not None
+
+        outside = []
+        for slab_idx, sr in enumerate(result.calculation.slab_results, 1):
+            grid = getattr(sr, "vm_grid", None)
+            if not grid:
+                continue
+            slab_area = sr.polygon.buffer(1e-5)
+            for seg in grid.segments:
+                if not slab_area.covers(LineString([seg.start, seg.end])):
+                    outside.append((slab_idx, seg))
+
+        assert outside == []
+
+    def test_secondary_vm_spacing_uses_manual_plywood_step(self):
+        spacing = _secondary_vm_spacing_m(0.18, default_plywood_spec())
+        assert spacing == pytest.approx(0.488)
+
+    def test_filters_noisy_nonorthogonal_slab_contours(self):
+        result = run_pipeline(str(DXF_PATH), mode="price")
+        assert result.calculation is not None
+
+        noisy = []
+        for slab_idx, sr in enumerate(result.calculation.slab_results, 1):
+            coords = list(sr.polygon.exterior.coords)
+            axis_ratio, _ = _axis_aligned_perimeter_ratio(sr.polygon)
+            minx, miny, maxx, maxy = sr.polygon.bounds
+            bbox_area = (maxx - minx) * (maxy - miny)
+            rectangularity = sr.polygon.area / bbox_area if bbox_area else 1.0
+            if (
+                sr.area_m2 < 25
+                and len(coords) >= 24
+                and axis_ratio < 0.50
+                and rectangularity < 0.75
+            ):
+                noisy.append((slab_idx, sr.area_m2, len(coords), axis_ratio))
+
+        assert noisy == []
 
     def test_beam_geometry_populated(self):
         result = run_pipeline(str(DXF_PATH))

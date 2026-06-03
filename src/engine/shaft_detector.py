@@ -86,6 +86,22 @@ class ShaftRegion:
         return self.y_max - self.y_min
 
 
+def _is_shaft_layer_name(layer: str) -> bool:
+    lower = (layer or "").lower()
+    return any(kw in lower for kw in SHAFT_LAYER_KEYWORDS)
+
+
+def _is_shaft_text_content(content: str) -> bool:
+    content_upper = (content or "").upper().strip()
+    for kw in SHAFT_TEXT_KEYWORDS:
+        if kw in content_upper:
+            return True
+    for pattern in SHAFT_TEXT_PATTERNS_EXACT:
+        if pattern in content_upper:
+            return True
+    return False
+
+
 def _line_angle_deg(x1: float, y1: float, x2: float, y2: float) -> float:
     """Angle of line from horizontal, in degrees (0-90)."""
     dx = abs(x2 - x1)
@@ -247,23 +263,7 @@ def detect_shafts_from_text(
     shafts = []
     for t in texts:
         content_upper = t.content.upper().strip()
-        is_shaft_text = False
-        label = None
-
-        for kw in SHAFT_TEXT_KEYWORDS:
-            if kw in content_upper:
-                is_shaft_text = True
-                label = content_upper
-                break
-
-        if not is_shaft_text:
-            for pattern in SHAFT_TEXT_PATTERNS_EXACT:
-                if pattern in content_upper:
-                    is_shaft_text = True
-                    label = content_upper
-                    break
-
-        if not is_shaft_text:
+        if not _is_shaft_text_content(content_upper):
             continue
 
         # Create a default shaft region around the text
@@ -277,7 +277,7 @@ def detect_shafts_from_text(
             x_max=cx + half, y_max=cy + half,
             area_m2=half * half * 4,
             detection_method="text", confidence=0.70,
-            label=label,
+            label=content_upper,
         ))
 
     return shafts
@@ -300,14 +300,10 @@ def detect_shafts_from_layers(
     """
     shafts = []
 
-    def _is_shaft_layer(layer: str) -> bool:
-        lower = layer.lower()
-        return any(kw in lower for kw in SHAFT_LAYER_KEYWORDS)
-
     # Check hatches on shaft layers
     for h in hatches:
         layer = getattr(h, "layer", "") if not isinstance(h, dict) else h.get("layer", "")
-        if not _is_shaft_layer(layer):
+        if not _is_shaft_layer_name(layer):
             continue
 
         points = getattr(h, "points", []) if not isinstance(h, dict) else h.get("points", [])
@@ -334,7 +330,7 @@ def detect_shafts_from_layers(
     for pl in polylines:
         layer = getattr(pl, "layer", "") if not isinstance(pl, dict) else pl.get("layer", "")
         is_closed = getattr(pl, "is_closed", False) if not isinstance(pl, dict) else pl.get("is_closed", False)
-        if not is_closed or not _is_shaft_layer(layer):
+        if not is_closed or not _is_shaft_layer_name(layer):
             continue
 
         points = getattr(pl, "points", []) if not isinstance(pl, dict) else pl.get("points", [])
@@ -503,26 +499,41 @@ def subtract_shafts_from_slabs(
     shaft_polys = [s.polygon.buffer(buffer_m) for s in shaft_regions]
     result = []
 
+    def _polygon_parts(geom):
+        if geom is None or geom.is_empty:
+            return []
+        if isinstance(geom, Polygon):
+            return [geom] if geom.area >= 0.5 else []
+        if isinstance(geom, MultiPolygon):
+            return [g for g in geom.geoms if g.area >= 0.5]
+        if hasattr(geom, "geoms"):
+            return [
+                g for g in geom.geoms
+                if isinstance(g, Polygon) and g.area >= 0.5
+            ]
+        return []
+
     for slab in slab_polygons:
-        modified = slab
+        parts = [slab]
         for sp in shaft_polys:
-            try:
-                if modified.intersects(sp):
-                    diff = modified.difference(sp)
+            next_parts = []
+            for part in parts:
+                try:
+                    if not part.intersects(sp):
+                        next_parts.append(part)
+                        continue
+                    diff = part.difference(sp)
                     if diff.is_empty:
-                        modified = None
-                        break
-                    # difference() may return MultiPolygon — keep all parts
-                    if isinstance(diff, MultiPolygon):
-                        modified = max(diff.geoms, key=lambda g: g.area)
-                    else:
-                        modified = diff
-                    if not modified.is_valid:
-                        modified = make_valid(modified)
-            except Exception:
-                continue
-        if modified is not None and not modified.is_empty and modified.area >= 0.5:
-            result.append(modified)
+                        continue
+                    if not diff.is_valid:
+                        diff = make_valid(diff)
+                    next_parts.extend(_polygon_parts(diff))
+                except Exception:
+                    next_parts.append(part)
+            parts = _polygon_parts(MultiPolygon(next_parts)) if next_parts else []
+            if not parts:
+                break
+        result.extend(parts)
 
     return result
 
