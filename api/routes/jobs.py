@@ -10,6 +10,7 @@ import logging
 import multiprocessing as mp
 import os
 import platform
+from contextlib import contextmanager
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import FileResponse
@@ -43,6 +44,29 @@ def _get_mp_context():
 
 
 _MP_CTX = _get_mp_context()
+
+
+@contextmanager
+def _pipeline_execution_lock(job_id: str):
+    """Serialize heavy pipeline jobs on a machine.
+
+    A single Fly shared-CPU VM can time out when multiple DXF pipelines run at
+    once. Keep queued jobs in `pending`; only the job holding this file lock is
+    marked `processing` and consumes the pipeline wall-clock budget.
+    """
+    import fcntl
+
+    lock_path = settings.data_root / "pipeline.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "w") as lock_file:
+        logger.info(f"Job {job_id} waiting for pipeline execution lock")
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        logger.info(f"Job {job_id} acquired pipeline execution lock")
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            logger.info(f"Job {job_id} released pipeline execution lock")
 
 
 def _pipeline_worker(job_id: str) -> None:
@@ -97,39 +121,41 @@ def _run_pipeline(job_id: str) -> None:
         a clean `error` row to the DB.
       - On OOM the kernel kills only the child, the API stays up.
     """
-    job_service.update_job(job_id, status="processing")
-    proc = _MP_CTX.Process(target=_pipeline_worker, args=(job_id,), daemon=True)
-    proc.start()
-    proc.join(timeout=settings.pipeline_timeout_seconds)
-    if proc.is_alive():
-        logger.warning(f"Job {job_id} exceeded {settings.pipeline_timeout_seconds}s — killing worker")
-        proc.terminate()
-        proc.join(timeout=5)
+    with _pipeline_execution_lock(job_id):
+        job_service.update_job(job_id, status="processing")
+        proc = _MP_CTX.Process(target=_pipeline_worker, args=(job_id,), daemon=True)
+        proc.start()
+        proc.join(timeout=settings.pipeline_timeout_seconds)
         if proc.is_alive():
-            proc.kill()
+            logger.warning(f"Job {job_id} exceeded {settings.pipeline_timeout_seconds}s — killing worker")
+            proc.terminate()
             proc.join(timeout=5)
-        job_service.update_job(
-            job_id,
-            status="error",
-            error_message=(
-                "Processamento excedeu o limite de tempo. "
-                "Arquivo muito grande ou geometria complexa — tente dividir o pavimento."
-            ),
-        )
-        return
-    # If the child crashed (OOM kill, segfault) before writing a result row,
-    # the job will still be in `processing`. Surface that explicitly.
-    if proc.exitcode not in (0, None):
-        current = job_service.get_job(job_id) or {}
-        if current.get("status") == "processing":
+            if proc.is_alive():
+                proc.kill()
+                proc.join(timeout=5)
             job_service.update_job(
                 job_id,
                 status="error",
                 error_message=(
-                    f"Worker terminou inesperadamente (codigo {proc.exitcode}). "
-                    "Provavel falta de memoria — tente um arquivo menor."
+                    "Processamento excedeu o limite de tempo no servidor. "
+                    "O arquivo pode exigir otimização adicional; reenvie o arquivo "
+                    "ou aguarde a análise técnica."
                 ),
             )
+            return
+        # If the child crashed (OOM kill, segfault) before writing a result row,
+        # the job will still be in `processing`. Surface that explicitly.
+        if proc.exitcode not in (0, None):
+            current = job_service.get_job(job_id) or {}
+            if current.get("status") == "processing":
+                job_service.update_job(
+                    job_id,
+                    status="error",
+                    error_message=(
+                        f"Worker terminou inesperadamente (codigo {proc.exitcode}). "
+                        "Provavel falta de memoria — tente um arquivo menor."
+                    ),
+                )
 
 
 @router.post("", status_code=201, response_model=JobCreateResponse)
@@ -167,7 +193,7 @@ async def upload_dxf(
 
     return JobCreateResponse(
         id=job["id"],
-        status="processing",
+        status="pending",
         filename=job["filename"],
         created_at=job["created_at"],
     )
