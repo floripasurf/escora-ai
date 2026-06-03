@@ -27,11 +27,10 @@ from typing import Any, Iterable, List, Optional
 
 from api.config import settings
 
-# Hard wall-clock cap for any single pipeline run. If a job sits in
-# `processing` longer than this, it's almost certainly hung (OOM-killed
-# silently, infinite loop, machine restart mid-flight) and we mark it as
-# `error` so the UI never gets stuck on a perma-spinner.
-PROCESSING_TIMEOUT_SECONDS = 10 * 60
+# Hard wall-clock cap for any single pipeline run. Keep this slightly longer
+# than the subprocess timeout so the parent has time to write a precise error
+# before the DB watchdog flips orphaned jobs.
+PROCESSING_TIMEOUT_SECONDS = settings.pipeline_timeout_seconds + 120
 
 _lock = threading.Lock()
 

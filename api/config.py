@@ -22,11 +22,11 @@ class Settings(BaseSettings):
     # Wall-clock budget for a single pipeline run before we SIGKILL it.
     # Must be shorter than job_service.PROCESSING_TIMEOUT_SECONDS so the
     # subprocess kill happens *before* the watchdog flips the job to error.
-    pipeline_timeout_seconds: int = 8 * 60
-    # ODA File Converter can hang on valid DXFs in production. DWG is optional;
-    # keep this much shorter than the full pipeline timeout so DXF/PDF/CSV still
-    # finish when the converter gets stuck.
-    dwg_conversion_timeout_seconds: int = 60
+    pipeline_timeout_seconds: int = 15 * 60
+    # ODA File Converter can hang on valid DXFs in production. DWG is optional
+    # and disabled by default; enable with ESCORA_DWG_CONVERSION_TIMEOUT_SECONDS
+    # when the converter is stable enough for the deployment target.
+    dwg_conversion_timeout_seconds: int = 0
 
     class Config:
         env_file = ".env"
