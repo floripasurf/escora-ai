@@ -2,6 +2,13 @@
 
 import csv
 import logging
+import os
+import platform
+import shutil
+import signal
+import subprocess
+import tempfile
+import time
 from datetime import date
 from pathlib import Path
 from typing import Optional
@@ -90,19 +97,12 @@ def process_dxf(
     for level in result.levels:
         pillar_count += sum(1 for e in level.elements if e.element_type == ElementType.PILLAR)
 
-    # Generate DWG from the DXF (requires ODA File Converter)
+    # Generate DWG from the DXF (requires ODA File Converter).
+    # The converter is optional and has its own timeout: a stuck ODA process
+    # must not make the whole job hit the pipeline hard timeout.
     dwg_path: Optional[str] = None
-    try:
-        from ezdxf.addons import odafc
-        if odafc.is_installed():
-            dwg_candidate = str(output_dir / f"{stem_base}_escoras{output_suffix}.dwg")
-            odafc.export_dwg(ezdxf.readfile(output_dxf), dwg_candidate)
-            dwg_path = dwg_candidate
-            logger.info(f"Generated DWG: {dwg_path}")
-        else:
-            logger.debug("ODA File Converter not installed — DWG export skipped")
-    except Exception as e:
-        logger.debug(f"DWG conversion skipped: {e}")
+    dwg_candidate = str(output_dir / f"{stem_base}_escoras{output_suffix}.dwg")
+    dwg_path = _try_generate_dwg(output_dxf, dwg_candidate)
 
     # Generate BOM CSV
     csv_path = str(output_dir / f"{stem_base}_BOM{output_suffix}.csv")
@@ -188,6 +188,155 @@ def process_dxf(
         "mermaid_diagrams": mermaid_diagrams,
         **pdf_paths,
     }
+
+
+def _try_generate_dwg(
+    output_dxf: str,
+    dwg_candidate: str,
+    *,
+    timeout_seconds: Optional[int] = None,
+) -> Optional[str]:
+    """Best-effort DXF->DWG conversion.
+
+    DWG is useful for customers but not required for a successful job. ODA File
+    Converter is known to hang on some valid drawings, so all converter errors
+    and timeouts are intentionally non-fatal.
+    """
+    timeout = timeout_seconds or settings.dwg_conversion_timeout_seconds
+    try:
+        dwg_path = _export_dwg_with_timeout(output_dxf, dwg_candidate, timeout)
+        if dwg_path:
+            logger.info(f"Generated DWG: {dwg_path}")
+        return dwg_path
+    except TimeoutError as exc:
+        logger.warning(f"DWG conversion timed out and was skipped: {exc}")
+    except Exception as exc:
+        logger.debug(f"DWG conversion skipped: {exc}")
+    return None
+
+
+def _terminate_process_group(proc: subprocess.Popen) -> None:
+    """Terminate a process and its children started in a new session."""
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except Exception:
+        try:
+            proc.terminate()
+        except Exception:
+            return
+    try:
+        proc.wait(timeout=5)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+    try:
+        proc.wait(timeout=5)
+    except Exception:
+        pass
+
+
+def _export_dwg_with_timeout(
+    output_dxf: str,
+    dwg_candidate: str,
+    timeout_seconds: int,
+) -> Optional[str]:
+    """Convert DXF to DWG using ODA File Converter with a hard timeout."""
+    from ezdxf.addons import odafc
+
+    if timeout_seconds <= 0:
+        logger.debug("DWG conversion disabled by timeout setting")
+        return None
+    if not odafc.is_installed():
+        logger.debug("ODA File Converter not installed — DWG export skipped")
+        return None
+
+    src_path = Path(output_dxf).expanduser().absolute()
+    dest_path = Path(dwg_candidate).expanduser().absolute()
+    if not src_path.exists():
+        raise FileNotFoundError(f"Source DXF not found: {src_path}")
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    if dest_path.exists():
+        dest_path.unlink()
+
+    system = platform.system()
+    command = odafc._get_odafc_path(system)
+    version = odafc.map_version("R2018")
+
+    with tempfile.TemporaryDirectory(prefix="odafc_") as tmp_dir:
+        arguments = odafc._odafc_arguments(
+            src_path.name,
+            in_folder=str(src_path.parent),
+            out_folder=tmp_dir,
+            output_format="DWG",
+            version=version,
+            audit=False,
+        )
+
+        env = os.environ.copy()
+        xvfb_proc: Optional[subprocess.Popen] = None
+        if system == "Linux":
+            if shutil.which("Xvfb"):
+                display = f":{os.getpid() % 60000}"
+                xvfb_proc = subprocess.Popen(
+                    ["Xvfb", display, "-screen", "0", "800x600x24"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                time.sleep(0.1)
+                env["DISPLAY"] = display
+            elif "DISPLAY" not in env:
+                logger.debug("Xvfb/DISPLAY unavailable — DWG export skipped")
+                return None
+
+        proc: Optional[subprocess.Popen] = None
+        try:
+            proc = subprocess.Popen(
+                [command] + arguments,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+                start_new_session=True,
+            )
+            try:
+                stdout, stderr = proc.communicate(timeout=timeout_seconds)
+            except subprocess.TimeoutExpired as exc:
+                _terminate_process_group(proc)
+                raise TimeoutError(
+                    f"ODA File Converter exceeded {timeout_seconds}s"
+                ) from exc
+
+            if odafc._odafc_failed(system, proc.returncode, stderr):
+                raise odafc.UnknownODAFCError(
+                    "ODA File Converter failed: "
+                    f"return code = {proc.returncode}.\n"
+                    f"stdout: {stdout}\nstderr: {stderr}"
+                )
+
+            result_files = [
+                p for p in Path(tmp_dir).iterdir()
+                if p.suffix.lower() == ".dwg"
+            ]
+            if not result_files:
+                raise odafc.UnknownODAFCError("ODA File Converter created no DWG file")
+            try:
+                shutil.move(str(result_files[0]), str(dest_path))
+            except IOError:
+                shutil.copy2(str(result_files[0]), str(dest_path))
+            return str(dest_path) if dest_path.exists() else None
+        finally:
+            if proc is not None and proc.poll() is None:
+                _terminate_process_group(proc)
+            if xvfb_proc is not None:
+                _terminate_process_group(xvfb_proc)
 
 
 def regenerate_from_revision(
