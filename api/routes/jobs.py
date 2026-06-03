@@ -8,6 +8,8 @@ session token (Authorization: Bearer ...) plus X-Branch-Id header via
 
 import logging
 import multiprocessing as mp
+import os
+import platform
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import FileResponse
@@ -28,12 +30,19 @@ router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
 
 MAX_FILE_SIZE = settings.max_file_size_mb * 1024 * 1024
 
-# Force `fork` so the child inherits the already-loaded ezdxf/shapely/ifcopenshell
-# modules without paying the import cost twice. Linux only — fine for Fly.
-try:
-    _MP_CTX = mp.get_context("fork")
-except ValueError:  # pragma: no cover - non-Linux dev box
-    _MP_CTX = mp.get_context("spawn")
+def _get_mp_context():
+    requested = os.environ.get("ESCORA_MP_START_METHOD")
+    if requested:
+        return mp.get_context(requested)
+    # Force `fork` on Linux/Fly so the child inherits already-loaded modules
+    # without paying import cost twice. Avoid fork on macOS: importing Objective-C
+    # linked modules after fork can abort the Python process.
+    if platform.system() == "Linux":
+        return mp.get_context("fork")
+    return mp.get_context("spawn")
+
+
+_MP_CTX = _get_mp_context()
 
 
 def _pipeline_worker(job_id: str) -> None:
@@ -186,6 +195,7 @@ async def get_status(
     branch: Branch = Depends(get_current_branch),
 ):
     """Get job status and results."""
+    job_service.sweep_stale_processing()
     job = job_service.get_job(job_id, branch_id=branch.id)
     if not job:
         raise HTTPException(404, "Job nao encontrado")
