@@ -6,6 +6,7 @@ both rectangular SOLIDs and circular columns (CIRCLE entities).
 
 import pytest
 from pathlib import Path
+from shapely.geometry import LineString
 from src.pipeline.runner import run_pipeline
 from src.models.pipeline_models import ElementType
 
@@ -57,6 +58,51 @@ class TestCFLSUBRegression:
         result = run_pipeline(str(DXF_PATH))
         assert result.calculation is not None
         assert len(result.calculation.beam_results) > 0
+
+    def test_final_vm_grid_has_no_failed_segments(self):
+        result = run_pipeline(str(DXF_PATH), mode="price")
+        assert result.calculation is not None
+
+        failed = []
+        for slab_idx, sr in enumerate(result.calculation.slab_results, 1):
+            grid = getattr(sr, "vm_grid", None)
+            if not grid:
+                continue
+            for seg in grid.segments:
+                if not seg.passes_moment or not seg.passes_deflection:
+                    failed.append((slab_idx, seg))
+
+        assert failed == []
+
+    def test_final_vm_grid_segments_stay_inside_slab_polygons(self):
+        result = run_pipeline(str(DXF_PATH), mode="price")
+        assert result.calculation is not None
+
+        outside = []
+        for slab_idx, sr in enumerate(result.calculation.slab_results, 1):
+            grid = getattr(sr, "vm_grid", None)
+            if not grid:
+                continue
+            slab_area = sr.polygon.buffer(1e-5)
+            for seg in grid.segments:
+                if not slab_area.covers(LineString([seg.start, seg.end])):
+                    outside.append((slab_idx, seg))
+
+        assert outside == []
+
+    def test_real_slab_panels_have_vm_grid(self):
+        result = run_pipeline(str(DXF_PATH), mode="price")
+        assert result.calculation is not None
+
+        missing = []
+        for slab_idx, sr in enumerate(result.calculation.slab_results, 1):
+            if sr.area_m2 < 1.0:
+                continue
+            grid = getattr(sr, "vm_grid", None)
+            if not grid or not getattr(grid, "segments", []):
+                missing.append((slab_idx, round(sr.area_m2, 2), len(sr.shores)))
+
+        assert missing == []
 
     def test_calculation_is_valid(self):
         result = run_pipeline(str(DXF_PATH))

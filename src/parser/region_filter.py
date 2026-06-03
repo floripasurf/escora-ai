@@ -51,6 +51,22 @@ DETAIL_KEYWORDS = [
     "1:100", "1:125", "1:150", "1:200",
 ]
 
+# Standalone scale notes are weak anchors: "ESC 1:50" is common on the main
+# plan and must not erase nearby structural geometry. Detail-scale notes still
+# count when they use a detail scale or appear with another detail keyword.
+SCALE_ONLY_KEYWORDS = [
+    "ESCALA", "ESC ",
+    "1:20", "1:25", "1:50", "1:75",
+    "1:100", "1:125", "1:150", "1:200",
+]
+DETAIL_SCALE_KEYWORDS = [
+    "1:20", "1:25", "1:75", "1:100", "1:125", "1:150", "1:200",
+]
+
+# Below this, gap-based clustering is too brittle: a single beam pair plus a
+# pillar can be split into artificial "regions" and lose valid geometry.
+MIN_REGION_FILTER_CENTROIDS = 8
+
 # Raio de exclusao da zona de detalhe (metros).
 # Aumentado de 5 -> 8 em 2026-05-30: detalhes BR tipicamente tem
 # 3-8m de largura, e textos de titulo costumam ficar centralizados;
@@ -121,7 +137,12 @@ def _find_gap_splits(values: List[float], total_range: float) -> List[float]:
     """
     if len(values) < 2:
         return []
-    threshold = max(2.0, 0.02 * total_range)
+    # Keep this deliberately conservative. Structural plans frequently contain
+    # patios, shafts, uncovered areas, and long internal gaps. A low threshold
+    # splits a single complex floor plan into "regions" and removes legitimate
+    # beams/slabs before classification. The 2026-04-09 engine used 5m/10% and
+    # correctly kept CFL-SUB as one structural plan.
+    threshold = max(5.0, 0.10 * total_range)
     sorted_vals = sorted(values)
     splits = []
     for i in range(len(sorted_vals) - 1):
@@ -178,12 +199,22 @@ def _is_in_detail_zone(x: float, y: float, texts: List[TextEntity]) -> bool:
     """Secondary pass: check if point is near a detail/section keyword text."""
     for t in texts:
         content_upper = t.content.upper().strip()
-        for kw in DETAIL_KEYWORDS:
-            if kw in content_upper:
-                if (abs(x - t.x) < DETAIL_EXCLUSION_RADIUS and
-                        abs(y - t.y) < DETAIL_EXCLUSION_RADIUS):
-                    return True
-                break
+        if not _is_detail_anchor_text(content_upper):
+            continue
+        if (abs(x - t.x) < DETAIL_EXCLUSION_RADIUS and
+                abs(y - t.y) < DETAIL_EXCLUSION_RADIUS):
+            return True
+    return False
+
+
+def _is_detail_anchor_text(content_upper: str) -> bool:
+    """Return True when text is strong enough to anchor detail exclusion."""
+    for kw in DETAIL_KEYWORDS:
+        if kw not in content_upper:
+            continue
+        if kw in SCALE_ONLY_KEYWORDS:
+            return any(scale_kw in content_upper for scale_kw in DETAIL_SCALE_KEYWORDS)
+        return True
     return False
 
 
@@ -250,7 +281,7 @@ def _detect_implicit_rect_frames(
     anchors: List[Tuple[float, float]] = []
     for t in texts:
         content_upper = t.content.upper().strip()
-        if any(kw in content_upper for kw in DETAIL_KEYWORDS):
+        if _is_detail_anchor_text(content_upper):
             anchors.append((t.x, t.y))
     if not anchors:
         return []
@@ -336,6 +367,12 @@ def filter_main_plan(
     # Step 1: Collect centroids and detect regions
     centroids = _collect_centroids(segments, rects, circles, polylines, hatches)
     if not centroids:
+        return texts, segments, rects, circles, polylines, hatches, dimensions, warnings
+    if len(centroids) < MIN_REGION_FILTER_CENTROIDS:
+        logger.info(
+            "Region filter: only %d geometry centroids, skipping spatial clustering",
+            len(centroids),
+        )
         return texts, segments, rects, circles, polylines, hatches, dimensions, warnings
 
     regions = _detect_regions(centroids)

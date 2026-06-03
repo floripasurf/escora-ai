@@ -6,15 +6,18 @@ load + shore calculations.
 """
 
 import logging
+import math
+from dataclasses import replace
 from typing import List, Dict, Any, Optional
 from collections import defaultdict
-from shapely.geometry import LineString, Point, Polygon, MultiPoint
+from shapely.geometry import LineString, Point, Polygon, MultiPoint, box
 
 from src.models.pipeline_models import ClassifiedElement, ElementType
 from src.models.calculation_models import (
     BeamShoringResult, SlabShoringResult, CalculationResult,
     VolumeBreakdownEntry,
 )
+from src.models.shore import PositionedShore
 from src.utils.labels import (
     CATEGORY_DEFAULT, CATEGORY_LABELS_PT,
     classify_layer, extract_room_hint, extract_structural_name,
@@ -34,7 +37,10 @@ from src.engine.beam_calculator import (
 from src.engine.grid_distributor import distribute_shores, PillarExclusion
 from src.engine.shore_capacity import compute_adaptive_spacing
 from src.engine.shore_selector import load_catalog, select_shore
-from src.engine.vm_grid_builder import ShorePoint, build_vm_grid
+from src.engine.vm_grid_builder import (
+    ShorePoint, VMGrid, build_vm_grid, select_vm_length_mm,
+    _compute_segment_load_and_moment,
+)
 from src.models.plywood import default_plywood_spec
 from src.engine.tower_selector import (
     load_tower_catalog, decide_support_type, select_tower,
@@ -48,7 +54,8 @@ from src.ml.predictor import ShoringPredictor
 from src.utils.constants import (
     GAMMA_F, Q_SOBRECARGA_DEFAULT, ESPESSURA_DEFAULT, ALTURA_DEFAULT,
     ESPACAMENTO_MAX_DEFAULT, ESPACAMENTO_MAX_VIGA, ESPACAMENTO_POR_ALTURA,
-    CONTRA_FLECHA, DISTANCIA_BORDA_MIN, ESPACAMENTO_MIN,
+    ESPACAMENTO_SECUNDARIAS_MANUAL, CONTRA_FLECHA, DISTANCIA_BORDA_MIN,
+    ESPACAMENTO_MIN,
 )
 
 logger = logging.getLogger(__name__)
@@ -98,6 +105,38 @@ MIN_SLAB_BEAM_SHORE_DIST = 0.50
 CANTILEVER_SPACING_FACTOR = 0.7
 
 
+def _secondary_vm_spacing_m(thickness_m: float, plywood) -> float:
+    """Return VM secondary spacing snapped to plywood seam multiples.
+
+    Manual p.89 gives the maximum spacing for secondary beams by slab
+    thickness and plywood thickness. Manual p.114-115 then requires plywood
+    seams to land on a secondary beam axis, so the practical spacing is the
+    largest seam multiple that does not exceed the manual maximum.
+    """
+    seam_m = plywood.effective_seam_multiple_mm() / 1000.0
+    if seam_m <= 0:
+        return 0.244
+
+    slab_cm = max(1, int(math.ceil(thickness_m * 100)))
+    plywood_mm = int(round(getattr(plywood, "thickness_mm", 18.0)))
+    keys = [k for k in ESPACAMENTO_SECUNDARIAS_MANUAL if k[2] == 2]
+    slab_options = sorted({k[0] for k in keys})
+    plywood_options = sorted({k[1] for k in keys})
+
+    slab_key = next((cm for cm in slab_options if cm >= slab_cm), slab_options[-1])
+    lower_or_equal_plywood = [mm for mm in plywood_options if mm <= plywood_mm]
+    plywood_key = lower_or_equal_plywood[-1] if lower_or_equal_plywood else plywood_options[0]
+
+    max_spacing = ESPACAMENTO_SECUNDARIAS_MANUAL.get(
+        (slab_key, plywood_key, 2),
+        seam_m,
+    )
+    if max_spacing <= seam_m:
+        return round(max_spacing, 3)
+    multiples = max(1, int(math.floor(max_spacing / seam_m)))
+    return round(multiples * seam_m, 3)
+
+
 def _max_spacing_for_slab(thickness_m: float) -> float:
     """Get maximum shore spacing based on slab thickness (practical recommendation).
 
@@ -112,6 +151,444 @@ def _max_spacing_for_slab(thickness_m: float) -> float:
         if min_cm <= thickness_cm <= max_cm:
             return spacing
     return ESPACAMENTO_MAX_DEFAULT
+
+
+def _build_slab_vm_grid(
+    sr: SlabShoringResult,
+    *,
+    global_origin: Optional[tuple[float, float]],
+):
+    """Build the VM grid from the slab's current, post-processed shores."""
+    if len(sr.shores) < 2 or sr.area_m2 <= 0:
+        return None
+    min_x, min_y, max_x, max_y = sr.polygon.bounds
+    plywood = default_plywood_spec()
+    shore_points = [ShorePoint(x=s.x, y=s.y) for s in sr.shores]
+    bbox = (min_x, min_y, max_x, max_y)
+    load_kn_m2 = sr.total_load_kn / sr.area_m2
+    secondary_spacing_m = _secondary_vm_spacing_m(sr.thickness_m, plywood)
+
+    def _candidate(primary_axis_override: Optional[str] = None) -> VMGrid:
+        grid = build_vm_grid(
+            shore_points=shore_points,
+            polygon_bbox=bbox,
+            load_kn_m2=load_kn_m2,
+            plywood=plywood,
+            secondary_spacing_m=secondary_spacing_m,
+            global_origin=global_origin,
+            primary_axis_override=primary_axis_override,
+        )
+        return _clip_vm_grid_to_polygon(grid, sr.polygon, sr.exclusions)
+
+    def _grid_score(grid: VMGrid) -> tuple[int, float, int]:
+        failed = [
+            seg for seg in getattr(grid, "segments", [])
+            if not seg.passes_moment or not seg.passes_deflection
+        ]
+        worst_utilization = max((seg.utilization for seg in failed), default=0.0)
+        return (len(failed), worst_utilization, len(getattr(grid, "issues", [])))
+
+    default_grid = _candidate()
+    default_score = _grid_score(default_grid)
+    if default_score[0] == 0:
+        return default_grid
+
+    alternate_axis = "y" if default_grid.primaria_axis == "x" else "x"
+    alternate_grid = _candidate(alternate_axis)
+    alternate_score = _grid_score(alternate_grid)
+    if alternate_score < default_score:
+        alternate_grid.issues.append(
+            f"Orientação da malha VM ajustada de {default_grid.primaria_axis} "
+            f"para {alternate_axis} por verificação de momento/flecha."
+        )
+        return alternate_grid
+    return default_grid
+
+
+def _line_parts(geom) -> List[LineString]:
+    if geom.is_empty:
+        return []
+    if geom.geom_type == "LineString":
+        return [geom]
+    if hasattr(geom, "geoms"):
+        parts: List[LineString] = []
+        for g in geom.geoms:
+            parts.extend(_line_parts(g))
+        return parts
+    return []
+
+
+def _clip_vm_grid_to_polygon(
+    grid: VMGrid,
+    polygon: Polygon,
+    exclusions: Optional[List[Any]] = None,
+    *,
+    min_segment_m: float = 0.10,
+) -> VMGrid:
+    """Clip VM segments to slab polygon, beams, pillars and openings."""
+    clipped = VMGrid(primaria_axis=grid.primaria_axis)
+    clip_polygon = polygon.buffer(1e-6)
+    obstacle_count = 0
+    if exclusions:
+        obstacle_polys = []
+        for ex in exclusions:
+            try:
+                obstacle = box(ex.min_x, ex.min_y, ex.max_x, ex.max_y)
+                if obstacle.intersects(clip_polygon):
+                    obstacle_polys.append(obstacle)
+            except Exception:
+                continue
+        if obstacle_polys:
+            try:
+                from shapely.ops import unary_union as _uu
+                clip_polygon = clip_polygon.difference(_uu(obstacle_polys))
+                obstacle_count = len(obstacle_polys)
+            except Exception:
+                pass
+    removed = 0
+    split_extra = 0
+
+    def _recheck_segment(seg, start, end):
+        span_m = math.hypot(end[0] - start[0], end[1] - start[1])
+        length_mm = select_vm_length_mm(span_m, seg.model)
+        if seg.role == "secundaria":
+            notes = seg.notes
+            if span_m < max(LineString([seg.start, seg.end]).length - 1e-6, 0):
+                notes = f"{notes}; recortado em viga/borda" if notes else "recortado em viga/borda"
+            return replace(
+                seg,
+                length_mm=length_mm,
+                start=start,
+                end=end,
+                notes=notes,
+            )
+
+        ei_by_model = {
+            "VM80": 146.8,
+            "VM130": 461.8,
+            "VM50": 35.0,
+        }
+        ei = ei_by_model.get(seg.model, 0.0)
+        M, Madm, f, fadm, passM, passF = _compute_segment_load_and_moment(
+            span_m,
+            seg.load_kn_m,
+            seg.moment_adm_kn_m,
+            ei,
+        )
+        notes = seg.notes
+        if span_m < max(seg.span_m - 1e-6, 0):
+            notes = f"{notes}; recortado em viga/borda" if notes else "recortado em viga/borda"
+        return replace(
+            seg,
+            length_mm=length_mm,
+            start=start,
+            end=end,
+            span_m=round(span_m, 3),
+            moment_kn_m=round(M, 3),
+            flecha_mm=round(f, 2),
+            flecha_adm_mm=round(fadm, 2),
+            passes_moment=passM,
+            passes_deflection=passF,
+            notes=notes,
+        )
+
+    for seg in grid.segments:
+        line = LineString([seg.start, seg.end])
+        if line.length < min_segment_m:
+            removed += 1
+            continue
+        if clip_polygon.covers(line):
+            clipped.add_segment(_recheck_segment(seg, seg.start, seg.end))
+            continue
+
+        parts = [p for p in _line_parts(line.intersection(clip_polygon)) if p.length >= min_segment_m]
+        if not parts:
+            removed += 1
+            continue
+        if len(parts) > 1:
+            split_extra += len(parts) - 1
+        for part in parts:
+            coords = list(part.coords)
+            start = (float(coords[0][0]), float(coords[0][1]))
+            end = (float(coords[-1][0]), float(coords[-1][1]))
+            # Preserve the original segment direction for predictable DXF output.
+            if Point(end).distance(Point(seg.start)) < Point(start).distance(Point(seg.start)):
+                start, end = end, start
+            clipped.add_segment(_recheck_segment(seg, start, end))
+
+    clipped.issues = list(grid.issues)
+    if removed or split_extra:
+        clipped.issues.append(
+            f"VMs recortadas pelo contorno da laje: {removed} removida(s), "
+            f"{split_extra} divisão(ões)."
+        )
+    if obstacle_count:
+        clipped.issues.append(
+            f"VMs interrompidas em {obstacle_count} faixa(s) de viga/pilar/abertura."
+        )
+    return clipped
+
+
+def _segment_crosses_exclusion(seg, ex) -> bool:
+    x1, y1 = seg.start
+    x2, y2 = seg.end
+    if abs(x1 - x2) < 1e-6:
+        lo, hi = sorted((y1, y2))
+        return ex.min_x <= x1 <= ex.max_x and hi >= ex.min_y and lo <= ex.max_y
+    if abs(y1 - y2) < 1e-6:
+        lo, hi = sorted((x1, x2))
+        return ex.min_y <= y1 <= ex.max_y and hi >= ex.min_x and lo <= ex.max_x
+    return False
+
+
+def _filter_vm_grid_for_exclusions(grid: VMGrid, exclusions: List[Any]) -> VMGrid:
+    """Remove primary VM segments that would run through pillar exclusions."""
+    if not exclusions:
+        return grid
+    filtered = VMGrid(primaria_axis=grid.primaria_axis)
+    skipped = 0
+    for seg in grid.segments:
+        if (
+            seg.role == "primaria"
+            and any(_segment_crosses_exclusion(seg, ex) for ex in exclusions)
+        ):
+            skipped += 1
+            continue
+        filtered.add_segment(seg)
+    filtered.issues = list(grid.issues)
+    if skipped:
+        filtered.issues.append(
+            f"{skipped} segmento(s) de VM primária interrompido(s) por pilar."
+        )
+    return filtered
+
+
+def _point_in_exclusions(
+    x: float,
+    y: float,
+    exclusions: List[Any],
+) -> bool:
+    for ex in exclusions or []:
+        if ex.min_x <= x <= ex.max_x and ex.min_y <= y <= ex.max_y:
+            return True
+    return False
+
+
+def _recalculate_slab_shore_loads(sr: SlabShoringResult) -> None:
+    if not sr.shores or sr.total_load_kn <= 0:
+        return
+    load_per = sr.total_load_kn / len(sr.shores)
+    for shore in sr.shores:
+        capacity = shore.shore.load_capacity_kn or 1.0
+        shore.load_applied_kn = round(load_per, 2)
+        shore.utilization_ratio = round(load_per / capacity, 4)
+
+
+def _add_vm_primary_reinforcement_shores(
+    sr: SlabShoringResult,
+    *,
+    max_span_m: float = 1.20,
+) -> int:
+    """Add telescopic shores at failed VM130 primary spans.
+
+    Manual §28 requires primary VMs to pass moment and deflection. A final
+    post-processing pass may remove slab shores close to beams or other slabs,
+    leaving stale VM spans. When a primary segment still fails after final
+    deduplication, insert intermediate slab shores at <=1.20 m intervals and
+    rebuild the grid.
+    """
+    grid = getattr(sr, "vm_grid", None)
+    if grid is None or not sr.selected_shore:
+        return 0
+
+    failed_primaries = [
+        seg for seg in getattr(grid, "segments", [])
+        if seg.role == "primaria"
+        and (not seg.passes_moment or not seg.passes_deflection)
+        and seg.span_m > max_span_m
+    ]
+    if not failed_primaries:
+        return 0
+
+    added = 0
+    for seg in failed_primaries:
+        # Use floor+1 instead of ceil so exact multiples (2.40, 3.60...)
+        # are still split; the VM check includes deflection and may reject a
+        # nominal 1.20 m remainder under heavier panels.
+        pieces = max(2, int(math.floor(seg.span_m / max_span_m)) + 1)
+        for idx in range(1, pieces):
+            t = idx / pieces
+            x = seg.start[0] + (seg.end[0] - seg.start[0]) * t
+            y = seg.start[1] + (seg.end[1] - seg.start[1]) * t
+            pt = Point(x, y)
+            if not sr.polygon.buffer(1e-6).covers(pt):
+                continue
+            if _point_in_exclusions(x, y, sr.exclusions):
+                continue
+            if any(math.hypot(x - s.x, y - s.y) < ESPACAMENTO_MIN for s in sr.shores):
+                continue
+            sr.shores.append(PositionedShore(
+                x=round(x, 3),
+                y=round(y, 3),
+                shore=sr.selected_shore,
+                load_applied_kn=0.0,
+                utilization_ratio=0.0,
+            ))
+            added += 1
+
+    if added:
+        _recalculate_slab_shore_loads(sr)
+        sr.shores_weight_kg = round(sum(s.shore.weight_kg for s in sr.shores), 2)
+    return added
+
+
+def _ensure_minimum_vm_shores(
+    sr: SlabShoringResult,
+    *,
+    min_area_m2: float = 1.0,
+) -> int:
+    """Ensure real slab panels have at least two shores for a VM span."""
+    if len(sr.shores) >= 2 or sr.area_m2 < min_area_m2 or not sr.selected_shore:
+        return 0
+
+    minx, miny, maxx, maxy = sr.polygon.bounds
+    width = maxx - minx
+    height = maxy - miny
+    if width <= 0 or height <= 0:
+        return 0
+
+    if sr.shores:
+        base = Point(sr.shores[0].x, sr.shores[0].y)
+    else:
+        base = sr.polygon.representative_point()
+    base_x, base_y = base.x, base.y
+
+    if width >= height:
+        ordered_dirs = [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)]
+        max_offset = width * 0.40
+    else:
+        ordered_dirs = [(0.0, 1.0), (0.0, -1.0), (1.0, 0.0), (-1.0, 0.0)]
+        max_offset = height * 0.40
+
+    offsets = [
+        min(max_offset, 0.80),
+        min(max_offset, 0.55),
+        min(max_offset, 0.35),
+    ]
+    added = 0
+    for offset in offsets:
+        if offset < ESPACAMENTO_MIN:
+            continue
+        for dx, dy in ordered_dirs:
+            x = base_x + dx * offset
+            y = base_y + dy * offset
+            pt = Point(x, y)
+            if not sr.polygon.buffer(1e-6).covers(pt):
+                continue
+            if _point_in_exclusions(x, y, sr.exclusions):
+                continue
+            if any(math.hypot(x - s.x, y - s.y) < ESPACAMENTO_MIN for s in sr.shores):
+                continue
+            sr.shores.append(PositionedShore(
+                x=round(x, 3),
+                y=round(y, 3),
+                shore=sr.selected_shore,
+                load_applied_kn=0.0,
+                utilization_ratio=0.0,
+            ))
+            added += 1
+            if len(sr.shores) >= 2:
+                _recalculate_slab_shore_loads(sr)
+                sr.shores_weight_kg = round(sum(s.shore.weight_kg for s in sr.shores), 2)
+                return added
+
+    if added:
+        _recalculate_slab_shore_loads(sr)
+        sr.shores_weight_kg = round(sum(s.shore.weight_kg for s in sr.shores), 2)
+    return added
+
+
+def _add_vm_secondary_reinforcement_shores(
+    sr: SlabShoringResult,
+    *,
+    max_span_m: float = 1.60,
+) -> int:
+    """Add shores under failed VM80 secondary spans.
+
+    Secondary VMs rest on primary guides. If the guide spacing left by final
+    shore cleanup is too large, VM80 can fail even when the visual secondary
+    spacing is correct. Add intermediate shores on failed secondary lines so
+    the next grid rebuild creates extra primary guides and shortens the VM80
+    span.
+    """
+    grid = getattr(sr, "vm_grid", None)
+    if grid is None or not sr.selected_shore:
+        return 0
+
+    failed_secondaries = [
+        seg for seg in getattr(grid, "segments", [])
+        if seg.role == "secundaria"
+        and (not seg.passes_moment or not seg.passes_deflection)
+        and seg.span_m > max_span_m
+    ]
+    if not failed_secondaries:
+        return 0
+
+    added = 0
+    for seg in failed_secondaries:
+        pieces = max(2, int(math.floor(seg.span_m / max_span_m)) + 1)
+        for idx in range(1, pieces):
+            t = idx / pieces
+            x = seg.start[0] + (seg.end[0] - seg.start[0]) * t
+            y = seg.start[1] + (seg.end[1] - seg.start[1]) * t
+            pt = Point(x, y)
+            if not sr.polygon.buffer(1e-6).covers(pt):
+                continue
+            if _point_in_exclusions(x, y, sr.exclusions):
+                continue
+            if any(math.hypot(x - s.x, y - s.y) < ESPACAMENTO_MIN for s in sr.shores):
+                continue
+            sr.shores.append(PositionedShore(
+                x=round(x, 3),
+                y=round(y, 3),
+                shore=sr.selected_shore,
+                load_applied_kn=0.0,
+                utilization_ratio=0.0,
+            ))
+            added += 1
+
+    if added:
+        _recalculate_slab_shore_loads(sr)
+        sr.shores_weight_kg = round(sum(s.shore.weight_kg for s in sr.shores), 2)
+    return added
+
+
+def _finalize_slab_vm_grids(
+    slab_results: List[SlabShoringResult],
+    *,
+    global_origin: Optional[tuple[float, float]],
+    warnings: List[str],
+) -> None:
+    """Rebuild VM grids after all shore post-processing and reinforce failures."""
+    for idx, sr in enumerate(slab_results, 1):
+        total_added = _ensure_minimum_vm_shores(sr)
+        sr.vm_grid = _build_slab_vm_grid(sr, global_origin=global_origin)
+        for _ in range(5):
+            added_primary = _add_vm_primary_reinforcement_shores(sr)
+            if added_primary:
+                sr.vm_grid = _build_slab_vm_grid(sr, global_origin=global_origin)
+
+            added_secondary = _add_vm_secondary_reinforcement_shores(sr)
+            added = added_primary + added_secondary
+            if not added:
+                break
+            total_added += added
+            sr.vm_grid = _build_slab_vm_grid(sr, global_origin=global_origin)
+        if total_added:
+            warnings.append(
+                f"Laje {idx} (área {sr.area_m2:.1f}m²) — adicionadas "
+                f"{total_added} escora(s) para eliminar falha de VM"
+            )
 
 
 def _contra_flecha_warnings(beam_length_m: float, beam_name: str) -> list:
@@ -346,6 +823,103 @@ def _filter_isolated_slabs(
         )
 
     return filtered
+
+
+def _axis_aligned_perimeter_ratio(
+    polygon: Polygon,
+    *,
+    angle_tolerance_deg: float = 3.0,
+) -> tuple[float, int]:
+    """Return axis-aligned perimeter ratio and short-segment count."""
+    try:
+        coords = list(polygon.exterior.coords)
+    except Exception:
+        return 1.0, 0
+
+    total_len = 0.0
+    axis_len = 0.0
+    short_segments = 0
+    for a, b in zip(coords, coords[1:]):
+        dx = b[0] - a[0]
+        dy = b[1] - a[1]
+        length = math.hypot(dx, dy)
+        if length <= 1e-9:
+            continue
+        total_len += length
+        if length < 0.20:
+            short_segments += 1
+        angle = abs(math.degrees(math.atan2(dy, dx))) % 180.0
+        axis_deviation = min(angle, abs(angle - 90.0), abs(angle - 180.0))
+        if axis_deviation <= angle_tolerance_deg:
+            axis_len += length
+
+    if total_len <= 0:
+        return 1.0, short_segments
+    return axis_len / total_len, short_segments
+
+
+def _is_noisy_nonorthogonal_slab_contour(polygon: Polygon) -> bool:
+    """Detect small contour artifacts generated by arcs/details.
+
+    Real slab panels in these structural plans are beam-bounded and mostly
+    orthogonal. The false CVS lower-left panel is a small arc-derived contour:
+    many tiny segments, low rectangularity, and almost no H/V perimeter.
+    """
+    try:
+        coords = list(polygon.exterior.coords)
+        vertex_count = len(coords)
+        minx, miny, maxx, maxy = polygon.bounds
+        bbox_area = (maxx - minx) * (maxy - miny)
+    except Exception:
+        return False
+
+    if vertex_count < 24 or polygon.area > 25.0 or bbox_area <= 0:
+        return False
+
+    rectangularity = polygon.area / bbox_area
+    axis_ratio, short_segments = _axis_aligned_perimeter_ratio(polygon)
+    segment_count = max(1, vertex_count - 1)
+    short_ratio = short_segments / segment_count
+
+    return (
+        rectangularity < 0.75
+        and axis_ratio < 0.50
+        and short_ratio > 0.50
+    )
+
+
+def _filter_noisy_overlapping_slabs(polygons: List[Polygon]) -> List[Polygon]:
+    """Remove small arc/detail contours that overlap a larger slab panel."""
+    if len(polygons) <= 1:
+        return polygons
+
+    removed: set[int] = set()
+    for i, polygon in enumerate(polygons):
+        if not _is_noisy_nonorthogonal_slab_contour(polygon):
+            continue
+
+        max_overlap_ratio = 0.0
+        for j, other in enumerate(polygons):
+            if i == j or other.area <= polygon.area * 1.5:
+                continue
+            try:
+                overlap_area = polygon.intersection(other).area
+            except Exception:
+                overlap_area = 0.0
+            if polygon.area > 0:
+                max_overlap_ratio = max(max_overlap_ratio, overlap_area / polygon.area)
+
+        if max_overlap_ratio >= 0.02:
+            removed.add(i)
+            logger.info(
+                f"Noisy slab contour filter: discarded area={polygon.area:.1f}m2 "
+                f"overlap={max_overlap_ratio:.0%} "
+                f"centroid=({polygon.centroid.x:.1f}, {polygon.centroid.y:.1f})"
+            )
+
+    if not removed:
+        return polygons
+    return [p for i, p in enumerate(polygons) if i not in removed]
 
 
 def _pillar_hull(pillars: List[ClassifiedElement]):
@@ -1261,6 +1835,19 @@ def run_calculation(
                 f"(detalhes, cortes, selo do engenheiro)"
             )
 
+    # Remove small non-orthogonal contour artifacts that overlap a larger,
+    # orthogonal slab. This catches arc/detail geometry accidentally
+    # polygonized as a slab while preserving standalone curved slabs.
+    if len(slab_polygons) > 1:
+        before_noisy = len(slab_polygons)
+        slab_polygons = _filter_noisy_overlapping_slabs(slab_polygons)
+        removed_noisy = before_noisy - len(slab_polygons)
+        if removed_noisy > 0:
+            warnings.append(
+                f"Filtradas {removed_noisy} lajes com contorno fragmentado "
+                f"sobreposto a paineis estruturais"
+            )
+
     cantilever_flags = detect_cantilever_slabs(slab_polygons, pillars)
 
     pillar_exclusions = _build_pillar_exclusions(pillars)
@@ -2104,6 +2691,14 @@ def run_calculation(
 
     review_corrections = review_and_fix(calc_result, pillars, valid_beams)
     warnings.extend(review_corrections)
+
+    # O review/dedup final pode remover ou mover escoras. Recalcular a malha
+    # de VMs depois disso evita DXF com segmentos antigos em VM_FALHA.
+    _finalize_slab_vm_grids(
+        slab_results,
+        global_origin=_global_origin,
+        warnings=warnings,
+    )
 
     # Sync shore_count with actual len(shores) after all post-processing
     for br in beam_results:

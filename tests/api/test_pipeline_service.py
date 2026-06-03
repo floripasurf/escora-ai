@@ -10,7 +10,7 @@ import pytest
 from api.services import pipeline_service
 from api.services.pipeline_service import _generate_output_dxf
 from src.models.calculation_models import (
-    BeamShoringResult, CalculationResult,
+    BeamShoringResult, CalculationResult, SlabShoringResult,
 )
 from src.models.pipeline_models import ClassifiedElement, ElementType
 from src.models.shore import (
@@ -176,6 +176,31 @@ def test_dxf_has_hexagon_shore_marker(empty_input_dxf, tmp_path):
     assert len(hex_polylines) >= 1
 
 
+def test_dxf_vm50_viga_is_not_duplicated(empty_input_dxf, tmp_path):
+    out = str(tmp_path / "out.dxf")
+    calc = _calc([_telescopic_beam_result()])
+    _generate_output_dxf(empty_input_dxf, calc, out)
+
+    doc = ezdxf.readfile(out)
+    msp = doc.modelspace()
+    vm50_lines = [e for e in msp.query("LINE") if e.dxf.layer == "VM50_Viga"]
+
+    # One travamento marker per telescopic shore. The previous pair-loop
+    # drew each interior shore twice.
+    assert len(vm50_lines) == len(calc.beam_results[0].shores)
+
+    keys = {
+        (
+            round(line.dxf.start.x, 3),
+            round(line.dxf.start.y, 3),
+            round(line.dxf.end.x, 3),
+            round(line.dxf.end.y, 3),
+        )
+        for line in vm50_lines
+    }
+    assert len(keys) == len(vm50_lines)
+
+
 def test_dxf_has_two_vm_rails_per_beam(empty_input_dxf, tmp_path):
     out = str(tmp_path / "out.dxf")
     calc = _calc([_tower_beam_result()])
@@ -210,6 +235,58 @@ def test_dxf_tower_marker_double_square(empty_input_dxf, tmp_path):
     ]
     # 4 towers × 2 squares (outer + inner) = 8 closed polylines
     assert len(tower_polylines) == 8
+
+
+def test_dxf_does_not_draw_vm50_laje_for_regular_slab(empty_input_dxf, tmp_path):
+    from shapely.geometry import box
+
+    shore = _shore_entry("ESC310")
+    slab = SlabShoringResult(
+        polygon=box(0, 0, 4, 4),
+        thickness_m=0.12,
+        area_m2=16.0,
+        total_load_kn=100.0,
+        shores=[
+            PositionedShore(
+                x=x, y=y, shore=shore,
+                load_applied_kn=25.0, utilization_ratio=0.5,
+            )
+            for x, y in [(0.5, 0.5), (3.5, 0.5), (0.5, 3.5), (3.5, 3.5)]
+        ],
+        selected_shore=shore,
+    )
+    calc = CalculationResult(
+        beam_results=[],
+        slab_results=[slab],
+        shore_catalog_used=[],
+        total_shores=4,
+        total_load_kn=100.0,
+        pe_direito_m=2.8,
+    )
+    out = str(tmp_path / "out.dxf")
+    _generate_output_dxf(empty_input_dxf, calc, out)
+
+    doc = ezdxf.readfile(out)
+    msp = doc.modelspace()
+    assert [e for e in msp if e.dxf.layer == "VM50_Laje"] == []
+
+
+def test_dxf_tower_legend_only_when_towers_exist(empty_input_dxf, tmp_path):
+    out_tel = str(tmp_path / "tel.dxf")
+    _generate_output_dxf(empty_input_dxf, _calc([_telescopic_beam_result()]), out_tel)
+    tel_texts = [
+        e.dxf.text for e in ezdxf.readfile(out_tel).modelspace().query("TEXT")
+        if e.dxf.layer == "INFO_ESCORAS"
+    ]
+    assert "Torre de escoramento" not in tel_texts
+
+    out_tower = str(tmp_path / "tower.dxf")
+    _generate_output_dxf(empty_input_dxf, _calc([_tower_beam_result()]), out_tower)
+    tower_texts = [
+        e.dxf.text for e in ezdxf.readfile(out_tower).modelspace().query("TEXT")
+        if e.dxf.layer == "INFO_ESCORAS"
+    ]
+    assert "Torre de escoramento" in tower_texts
 
 
 # ---------------------------------------------------------------------------

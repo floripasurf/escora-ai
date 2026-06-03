@@ -252,10 +252,12 @@ def build_vm_grid(
     plywood: Optional[PlywoodSpec] = None,
     polygon_bbox: Optional[Tuple[float, float, float, float]] = None,
     load_kn_m2: float = 7.7,                   # padrao: laje 12cm + sobrec.
+    secondary_spacing_m: Optional[float] = None,
     available_primaria_lengths_mm: Optional[Sequence[int]] = None,
     available_secundaria_lengths_mm: Optional[Sequence[int]] = None,
     row_tolerance_m: float = 0.30,
     global_origin: Optional[Tuple[float, float]] = None,
+    primary_axis_override: Optional[Literal["x", "y"]] = None,
 ) -> VMGrid:
     """Constroi o grid completo de VMs sobre um conjunto de escoras.
 
@@ -288,7 +290,7 @@ def build_vm_grid(
         grid.issues.append("Menos de 2 escoras: nenhum grid de VM gerado.")
         return grid
 
-    primary_axis = _detect_primary_axis(shore_points, polygon_bbox)
+    primary_axis = primary_axis_override or _detect_primary_axis(shore_points, polygon_bbox)
     grid.primaria_axis = primary_axis
 
     # Direcao perpendicular = direcao das secundarias (barrotes)
@@ -378,8 +380,9 @@ def build_vm_grid(
         min_y, max_y = min(ys), max(ys)
 
     seam_m = seam_mm / 1000.0
+    secondary_step_m = secondary_spacing_m if secondary_spacing_m and secondary_spacing_m > 0 else seam_m
     span_secundaria_m = avg_row_spacing  # apoia em duas primarias adjacentes
-    q_secundaria_kn_m = load_kn_m2 * seam_m
+    q_secundaria_kn_m = load_kn_m2 * secondary_step_m
 
     # Helper: gera posicoes snap-adas ao grid global (ou local se origem nao dada)
     def _snapped_positions(lo: float, hi: float, origin: float, step: float) -> List[float]:
@@ -398,9 +401,9 @@ def build_vm_grid(
     if secondary_axis == "x":
         # Secundarias correm em X; uma a cada passo em Y
         if global_origin is not None:
-            y_positions = _snapped_positions(min_y, max_y, global_origin[1], seam_m)
+            y_positions = _snapped_positions(min_y, max_y, global_origin[1], secondary_step_m)
         else:
-            n_barrotes = max(2, int(round((max_y - min_y) / seam_m)) + 1)
+            n_barrotes = max(2, int(round((max_y - min_y) / secondary_step_m)) + 1)
             actual_step = (max_y - min_y) / max(n_barrotes - 1, 1)
             y_positions = [min_y + i * actual_step for i in range(n_barrotes)]
         for y in y_positions:
@@ -430,15 +433,15 @@ def build_vm_grid(
                 passes_deflection=passF,
                 notes=(
                     f"barrote (compensado {plywood.format_label()}, "
-                    f"passo {seam_mm}mm)"
+                    f"passo {int(round(secondary_step_m * 1000))}mm)"
                 ),
             )
             grid.add_segment(seg)
     else:  # secondary_axis == "y"
         if global_origin is not None:
-            x_positions = _snapped_positions(min_x, max_x, global_origin[0], seam_m)
+            x_positions = _snapped_positions(min_x, max_x, global_origin[0], secondary_step_m)
         else:
-            n_barrotes = max(2, int(round((max_x - min_x) / seam_m)) + 1)
+            n_barrotes = max(2, int(round((max_x - min_x) / secondary_step_m)) + 1)
             actual_step = (max_x - min_x) / max(n_barrotes - 1, 1)
             x_positions = [min_x + i * actual_step for i in range(n_barrotes)]
         for x in x_positions:
@@ -467,7 +470,7 @@ def build_vm_grid(
                 passes_deflection=passF,
                 notes=(
                     f"barrote (compensado {plywood.format_label()}, "
-                    f"passo {seam_mm}mm)"
+                    f"passo {int(round(secondary_step_m * 1000))}mm)"
                 ),
             )
             grid.add_segment(seg)

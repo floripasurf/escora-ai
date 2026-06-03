@@ -8,6 +8,7 @@ from src.parser.region_filter import (
     _is_in_detail_zone,
     filter_main_plan,
     DETAIL_EXCLUSION_RADIUS,
+    MIN_REGION_FILTER_CENTROIDS,
 )
 from src.pipeline.stage_parse import (
     TextEntity, SegmentEntity, PolylineEntity, HatchEntity,
@@ -16,18 +17,17 @@ from src.pipeline.stage_parse import (
 
 
 class TestGapDetection:
-    def test_small_gap_detected_with_new_threshold(self):
-        """Gap of 2.5m should be detected with the new lower threshold."""
-        # total_range = 100m → threshold = max(2.0, 0.02*100) = 2.0m
-        # 2.5m > 2.0m → should split
-        values = [0.0, 1.0, 2.0, 3.0, 5.5, 6.5, 7.5]
+    def test_gap_detected_with_conservative_threshold(self):
+        """Only large gaps should split regions in structural floor plans."""
+        # total_range = 100m -> threshold = max(5.0, 0.10*100) = 10.0m
+        values = [0.0, 1.0, 2.0, 3.0, 14.5, 15.5, 16.5]
         splits = _find_gap_splits(values, 100.0)
         assert len(splits) >= 1
-        assert any(3.0 < s < 5.5 for s in splits)
+        assert any(3.0 < s < 14.5 for s in splits)
 
     def test_gap_below_threshold_not_detected(self):
         """Gaps below threshold should not cause splits."""
-        values = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0]
+        values = [0.0, 1.0, 2.0, 3.0, 8.0, 9.0]
         splits = _find_gap_splits(values, 100.0)
         assert len(splits) == 0
 
@@ -123,6 +123,10 @@ class TestDetailKeywords:
         texts = [self._text("ESCALA 1:25")]
         assert _is_in_detail_zone(50.0, 51.0, texts) is True
 
+    def test_main_plan_scale_1_50_not_caught(self):
+        texts = [self._text("ESC 1:50")]
+        assert _is_in_detail_zone(50.0, 51.0, texts) is False
+
     def test_planta_principal_not_treated_as_detail(self):
         """Texto sem keyword nao dispara filtro."""
         texts = [self._text("V120a")]  # nome de viga - planta principal
@@ -182,3 +186,69 @@ class TestImplicitRectFrame:
         texts = [self._text("DETALHE", 2.5, 2.0)]
         rects = _detect_implicit_rect_frames(segs, texts)
         assert len(rects) == 0
+
+
+class TestSparseMainPlan:
+    def test_sparse_file_not_spatially_clustered(self):
+        """A tiny valid plan should not be split into artificial regions."""
+        assert MIN_REGION_FILTER_CENTROIDS > 3
+        texts = [
+            TextEntity(content="V1 14x40", x=3.0, y=10.2, layer="TEXTO"),
+            TextEntity(content="P1", x=0.1, y=10.3, layer="TEXTO"),
+            TextEntity(content="ESC 1:50", x=5.0, y=12.0, layer="TEXTO"),
+        ]
+        segments = [
+            SegmentEntity(type="H", y=10.0, x_min=0.0, x_max=6.0, layer="11"),
+            SegmentEntity(type="H", y=10.14, x_min=0.0, x_max=6.0, layer="11"),
+        ]
+        rects = [
+            RectEntity(
+                cx=0.1, cy=10.0,
+                width=0.2, height=0.4, area=0.08,
+                layer="21",
+            )
+        ]
+
+        _, f_segments, f_rects, _, _, _, _, warnings = filter_main_plan(
+            texts, segments, rects, [], [], [], []
+        )
+
+        assert len(f_segments) == 2
+        assert len(f_rects) == 1
+        assert warnings == []
+
+
+class TestCFLRegression:
+    def test_cfl_complex_plan_is_not_split_into_secondary_regions(self):
+        """CFL-SUB has internal voids/shafts, not separate drawing regions."""
+        from pathlib import Path
+        from src.pipeline.stage_parse import parse_dxf
+        from src.pipeline.runner import _detect_coordinate_scale
+
+        dxf_path = (
+            Path(__file__).parent.parent
+            / "fixtures"
+            / "CFL-SUB-FOR-0casa-SFGL.DXF"
+        )
+        if not dxf_path.exists():
+            pytest.skip("CFL-SUB DXF not in fixtures")
+
+        parsed = parse_dxf(str(dxf_path))
+        _detect_coordinate_scale(parsed)
+        (
+            _texts, f_segments, f_rects, f_circles, f_polylines,
+            _hatches, _dims, warnings,
+        ) = filter_main_plan(
+            parsed.texts,
+            parsed.segments,
+            parsed.rects,
+            parsed.circles,
+            parsed.polylines,
+            parsed.hatches,
+            parsed.dimensions,
+        )
+
+        assert len(f_segments) >= 10000
+        assert len(f_rects) >= 900
+        assert len(f_polylines) >= 1500
+        assert not any("Filtradas" in w for w in warnings)

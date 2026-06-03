@@ -7,6 +7,7 @@ from src.engine.shaft_detector import (
     detect_shafts_from_text,
     detect_shafts_from_layers,
     detect_all_shafts,
+    subtract_shafts_from_slabs,
     filter_slab_polygons_by_shafts,
     ShaftRegion,
     _merge_nearby_shafts,
@@ -223,3 +224,43 @@ class TestIntegration:
         shafts = detect_all_shafts(diags, texts, [], [], scale=1.0)
         assert len(shafts) == 1
         assert shafts[0].confidence == 0.9  # X-pattern confidence wins
+
+    def test_dense_x_patterns_are_kept_as_shafts(self):
+        diags = []
+        for i in range(5):
+            x = i * 4
+            diags.extend([
+                FakeDiagonal(x1=x, y1=0, x2=x + 2, y2=2),
+                FakeDiagonal(x1=x + 2, y1=0, x2=x, y2=2),
+            ])
+
+        shafts = detect_all_shafts(diags, [], [], [], scale=1.0)
+
+        assert len(shafts) == 5
+
+    def test_dense_x_patterns_merge_text_confirmed_shaft(self):
+        diags = []
+        for i in range(5):
+            x = i * 4
+            diags.extend([
+                FakeDiagonal(x1=x, y1=0, x2=x + 2, y2=2),
+                FakeDiagonal(x1=x + 2, y1=0, x2=x, y2=2),
+            ])
+        texts = [FakeText(content="POÇO DE ELEVADOR", x=1, y=1)]
+
+        shafts = detect_all_shafts(diags, texts, [], [], scale=1.0)
+
+        assert len(shafts) == 5
+        assert any(s.label == "POÇO DE ELEVADOR" for s in shafts)
+
+    def test_subtract_shafts_preserves_disconnected_slab_parts(self):
+        slabs = [box(0, 0, 6, 2)]
+        shafts = [ShaftRegion(
+            x_min=2.5, y_min=-0.2, x_max=3.5, y_max=2.2,
+            area_m2=2.4, detection_method="layer",
+        )]
+
+        result = subtract_shafts_from_slabs(slabs, shafts, buffer_m=0.0)
+
+        assert len(result) == 2
+        assert sum(p.area for p in result) == pytest.approx(10.0)

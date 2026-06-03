@@ -498,18 +498,20 @@ def _generate_output_dxf(
             vm50_layer = "VM50_Viga"
             _ensure_layer(doc, vm50_layer, 6)
             sorted_tel = sorted(telescopic_shores, key=lambda s: _dx(s.x) * ux + _dx(s.y) * uy)
-            for si in range(len(sorted_tel) - 1):
-                s1, s2 = sorted_tel[si], sorted_tel[si + 1]
-                # Short perpendicular VM50 lines at shore positions
-                trav_half = 0.20 * inv_scale
-                for s in (s1, s2):
-                    sx, sy = _dx(s.x), _dx(s.y)
-                    tx0 = sx - nx * trav_half
-                    ty0 = sy - ny * trav_half
-                    tx1 = sx + nx * trav_half
-                    ty1 = sy + ny * trav_half
-                    msp.add_line((tx0, ty0), (tx1, ty1),
-                                 dxfattribs={"layer": vm50_layer})
+            drawn_travamentos = set()
+            trav_half = 0.20 * inv_scale
+            for s in sorted_tel:
+                key = (round(s.x, 3), round(s.y, 3), round(nx, 3), round(ny, 3))
+                if key in drawn_travamentos:
+                    continue
+                drawn_travamentos.add(key)
+                sx, sy = _dx(s.x), _dx(s.y)
+                tx0 = sx - nx * trav_half
+                ty0 = sy - ny * trav_half
+                tx1 = sx + nx * trav_half
+                ty1 = sy + ny * trav_half
+                msp.add_line((tx0, ty0), (tx1, ty1),
+                             dxfattribs={"layer": vm50_layer})
 
         # Place telescopic shore markers as-is (no VM rails)
         for shore in telescopic_shores:
@@ -522,6 +524,15 @@ def _generate_output_dxf(
             _draw_telescopic(_dx(shore.x), _dx(shore.y), layer, label)
 
     # ----- Slab loop ----------------------------------------------------
+    drawn_slab_vm_segments = set()
+
+    def _vm_draw_key(layer_name: str, start: tuple[float, float], end: tuple[float, float]):
+        a = (round(start[0], 3), round(start[1], 3))
+        b = (round(end[0], 3), round(end[1], 3))
+        if b < a:
+            a, b = b, a
+        return (layer_name, a, b)
+
     for sr in calc.slab_results:
         # Detect VM family for slab rails (use first tower shore's dist_beam)
         slab_tower_shores = [
@@ -580,39 +591,36 @@ def _generate_output_dxf(
                         dxfattribs={"layer": slab_vm_layer},
                     )
 
-        # Draw VM50 travamento perpendicular to slab rows (vertical connectors)
-        # This creates the Orguel-style grid connecting shore rows. Conectores
-        # que cruzariam a exclusão de pilar são omitidos.
-        if len(sr.shores) >= 4:
-            vm50_slab_layer = "VM50_Laje"
-            _ensure_layer(doc, vm50_slab_layer, 6)
-
-            def _col_crosses_pillar(x, y0, y1):
-                for ex in sr.exclusions or []:
-                    if x < ex.min_x or x > ex.max_x:
-                        continue
-                    lo, hi = min(y0, y1), max(y0, y1)
-                    if hi >= ex.min_y and lo <= ex.max_y:
-                        return True
-                return False
-
-            # Group by X column (vertical travamento connecting horizontal rows)
-            cols: dict = {}
-            for s in sr.shores:
-                ckey = round(s.x / 0.5) * 0.5
-                cols.setdefault(ckey, []).append(s)
-            for ckey, col_shores in cols.items():
-                if len(col_shores) < 2:
+        # Manual §28: desenhar grid de VMs primarias+secundarias quando o
+        # pipeline anexou sr.vm_grid. Adiciona as 3 layers do builder:
+        # VM130_Primaria (cor 170), VM80_Secundaria (cor 1), VM_FALHA (cor 6).
+        # Convertendo coordenadas via _dx() para respeitar a escala do DXF.
+        vm_grid = getattr(sr, "vm_grid", None)
+        if vm_grid is not None and getattr(vm_grid, "segments", None):
+            _vm_layer_colors = {
+                "VM130_Primaria": 170,
+                "VM80_Secundaria": 1,
+                "VM50_Secundaria": 6,
+                "ALU14_Primaria": 132,
+                "HT20_Primaria": 30,
+                "VM_FALHA": 6,
+            }
+            _vm_layers_seen = set()
+            for seg in vm_grid.segments:
+                role_suffix = "Primaria" if seg.role == "primaria" else "Secundaria"
+                layer_name = f"{seg.model}_{role_suffix}"
+                if not seg.passes_moment or not seg.passes_deflection:
+                    layer_name = "VM_FALHA"
+                if layer_name not in _vm_layers_seen:
+                    _ensure_layer(doc, layer_name, _vm_layer_colors.get(layer_name))
+                    _vm_layers_seen.add(layer_name)
+                start = (_dx(seg.start[0]), _dx(seg.start[1]))
+                end = (_dx(seg.end[0]), _dx(seg.end[1]))
+                draw_key = _vm_draw_key(layer_name, start, end)
+                if draw_key in drawn_slab_vm_segments:
                     continue
-                col_shores.sort(key=lambda s: s.y)
-                for ci in range(len(col_shores) - 1):
-                    s1, s2 = col_shores[ci], col_shores[ci + 1]
-                    if _col_crosses_pillar(s1.x, s1.y, s2.y):
-                        continue
-                    msp.add_line(
-                        (_dx(s1.x), _dx(s1.y)), (_dx(s2.x), _dx(s2.y)),
-                        dxfattribs={"layer": vm50_slab_layer},
-                    )
+                drawn_slab_vm_segments.add(draw_key)
+                msp.add_line(start, end, dxfattribs={"layer": layer_name})
 
         for shore in sr.shores:
             layer = _shore_layer_name(shore, "Laje")
@@ -631,6 +639,15 @@ def _generate_output_dxf(
     total_beam = sum(br.shore_count for br in calc.beam_results)
     total_slab = sum(len(sr.shores) for sr in calc.slab_results)
     all_pts = [p for br in calc.beam_results for p in br.beam.geometry]
+    has_tower = any(
+        getattr(s, "support_type", None) == SupportType.TOWER
+        for br in calc.beam_results
+        for s in br.shores
+    ) or any(
+        getattr(s, "support_type", None) == SupportType.TOWER
+        for sr in calc.slab_results
+        for s in sr.shores
+    )
     if all_pts:
         min_x = _dx(min(p[0] for p in all_pts))
         max_y = _dx(max(p[1] for p in all_pts))
@@ -651,12 +668,13 @@ def _generate_output_dxf(
             height=SHORE_LABEL_HEIGHT * 0.8,
             dxfattribs={"layer": "INFO_ESCORAS"},
         ).set_placement((lx + 0.4, ly - 0.05))
-        _draw_tower(lx + 3.5, ly, "INFO_ESCORAS")
-        msp.add_text(
-            "Torre de escoramento",
-            height=SHORE_LABEL_HEIGHT * 0.8,
-            dxfattribs={"layer": "INFO_ESCORAS"},
-        ).set_placement((lx + 3.9, ly - 0.05))
+        if has_tower:
+            _draw_tower(lx + 3.5, ly, "INFO_ESCORAS")
+            msp.add_text(
+                "Torre de escoramento",
+                height=SHORE_LABEL_HEIGHT * 0.8,
+                dxfattribs={"layer": "INFO_ESCORAS"},
+            ).set_placement((lx + 3.9, ly - 0.05))
 
     # Bloco CONSUMO POR PÉ-DIREITO — orçamento interno na layer VOLUMES.
     if report_data is not None and getattr(report_data, "consumption_rows", None):
