@@ -1605,13 +1605,13 @@
     </footer>
 
     <script>
-        // API goes straight to the Fly backend. We intentionally bypass the
-        // Vercel rewrite here because Vercel edge rewrites cap request bodies
-        // at ~4.5 MB, which would break our 200 MB DXF upload feature.
-        // CORS is enabled server-side (allow_origins=*).
+        // API goes straight to the Mac Mini backend (via Cloudflare Tunnel).
+        // We intentionally bypass the Vercel rewrite here because Vercel edge
+        // rewrites cap request bodies at ~4.5 MB, which would break large DXF
+        // uploads. CORS is enabled server-side (allow_origins=*).
         const BACKEND = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
             ? ''  // dev: same origin
-            : 'https://escora-ai.fly.dev';
+            : 'https://escora.blackcube.dev';
         const API = `${BACKEND}/api/v1`;
         const jobs = {};
 
