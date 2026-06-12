@@ -198,6 +198,7 @@ def run_pipeline(
     mode: str = "price",
     inventory_name: Optional[str] = None,
     branch_id: Optional[str] = None,
+    slab_layout_mode: str = "grid",
 ) -> PipelineResult:
     # Stage 0: Load learning store for accumulated knowledge (per-branch when
     # branch_id is provided, so each locadora unit keeps its own corrections).
@@ -451,6 +452,7 @@ def run_pipeline(
                 mode=mode,
                 inventory=inventory,
                 text_entities=all_texts,
+                slab_layout_mode=slab_layout_mode,
             )
             # A1: Resumo agregado por categoria para diagnóstico rápido.
             # Em projetos TQS com layers numéricos a classificação por keyword

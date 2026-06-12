@@ -49,6 +49,10 @@ class SlabShoringResult(BaseModel):
     structural_name: Optional[str] = Field(default=None, description="Nome estrutural extraído do DXF (ex.: 'L3')")
     shores_weight_kg: float = Field(default=0.0, description="Soma do peso das escoras desta laje (kg)")
     decision_rule: str = Field(default="", description="Slug estável da regra de decisão aplicada (ex.: 'rule-4-laje-espessa')")
+    # Manual §28.8 (gold standard Orguel): modo de posicionamento das escoras
+    # de laje. "grid" = grid de pontos legado; "line_first" = linhas de guia
+    # com escoras ao longo da linha (src/engine/line_first_builder.py).
+    layout_mode: str = Field(default="grid", description="Modo de posicionamento: grid | line_first")
     # Manual §28: grid completo de VMs (primarias + secundarias) sobre as
     # escoras posicionadas. Populated por stage_calculate via build_vm_grid().
     # Tipo real: src.engine.vm_grid_builder.VMGrid (dataclass).

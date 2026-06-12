@@ -238,6 +238,61 @@ def _build_slab_vm_grid(
     return default_grid
 
 
+def _distribute_line_first_shores(
+    slab: Slab,
+    polygon: Polygon,
+    shore,
+    total_load_kn: float,
+    exclusions: List[Any],
+    floor_height_m: Optional[float],
+    pillar_positions: Optional[List[tuple]] = None,
+):
+    """Posiciona escoras de laje pelo modo line-first (manual §28.8).
+
+    Gera linhas de guia (direcao por painel, pitch = vao/n) e escoras ao
+    longo de cada linha via ``line_first_builder``. O adensamento de
+    capitel (Orguel Q6) acontece SOBRE as linhas via ``capitel_centers``
+    — nunca pontos avulsos. Retorna ``(shores, nx, ny, sx, sy, layout)``
+    no mesmo formato de ``distribute_shores`` + o layout para o vm_grid.
+    """
+    from src.engine.line_first_builder import build_line_first_layout
+
+    q_kn_m2 = total_load_kn / slab.area_m2 if slab.area_m2 > 0 else 7.7
+    try:
+        cap_kn = (
+            shore.effective_capacity(floor_height_m)
+            if floor_height_m is not None
+            else shore.load_capacity_kn
+        )
+    except Exception:
+        cap_kn = shore.load_capacity_kn
+    layout = build_line_first_layout(
+        polygon,
+        q_kn_m2,
+        cap_kn,
+        exclusions=exclusions,
+        capitel_centers=pillar_positions,
+    )
+    if not layout.shores:
+        return [], 0, 0, 0.0, 0.0, None
+
+    load_per = total_load_kn / len(layout.shores)
+    capacity = shore.load_capacity_kn or 1.0
+    shores = [
+        PositionedShore(
+            x=round(x, 3),
+            y=round(y, 3),
+            shore=shore,
+            load_applied_kn=round(load_per, 2),
+            utilization_ratio=round(load_per / capacity, 4),
+        )
+        for x, y in layout.shores
+    ]
+    nx = len(layout.lines)
+    ny = max((len(ln.shore_positions) for ln in layout.lines), default=0)
+    return shores, nx, ny, layout.step_m, layout.pitch_m, layout
+
+
 def _line_parts(geom) -> List[LineString]:
     if geom.is_empty:
         return []
@@ -607,8 +662,20 @@ def _finalize_slab_vm_grids(
     # paineis usam a mesma direcao de primaria/secundaria, como nos
     # projetos Orguel reais. Elimina a "grade cruzada" de paineis
     # sobrepostos/vizinhos com eixos opostos.
-    preferred_axis = _level_primary_axis(slab_results)
+    # NOTA (manual §28.8 / 23.9): a regra de eixo unico por pavimento fica
+    # DEPRECIADA para paineis line-first — neles a direcao e POR PAINEL
+    # (perpendicular ao vao menor) e as guias derivam do POLIGONO, nao das
+    # escoras, entao o pos-processamento de escoras nao invalida as linhas
+    # (momento/flecha/capacidade ja verificados pelo builder).
+    preferred_axis = _level_primary_axis(
+        [sr for sr in slab_results if getattr(sr, "layout_mode", "grid") != "line_first"]
+    )
     for idx, sr in enumerate(slab_results, 1):
+        if (
+            getattr(sr, "layout_mode", "grid") == "line_first"
+            and getattr(sr, "vm_grid", None) is not None
+        ):
+            continue
         total_added = _ensure_minimum_vm_shores(sr)
         sr.vm_grid = _build_slab_vm_grid(
             sr, global_origin=global_origin, preferred_axis=preferred_axis,
@@ -634,6 +701,56 @@ def _finalize_slab_vm_grids(
                 f"Laje {idx} (área {sr.area_m2:.1f}m²) — adicionadas "
                 f"{total_added} escora(s) para eliminar falha de VM"
             )
+
+
+# Invariante line-first (manual §28.8): escora de laje SEMPRE sobre uma
+# linha de guia. Tolerancia para arredondamento de coordenadas (3 casas).
+LINE_FIRST_MAX_OFFLINE_DIST_M = 0.10
+
+
+def _enforce_line_first_shores_on_lines(
+    slab_results: List[SlabShoringResult],
+    warnings: List[str],
+) -> int:
+    """Remove escoras de laje a >0.10 m de qualquer linha de guia (line-first).
+
+    Invariante do modo line-first: TODA escora de laje fica sobre uma linha
+    de guia. Pos-processadores legados (geradores de pontos avulsos) nao
+    devem injetar escoras fora das linhas — este passo final garante o
+    invariante mesmo se um novo pos-processador violar a regra.
+    """
+    dropped_total = 0
+    for idx, sr in enumerate(slab_results, 1):
+        if getattr(sr, "layout_mode", "grid") != "line_first":
+            continue
+        grid = getattr(sr, "vm_grid", None)
+        if grid is None or not getattr(grid, "segments", None):
+            continue
+        guide_lines = [
+            LineString([seg.start, seg.end])
+            for seg in grid.segments
+            if seg.role == "primaria"
+        ]
+        if not guide_lines:
+            continue
+        kept = [
+            s for s in sr.shores
+            if min(ln.distance(Point(s.x, s.y)) for ln in guide_lines)
+            <= LINE_FIRST_MAX_OFFLINE_DIST_M
+        ]
+        dropped = len(sr.shores) - len(kept)
+        if dropped and kept:
+            sr.shores = kept
+            _recalculate_slab_shore_loads(sr)
+            sr.shores_weight_kg = round(
+                sum(s.shore.weight_kg for s in sr.shores), 2
+            )
+            dropped_total += dropped
+            warnings.append(
+                f"Laje {idx} (line-first): removida(s) {dropped} escora(s) "
+                f"fora das linhas de guia (>{LINE_FIRST_MAX_OFFLINE_DIST_M:.2f} m)"
+            )
+    return dropped_total
 
 
 def _contra_flecha_warnings(beam_length_m: float, beam_name: str) -> list:
@@ -1210,6 +1327,7 @@ def run_calculation(
     mode: str = "price",
     inventory: Optional[Any] = None,
     text_entities: Optional[List[Dict[str, Any]]] = None,
+    slab_layout_mode: str = "grid",
 ) -> CalculationResult:
     """Run the full calculation pipeline.
 
@@ -1219,6 +1337,8 @@ def run_calculation(
         pe_direito_is_default: True if pe_direito was not found in DXF.
         slab_thickness_m: Slab thickness override. None = use default.
         slab_type: Detected slab type (solid, ribbed, waffle, etc.)
+        slab_layout_mode: "grid" (default, grid de pontos legado) ou
+            "line_first" (linhas de guia Orguel gold-standard, manual §28.8).
 
     Returns:
         CalculationResult with beam/slab shoring results.
@@ -2421,17 +2541,49 @@ def run_calculation(
             # Fallback: no ribs found in this nervura panel — use uniform grid
             is_nervura_panel = False
 
-        # Solid slab — uniform grid shore placement
-        # Passa floor_height_m para ativar espaçamento adaptativo por carga
-        shores, nx, ny, sx, sy = distribute_shores(
-            slab=slab,
-            shore=selected_shore,
-            total_load_kn=total_load,
-            max_spacing=max_spacing,
-            exclusions=all_exclusions,
-            floor_height_m=slab_shore_height,
-            global_origin=_global_origin,
-        )
+        # Solid slab — shore placement
+        # Manual §28.8 (gold standard Orguel): modo "line_first" gera linhas
+        # de guia por painel e escoras ao longo de cada linha. Paineis 100%
+        # torre mantem o grid legado (malha de torres tem regra propria).
+        line_first_layout = None
+        if (
+            slab_layout_mode == "line_first"
+            and not (slab_support_type == SupportType.TOWER and use_tower_entry is not None)
+        ):
+            try:
+                shores, nx, ny, sx, sy, line_first_layout = _distribute_line_first_shores(
+                    slab=slab,
+                    polygon=polygon,
+                    shore=selected_shore,
+                    total_load_kn=total_load,
+                    exclusions=pillar_exclusions + shaft_exclusions,
+                    floor_height_m=slab_shore_height,
+                    pillar_positions=[
+                        (p.geometry[0][0], p.geometry[0][1])
+                        for p in pillars
+                        if p.element_type == ElementType.PILLAR and p.geometry
+                    ],
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"Line-first falhou para laje (area={slab.area_m2:.1f}m2): {exc}"
+                )
+                line_first_layout = None
+            if line_first_layout is None or not shores:
+                line_first_layout = None
+
+        if line_first_layout is None:
+            # Grid de pontos legado (default). Passa floor_height_m para
+            # ativar espaçamento adaptativo por carga.
+            shores, nx, ny, sx, sy = distribute_shores(
+                slab=slab,
+                shore=selected_shore,
+                total_load_kn=total_load,
+                max_spacing=max_spacing,
+                exclusions=all_exclusions,
+                floor_height_m=slab_shore_height,
+                global_origin=_global_origin,
+            )
 
         # === MIXED SLAB SUPPORT ===
         # VM-driven orthogonal tower grid: towers spaced at VM130 max span
@@ -2544,7 +2696,10 @@ def run_calculation(
         # de cada pilar no anel 0.70-1.50m, com espaçamento 30% menor.
         # Rodamos APÓS o swap MIXED para garantir que as escoras de capitel
         # fiquem sempre telescópicas (ver comentário do bloco MIXED acima).
-        if not is_cantilever:
+        # No modo line-first o adensamento JA aconteceu SOBRE as linhas
+        # (capitel_centers no builder, manual §28.8) — pular o gerador de
+        # pontos avulsos, que criaria escoras orfas fora das linhas.
+        if not is_cantilever and line_first_layout is None:
             from src.engine.capitel_densification import (
                 capitel_densification_shores,
             )
@@ -2568,16 +2723,32 @@ def run_calculation(
             )
             shores.extend(extra_shores)
 
-        is_valid, errors = validate_result(shores, sx, sy)
+        # Line-first: pitch/passo verificados por capacidade + VM (manual
+        # §28.8) podem exceder o teto legado de 1.10 m — validar contra o
+        # teto da faixa observada (1.80 m).
+        if line_first_layout is not None:
+            from src.engine.line_first_builder import PITCH_RANGE_M
+            is_valid, errors = validate_result(
+                shores, sx, sy, max_spacing=PITCH_RANGE_M[1],
+            )
+        else:
+            is_valid, errors = validate_result(shores, sx, sy)
         validation_errors.extend(errors)
 
         # --- Manual §28: grid completo de VMs (primarias + secundarias) ---
         # Gera grid de vigas metalicas sobre TODAS as escoras posicionadas
         # (escoras telescopicas + torres), conforme padrao Orguel/UTFPR.
         # Pulado se o painel tiver <2 escoras (sem vao para definir VMs).
+        # No modo line-first o grid vem do proprio layout (so guias
+        # primarias; barrotes de madeira do cliente nao se desenham —
+        # gold standard nota 15).
         slab_vm_grid = None
         try:
-            if len(shores) >= 2 and slab.area_m2 > 0:
+            if line_first_layout is not None:
+                from src.engine.line_first_builder import layout_to_vm_grid
+                q_unit_kn_m2 = total_load / slab.area_m2 if slab.area_m2 > 0 else 7.7
+                slab_vm_grid = layout_to_vm_grid(line_first_layout, q_unit_kn_m2)
+            elif len(shores) >= 2 and slab.area_m2 > 0:
                 bbox = slab.bounding_box
                 q_unit_kn_m2 = total_load / slab.area_m2 if slab.area_m2 > 0 else 7.7
                 slab_vm_grid = build_vm_grid(
@@ -2613,6 +2784,7 @@ def run_calculation(
             room_hint=panel_room_hint,
             shores_weight_kg=round(sum(s.shore.weight_kg for s in shores), 2),
             decision_rule=slab_decision_rule,
+            layout_mode="line_first" if line_first_layout is not None else "grid",
             vm_grid=slab_vm_grid,
         ))
         solid_panel_count += 1
@@ -2776,6 +2948,10 @@ def run_calculation(
         global_origin=_global_origin,
         warnings=warnings,
     )
+
+    # Invariante line-first (manual §28.8): nenhuma escora de laje a mais
+    # de 0.10 m de uma linha de guia sobrevive ao pos-processamento.
+    _enforce_line_first_shores_on_lines(slab_results, warnings)
 
     # Sync shore_count with actual len(shores) after all post-processing
     for br in beam_results:

@@ -34,6 +34,7 @@ def process_dxf(
     inventory_name: Optional[str] = None,
     output_suffix: str = "",
     branch_id: Optional[str] = None,
+    slab_layout_mode: str = "grid",
 ) -> dict:
     """Run the full pipeline on a DXF file and generate output.
 
@@ -42,6 +43,9 @@ def process_dxf(
 
     branch_id scopes the learning store so each locadora branch keeps its
     own accumulated knowledge.
+
+    slab_layout_mode: "grid" (default) ou "line_first" (linhas de guia
+    Orguel gold-standard, manual §28.8).
     """
     pipeline_runner = run_pipeline
     if pipeline_runner is None:
@@ -52,6 +56,7 @@ def process_dxf(
         mode=mode,
         inventory_name=inventory_name,
         branch_id=branch_id,
+        slab_layout_mode=slab_layout_mode,
     )
     calc = result.calculation
 

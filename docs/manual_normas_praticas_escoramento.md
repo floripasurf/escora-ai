@@ -1919,6 +1919,9 @@ Diferenciacao Rohr:
 | Viga de aluminio robusta | ALU20: M 800 kgf.m, 6.35 kg/m | JAU VA165: M 878, EI 50500, 6.00 kg/m | Modelos distintos - nao fundir nem interpolar |
 | Peso ALU14/VA140 | Orguel p.69 e JAU: 4.00 kg/m | Tabela de comprimentos Orguel p.21 implica 3.82 kg/m | Adotado 4.00 (duas fontes concordantes) |
 | Carga de bomba de concreto | Versao anterior: 5% puro | NBR 4.2.l oficial: somar efeito dinamico da bomba aos 5% | Adotado texto oficial |
+| Passo do conjunto escora+cruzeta sob viga | DOCX resposta 5 (secao 10.3): 0.80 m alvo / 1.00 m teto | 11 projetos executivos Orguel (gold standard, secao 28.8): cotas e NN 0.50-0.65 m, moda 0.50-0.60 (0.60x127 no 87845) | Default Orguel-like 0.50-0.60 m quando seguir o gold standard; 0.80/1.00 do DOCX permanece como teto do manual — projetos reais sao MAIS densos sob viga que o DOCX |
+| Topologia de escoramento de laje | Manual secoes 11.1/23.3: GRID de pontos (teto operacional 1.00 x 1.00 m) | 11 projetos reais: sistema LINE-FIRST — linhas de guia (direcao+pitch por painel) e escoras ao longo da linha, passo verificado por capacidade + VM (secao 28.8) | Modo `slab_layout_mode="line_first"` implementado em paralelo (src/engine/line_first_builder.py + stage_calculate); "grid" permanece default ate validacao em producao |
+| Eixo de barroteamento por pavimento | Regra de inspecao visual 2026-06-12: eixo UNICO por pavimento (voto ponderado por area, `_level_primary_axis`) | Projetos reais: direcao POR PAINEL, perpendicular ao vao menor (~50/50 H/V no mesmo pavimento); em edificio nao-ortogonal a guia acompanha o angulo de cada viga (35 angulos no 104004) | A regra de eixo unico de 2026-06-12 fica DEPRECIADA para o modo line-first (direcao por painel); permanece valida apenas no modo grid legado |
 
 ### 23.10 Lacunas Preenchidas
 
@@ -2395,3 +2398,96 @@ Suite atual: **460 testes passando** (445 base + 15 novos VM/STRUCT-VM/BOM).
    - `VM_FALHA` (cor 6 / magenta) quando o segmento nao passa M ou flecha
 7. `bom_generator.aggregate_vm_bom()` consolida quantidade real de VMs
    por modelo+comprimento atraves de todas as lajes.
+
+### 28.8 Padrão Gold-Standard Orguel (11 projetos, 2026-06-12)
+
+Fonte: `docs/research/orguel_gold_standard.md` (analise de 11 projetos
+executivos Orguel reais em DXF — pavimento tipo, terreo/transicao,
+subsolos, cobertura, nervurada ALU14 e industrial). Regras consolidadas
+que definem o modo **line-first** do engine
+(`src/engine/line_first_builder.py`, flag `slab_layout_mode="line_first"`
+em `stage_calculate.run_calculation` / `run_pipeline` / `process_dxf`;
+default permanece `"grid"`).
+
+Regras consolidadas:
+
+1. **Laje e sistema de LINHAS, nao grid de pontos**: linhas de guia
+   metalica (VM80 em vaos curtos; VM130 em convencional; ALU14 primaria +
+   VM80 secundaria em nervurada/industrial) sobre forcados, escoras AO
+   LONGO de cada linha. Barrotes de madeira por cima sao do CLIENTE
+   (nota 15 Orguel) — nao se desenham nem se quantificam.
+2. **Direcao da guia POR PAINEL**: perpendicular ao vao menor; ~50/50 H/V
+   convivem no mesmo pavimento. Em edificio nao-ortogonal a guia acompanha
+   o ANGULO da viga dominante do painel. A regra de eixo unico por
+   pavimento (2026-06-12) fica DEPRECIADA para o modo line-first.
+3. **Pitch entre linhas = vao_perpendicular/n**, faixa 1.10-1.80 m
+   (moda global 0.95-1.35; alvo do engine <= 1.55), calculado por painel —
+   nao tabelado. Verificado por capacidade da escora
+   (pitch x passo <= capacidade derateada / q).
+4. **Passo de escora ao longo da guia**: VM130 1.00-2.00 m com moda
+   1.20-1.55 (2.00 so em laje h<=12 do 59428); VM80 1.00-1.09 m.
+   Verificado por capacidade da escora E pelo vao admissivel da guia
+   (M = qL2/8; flecha 5qL4/384EI <= 1 + L/500 — formulas de `vm_checks`).
+5. **Extremidade da linha**: a guia corta com gap de 0 a +0.40 m da face
+   da viga de concreto (moda +0.30 nos projetos novos; flush 0.00 no 59428
+   e 105475). NUNCA atravessa a viga. Default do engine: 0.30 m.
+6. **Emendas SEMPRE por transpasse de 0.45-0.70 m** (default 0.65; ate
+   0.95 em cobertura), com escora/forcado em CADA ponta do transpasse —
+   pares de escoras a ~0.70 m nas emendas, refletidos no BOM. Emenda
+   topo-a-topo nao existe nos projetos reais.
+7. **Sob viga**: conjunto escora+cruzeta 1:1 a cada **0.50-0.60 m**
+   (cotas 50-65 cm; mais denso que os 0.80 m do DOCX — conflito registrado
+   na secao 23.9). Torres sob viga a 1.35-1.60 m (cobertura) ou 1.9-2.4 m
+   (terreo de pe-direito alto).
+8. **Torres em laje a 2.35-2.85 m** centro-a-centro (moda 2.35-2.60),
+   paineis 1.00/1.54 m, vao livre ~1.0-1.2 m, guias VM130-310/360 vencendo
+   o vao entre torres.
+9. **Tripes = 30% do total de escoras** (nota 17 Orguel; arredondar para
+   cima), item de BOM — % negociavel (60% no 59428 a pedido do cliente).
+10. **Cobertura e torre-first** (35412, 97661): malha de torres + VM130-360
+    no lugar de escoras isoladas; exige viga na base da torre, tubo de
+    travamento no pe da torre e 2xVM80 nas vigas perpendiculares a
+    longarina.
+11. Sistemas complementares observados: ALU14 primaria a 1.00 m + escora
+    FFD a 2.85 m (nervuradas), Mecanflex 1.50 x 1.20 m (sacadas de
+    cobertura), reescoramento dimensionado por projeto (1.0x1.25 a
+    1.8x1.4 m), travamento de pilares/vigas como prancha propria.
+
+Status de implementacao (2026-06-12): itens 1-6 e 9 implementados no modo
+line-first (`line_first_builder` gera linhas, escoras, transpasses e BOM
+com tripes; `stage_calculate` popula `sr.vm_grid` so com guias
+role="primaria" — sem secundarias metalicas, item 1). Itens 7, 8, 10 e 11
+permanecem como calibracao pendente de `beam_calculator`/`tower_selector`.
+
+### 28.9 Perfil de Metodologia por Locadora (decisao de produto 2026-06-12)
+
+A analise dos 11 projetos Orguel mostrou que o "line-first" sem barrotes
+metalicos e a metodologia DA ORGUEL (barrotes de madeira sao fornecimento
+do cliente - nota 15 do quadro padrao). Outras locadoras trabalham com
+malha dupla metalica (VM130 + VM80) e sistemas Doka usam H20+H20 (regra
+1-2-4 da secao 23.3). Nenhum modo e universal: a metodologia e um ATRIBUTO
+DA LOCADORA, na mesma logica da hierarquia de fontes ("o catalogo da
+locadora dita").
+
+Perfil a cadastrar por locadora (junto do catalogo/inventario em
+`data/locadoras.json`):
+
+| Campo | Valores | Default | Status |
+|---|---|---|---|
+| `laje_layout` | `line_first` (Orguel) / `grid_vm_duplo` (malha VM130+VM80) / `doka_124` | `grid_vm_duplo` | line_first e grid implementados (flag `slab_layout_mode`); doka_124 pendente |
+| `desenha_barrotes` | true/false (secundarias no DXF e BOM) | true no grid; false no line_first | implementado implicitamente pelo modo |
+| `barrote` | `VM80` / `H20` / `madeira_cliente` | VM80 | parcial (catalogo de vigas) |
+| `passo_sob_viga_m` | 0.50-0.65 (projetos reais) / 0.80 (DOCX) | 0.80 com alerta | conflito registrado em 23.9 |
+| `cobertura` | `torre_first` / `padrao` | `padrao` | torre_first pendente (28.8 item 10) |
+| `tripes_fracao` | 0.30 (30% das escoras; 60% a pedido) | 0.30 | implementado no line_first |
+
+Regras de implementacao:
+
+1. O perfil define os DEFAULTS; o engenheiro pode sobrescrever por obra
+   (override registrado no relatorio com justificativa).
+2. `slab_layout_mode` do pipeline passa a ser derivado do perfil da
+   locadora/branch quando nao informado explicitamente.
+3. BOM, DXF (camadas), memoria de calculo e verificadores devem reagir ao
+   perfil - ex.: line_first nao emite STRUCT de secundaria metalica.
+4. Perfis novos (outras locadoras) exigem a mesma validacao gold-standard:
+   amostra de projetos reais da empresa antes de calibrar os numeros.
