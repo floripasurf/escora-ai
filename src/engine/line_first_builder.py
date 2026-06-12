@@ -38,7 +38,11 @@ from src.engine.vm_grid_builder import (
 # Constantes do gold standard (orguel_gold_standard.md, sintese 11 projetos)
 # ---------------------------------------------------------------------------
 
-EDGE_GAP_DEFAULT_M = 0.30        # gap modal guia -> borda do painel
+# Gap guia -> borda do painel. Gold standard Orguel: 0-0.40 m (moda 0.30).
+# DECISAO DO REVISOR (2026-06-12, v10): a guia deve CHEGAR ate a face da
+# viga -> default 0.05 m; o alinhamento atravessa vigas internas via
+# conectores (stage_calculate._merge_collinear_line_first_guides).
+EDGE_GAP_DEFAULT_M = 0.05
 EDGE_GAP_MAX_M = 0.40            # faixa observada: 0 a +0.40, nunca atravessar
 SPLICE_OVERLAP_DEFAULT_M = 0.65  # transpasse modal de emenda
 SPLICE_OVERLAP_RANGE_M = (0.45, 0.70)
@@ -264,6 +268,8 @@ def build_line_first_layout(
     exclusions: Optional[Sequence] = None,
     angle_override_deg: Optional[float] = None,
     capitel_centers: Optional[Sequence[Tuple[float, float]]] = None,
+    pitch_override_m: Optional[float] = None,
+    v_anchor: Optional[float] = None,
 ) -> LineFirstLayout:
     """Gera linhas de guia + escoras para um painel de laje (line-first).
 
@@ -340,23 +346,31 @@ def build_line_first_layout(
         layout.issues.append("Painel degenerado (vao perpendicular nulo).")
         return layout
 
-    # Pitch entre linhas = vao/n, alvo dentro de pitch_range (moda <=1.55)
-    n_lines = max(1, int(math.ceil(span_perp / pitch_target_max_m)))
-    pitch = span_perp / n_lines
-    if pitch < pitch_range_m[0] and n_lines > 1:
-        alt = span_perp / (n_lines - 1)
-        if alt <= pitch_range_m[1] + 1e-9:
-            n_lines -= 1
-            pitch = alt
     # Capacidade: area de influencia pitch x passo <= cap/q
     max_area_m2 = (
         shore_capacity_kn / load_kn_m2
         if load_kn_m2 > 0 and shore_capacity_kn > 0
         else float("inf")
     )
-    while pitch > _PITCH_FLOOR_M and pitch * 0.30 > max_area_m2:
-        n_lines += 1
+    if pitch_override_m is not None and pitch_override_m > 0:
+        # Malha de PAVIMENTO (decisao do revisor 2026-06-12): pitch unico
+        # para todos os paineis; com v_anchor, as posicoes das linhas sao
+        # ancoradas numa lattice global -> linhas colineares atravessando
+        # as vigas (alinhamento continuo entre paineis).
+        pitch = pitch_override_m
+        n_lines = max(1, int(math.ceil(span_perp / pitch)))
+    else:
+        # Pitch entre linhas = vao/n, alvo dentro de pitch_range (moda <=1.55)
+        n_lines = max(1, int(math.ceil(span_perp / pitch_target_max_m)))
         pitch = span_perp / n_lines
+        if pitch < pitch_range_m[0] and n_lines > 1:
+            alt = span_perp / (n_lines - 1)
+            if alt <= pitch_range_m[1] + 1e-9:
+                n_lines -= 1
+                pitch = alt
+        while pitch > _PITCH_FLOOR_M and pitch * 0.30 > max_area_m2:
+            n_lines += 1
+            pitch = span_perp / n_lines
     layout.pitch_m = round(pitch, 3)
 
     # Passo de escora ao longo da linha: capacidade + vao admissivel da guia
@@ -390,8 +404,19 @@ def build_line_first_layout(
     all_shores: List[Tuple[float, float]] = []
     steps_used: List[float] = []
 
-    for i in range(n_lines):
-        v = min_v + (i + 0.5) * pitch
+    # Posicoes das linhas: por painel (centro dos pitches) ou ancoradas na
+    # lattice global v_anchor + k*pitch (malha de pavimento — linhas
+    # colineares entre paineis, atravessando as vigas em alinhamento).
+    if v_anchor is not None and pitch > 0:
+        k_lo = math.ceil((min_v + 0.10 - v_anchor) / pitch)
+        k_hi = math.floor((max_v - 0.10 - v_anchor) / pitch)
+        v_positions = [v_anchor + k * pitch for k in range(k_lo, k_hi + 1)]
+        if not v_positions:
+            v_positions = [(min_v + max_v) / 2.0]
+    else:
+        v_positions = [min_v + (i + 0.5) * pitch for i in range(n_lines)]
+
+    for v in v_positions:
         scan = LineString([(min_u - 1.0, v), (max_u + 1.0, v)])
         try:
             inter = scan.intersection(local)

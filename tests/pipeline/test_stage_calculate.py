@@ -144,3 +144,52 @@ class TestRunCalculation:
         assert result.pe_direito_is_default is True
         assert any("pé-direito" in w.lower() or "pe-direito" in w.lower() or "padrão" in w.lower()
                     for w in result.warnings)
+
+
+class TestFilterBeamsToMainCluster:
+    """Conexao do cluster = distancia entre linhas < buffer_m (CVS-006).
+
+    O bug do duplo buffer (limiar efetivo 2x buffer_m = 10 m) deixava a
+    tabela ESQUEMA DE NIVEIS encadear no cluster principal via a barra de
+    corte e receber escoramento fantasma.
+    """
+
+    def test_tabela_a_9m_da_planta_e_descartada(self):
+        from src.pipeline.stage_calculate import _filter_beams_to_main_cluster
+        # Planta principal: malha 10x8 m de vigas
+        plan = [
+            _beam(0, 0, 10, 0), _beam(0, 8, 10, 8),
+            _beam(0, 0, 0, 8), _beam(10, 0, 10, 8),
+            _beam(0, 4, 10, 4),
+        ]
+        # "Tabela" de legenda a 9 m da planta (gap > buffer_m=5)
+        table = [
+            _beam(19, 2, 23, 2), _beam(19, 3, 23, 3), _beam(19, 4, 23, 4),
+        ]
+        kept = _filter_beams_to_main_cluster(plan + table)
+        assert len(kept) == len(plan)
+        assert all(b.geometry[0][0] <= 10 for b in kept)
+
+    def test_encadeamento_via_barra_intermediaria_nao_conecta(self):
+        from src.pipeline.stage_calculate import _filter_beams_to_main_cluster
+        plan = [
+            _beam(0, 0, 10, 0), _beam(0, 8, 10, 8),
+            _beam(0, 0, 0, 8), _beam(10, 0, 10, 8),
+            _beam(0, 4, 10, 4),
+        ]
+        # Barra de corte a 7 m da planta + tabela a 6 m da barra:
+        # com o duplo buffer antigo (10 m efetivos) tudo encadeava.
+        bridge = [_beam(17, 0, 22, 0)]
+        table = [_beam(19, 6, 23, 6), _beam(19, 7, 23, 7)]
+        kept = _filter_beams_to_main_cluster(plan + bridge + table)
+        assert len(kept) == len(plan)
+
+    def test_vigas_proximas_permanecem_conectadas(self):
+        from src.pipeline.stage_calculate import _filter_beams_to_main_cluster
+        plan = [
+            _beam(0, 0, 10, 0),
+            _beam(0, 4, 10, 4),
+            _beam(13, 0, 20, 0),  # ala separada por 3 m (< buffer 5 m)
+        ]
+        kept = _filter_beams_to_main_cluster(plan)
+        assert len(kept) == 3

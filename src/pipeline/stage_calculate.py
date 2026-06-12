@@ -8,7 +8,7 @@ load + shore calculations.
 import logging
 import math
 from dataclasses import replace
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from collections import defaultdict
 from shapely.geometry import LineString, Point, Polygon, MultiPoint, box
 
@@ -246,13 +246,17 @@ def _distribute_line_first_shores(
     exclusions: List[Any],
     floor_height_m: Optional[float],
     pillar_positions: Optional[List[tuple]] = None,
+    tower_mode: bool = False,
+    floor_frame: Optional[tuple] = None,
 ):
     """Posiciona escoras de laje pelo modo line-first (manual §28.8).
 
     Gera linhas de guia (direcao por painel, pitch = vao/n) e escoras ao
     longo de cada linha via ``line_first_builder``. O adensamento de
     capitel (Orguel Q6) acontece SOBRE as linhas via ``capitel_centers``
-    — nunca pontos avulsos. Retorna ``(shores, nx, ny, sx, sy, layout)``
+    — nunca pontos avulsos. ``tower_mode=True`` usa pitch/passo de TORRE
+    (2.35-2.85 m c-a-c, gold standard 28.8 item 7) — torres apoiam as
+    guias. Retorna ``(shores, nx, ny, sx, sy, layout)``
     no mesmo formato de ``distribute_shores`` + o layout para o vm_grid.
     """
     from src.engine.line_first_builder import build_line_first_layout
@@ -266,12 +270,32 @@ def _distribute_line_first_shores(
         )
     except Exception:
         cap_kn = shore.load_capacity_kn
+    extra = {}
+    if tower_mode:
+        extra = dict(
+            pitch_range_m=(2.0, 2.85),
+            pitch_target_max_m=2.60,
+            step_range_m=(2.35, 2.85),
+        )
+    if floor_frame is not None and not tower_mode:
+        # Malha de PAVIMENTO (decisao do revisor 2026-06-12): eixo unico
+        # paralelo ao maior sentido do projeto + pitch unico + linhas
+        # ancoradas na lattice global -> guias colineares atravessando as
+        # vigas em alinhamento continuo. A capacidade e preservada pelo
+        # PASSO (densifica ao longo da linha em paineis mais carregados).
+        f_angle, f_pitch, f_anchor = floor_frame
+        extra.update(
+            angle_override_deg=f_angle,
+            pitch_override_m=f_pitch,
+            v_anchor=f_anchor,
+        )
     layout = build_line_first_layout(
         polygon,
         q_kn_m2,
         cap_kn,
         exclusions=exclusions,
         capitel_centers=pillar_positions,
+        **extra,
     )
     if not layout.shores:
         return [], 0, 0, 0.0, 0.0, None
@@ -753,6 +777,577 @@ def _enforce_line_first_shores_on_lines(
     return dropped_total
 
 
+def _merge_collinear_line_first_guides(
+    slab_results: List[SlabShoringResult],
+    beam_lines: Optional[List[LineString]],
+    warnings: List[str],
+    *,
+    max_gap_m: float = 1.10,
+    max_offset_m: float = 0.12,
+    angle_tol_deg: float = 3.0,
+) -> int:
+    """Funde guias COLINEARES de paineis vizinhos (v6, inspecao 2026-06-12).
+
+    Paineis derivados fragmentados geram guias-toco que deveriam ser uma
+    guia continua (marcacao verde do revisor). Regra: duas primarias com o
+    mesmo angulo, desvio perpendicular <= 0.12 m e vao longitudinal de ate
+    1.10 m sao conectadas — DESDE QUE nenhuma viga de concreto cruze o
+    conector (guia para na face da viga, gold standard §28.8). Mantem o
+    paralelismo (preferencia do revisor) sem deslocar linhas existentes.
+    """
+    import math as _m
+    from src.engine.vm_grid_builder import VMSegment
+
+    segs: List[tuple] = []  # (sr, seg, angle_deg, grid)
+    for sr in slab_results:
+        if getattr(sr, "layout_mode", "grid") != "line_first":
+            continue
+        grid = getattr(sr, "vm_grid", None)
+        if grid is None:
+            continue
+        for seg in getattr(grid, "segments", []):
+            if seg.role != "primaria":
+                continue
+            dx = seg.end[0] - seg.start[0]
+            dy = seg.end[1] - seg.start[1]
+            if abs(dx) < 1e-9 and abs(dy) < 1e-9:
+                continue
+            ang = _m.degrees(_m.atan2(dy, dx)) % 180.0
+            segs.append((sr, seg, ang, grid))
+
+    merged = 0
+    done: set = set()
+    for a in range(len(segs)):
+        sr_a, seg_a, ang_a, grid_a = segs[a]
+        for b in range(a + 1, len(segs)):
+            sr_b, seg_b, ang_b, _ = segs[b]
+            if sr_a is sr_b:
+                continue  # mesmo painel: ja continuo por construcao
+            d_ang = min(abs(ang_a - ang_b), 180.0 - abs(ang_a - ang_b))
+            if d_ang > angle_tol_deg:
+                continue
+            # Frame do angulo de A: u ao longo, v perpendicular
+            rad = _m.radians(ang_a)
+            ca, sa = _m.cos(rad), _m.sin(rad)
+
+            def _uv(pt):
+                return (pt[0] * ca + pt[1] * sa, -pt[0] * sa + pt[1] * ca)
+
+            ua = sorted([_uv(seg_a.start)[0], _uv(seg_a.end)[0]])
+            ub = sorted([_uv(seg_b.start)[0], _uv(seg_b.end)[0]])
+            va = (_uv(seg_a.start)[1] + _uv(seg_a.end)[1]) / 2.0
+            vb = (_uv(seg_b.start)[1] + _uv(seg_b.end)[1]) / 2.0
+            if abs(va - vb) > max_offset_m:
+                continue
+            gap = max(ua[0], ub[0]) - min(ua[1], ub[1])
+            if gap <= 0 or gap > max_gap_m:
+                continue
+            # Conector entre as pontas mais proximas
+            if ua[1] <= ub[0]:
+                p1 = seg_a.start if _uv(seg_a.start)[0] > _uv(seg_a.end)[0] else seg_a.end
+                p2 = seg_b.start if _uv(seg_b.start)[0] < _uv(seg_b.end)[0] else seg_b.end
+            else:
+                p1 = seg_b.start if _uv(seg_b.start)[0] > _uv(seg_b.end)[0] else seg_b.end
+                p2 = seg_a.start if _uv(seg_a.start)[0] < _uv(seg_a.end)[0] else seg_a.end
+            connector = LineString([p1, p2])
+            # v10 (decisao do revisor 2026-06-12): o alinhamento ATRAVESSA
+            # vigas internas — conector permitido sobre viga, marcado como
+            # tal (peca de VM continua quebrando na face; escoras nunca
+            # caem sobre a viga: conectores ficam fora do re-espacamento).
+            crosses_beam = bool(beam_lines) and any(
+                connector.intersects(bl) for bl in beam_lines
+            )
+            key = (id(seg_a), id(seg_b))
+            if key in done:
+                continue
+            done.add(key)
+            grid_a.add_segment(VMSegment(
+                role="primaria",
+                model=seg_a.model,
+                length_mm=int(round(connector.length * 1000)),
+                start=(round(p1[0], 3), round(p1[1], 3)),
+                end=(round(p2[0], 3), round(p2[1], 3)),
+                axis=getattr(seg_a, "axis", "x"),
+                load_kn_m=seg_a.load_kn_m,
+                span_m=round(connector.length, 3),
+                moment_kn_m=0.0,
+                moment_adm_kn_m=seg_a.moment_adm_kn_m,
+                flecha_mm=0.0,
+                flecha_adm_mm=999.0,
+                passes_moment=True,
+                passes_deflection=True,
+                notes=(
+                    "conector atravessa viga interna (alinhamento continuo, v10)"
+                    if crosses_beam
+                    else "conector de guia continua entre paineis (v6)"
+                ),
+            ))
+            merged += 1
+    if merged:
+        warnings.append(
+            f"{merged} conector(es) de guia continua entre paineis "
+            f"fragmentados (line-first v6 — sem viga cruzando o vao)"
+        )
+    return merged
+
+
+def _respace_line_first_shores(
+    slab_results: List[SlabShoringResult],
+    warnings: List[str],
+    *,
+    chain_offset_m: float = 0.12,
+    default_step_m: float = 1.50,
+) -> int:
+    """Re-espaca escoras EQUIDISTANTES ao longo de cada guia continua.
+
+    Decisao do revisor (2026-06-12): equidistancia prevalece — em um vao
+    de 6 m lineares com 5 escoras, o espacamento deve ser 1.20 m constante.
+    Extras de transpasse/capitel e cadeias fundidas entre paineis (passos
+    diferentes de cada lado) sao substituidos por n = ceil(L/alvo),
+    passo = L/n, escoras em i*passo com escora em cada ponta. O alvo por
+    painel vem do layout (sr spacing); o n nunca diminui em relacao ao
+    numero de escoras que a cadeia tinha (capacidade preservada).
+    """
+    import math as _m
+
+    respaced = 0
+    for sr in slab_results:
+        if getattr(sr, "layout_mode", "grid") != "line_first":
+            continue
+        grid = getattr(sr, "vm_grid", None)
+        if grid is None or not getattr(grid, "segments", None):
+            continue
+        # Conectores que atravessam viga ficam FORA do re-espacamento:
+        # escora nunca cai sobre a viga (v10).
+        prim = [
+            s for s in grid.segments
+            if s.role == "primaria"
+            and "atravessa viga" not in (s.notes or "")
+        ]
+        if not prim:
+            continue
+        target = getattr(sr, "spacing_x_m", None) or default_step_m
+        if not (0.30 <= target <= 3.0):
+            target = default_step_m
+
+        # Agrupar segmentos em CADEIAS colineares conectadas (uniao por
+        # proximidade de extremos + mesmo angulo).
+        n_seg = len(prim)
+        parent = list(range(n_seg))
+
+        def _find(i):
+            while parent[i] != i:
+                parent[i] = parent[parent[i]]
+                i = parent[i]
+            return i
+
+        def _ang(s):
+            return _m.degrees(_m.atan2(
+                s.end[1] - s.start[1], s.end[0] - s.start[0])) % 180.0
+
+        def _uv_interval(s, rad):
+            ca, sa = _m.cos(rad), _m.sin(rad)
+            u1 = s.start[0] * ca + s.start[1] * sa
+            u2 = s.end[0] * ca + s.end[1] * sa
+            v1 = -s.start[0] * sa + s.start[1] * ca
+            v2 = -s.end[0] * sa + s.end[1] * ca
+            return min(u1, u2), max(u1, u2), (v1 + v2) / 2.0
+
+        for i in range(n_seg):
+            for j in range(i + 1, n_seg):
+                d_ang = abs(_ang(prim[i]) - _ang(prim[j]))
+                d_ang = min(d_ang, 180.0 - d_ang)
+                if d_ang > 3.0:
+                    continue
+                # Colineares se: desvio perpendicular <= tol E intervalos
+                # ao longo do eixo se SOBREPOEM (pecas com transpasse de
+                # 0.65 m se sobrepoem!) ou tem gap <= tol.
+                rad = _m.radians(_ang(prim[i]))
+                lo_i, hi_i, v_i = _uv_interval(prim[i], rad)
+                lo_j, hi_j, v_j = _uv_interval(prim[j], rad)
+                if abs(v_i - v_j) > chain_offset_m:
+                    continue
+                gap = max(lo_i, lo_j) - min(hi_i, hi_j)
+                if gap <= chain_offset_m:
+                    parent[_find(i)] = _find(j)
+
+        chains: Dict[int, list] = {}
+        for i in range(n_seg):
+            chains.setdefault(_find(i), []).append(prim[i])
+
+        # Re-espacar escoras por cadeia
+        new_shores: List = []
+        claimed: set = set()
+        shore_pts = [(s, Point(s.x, s.y)) for s in sr.shores]
+        for segs in chains.values():
+            rad = _m.radians(_ang(segs[0]))
+            ca, sa = _m.cos(rad), _m.sin(rad)
+            us, vs = [], []
+            for s in segs:
+                for pt in (s.start, s.end):
+                    us.append(pt[0] * ca + pt[1] * sa)
+                    vs.append(-pt[0] * sa + pt[1] * ca)
+            u_lo, u_hi = min(us), max(us)
+            v_mid = sum(vs) / len(vs)
+            length = u_hi - u_lo
+            chain_lines = [LineString([s.start, s.end]) for s in segs]
+            mine = [
+                (idx, s) for idx, (s, p) in enumerate(shore_pts)
+                if idx not in claimed
+                and min(ln.distance(p) for ln in chain_lines) <= 0.10
+            ]
+            for idx, _s in mine:
+                claimed.add(idx)
+            if length < 0.30 or not mine:
+                new_shores.extend(s for _i, s in mine)
+                continue
+            n_old = len(mine)
+            n_steps = max(
+                int(_m.ceil(length / target - 1e-9)),
+                n_old - 1 if n_old >= 2 else 1,
+            )
+            step = length / n_steps
+            tmpl = mine[0][1]
+            for k in range(n_steps + 1):
+                u = u_lo + k * step
+                x = u * ca - v_mid * sa
+                y = u * sa + v_mid * ca
+                new_shores.append(PositionedShore(
+                    x=round(x, 3), y=round(y, 3),
+                    shore=tmpl.shore,
+                    load_applied_kn=tmpl.load_applied_kn,
+                    utilization_ratio=tmpl.utilization_ratio,
+                    support_type=getattr(tmpl, "support_type", None),
+                    tower=getattr(tmpl, "tower", None),
+                    distribution_beam=getattr(tmpl, "distribution_beam", None),
+                ))
+            respaced += 1
+
+        # Escoras nao atribuidas a nenhuma cadeia permanecem
+        new_shores.extend(
+            s for idx, (s, _p) in enumerate(shore_pts) if idx not in claimed
+        )
+        if respaced:
+            sr.shores = new_shores
+            _recalculate_slab_shore_loads(sr)
+            sr.shores_weight_kg = round(
+                sum(s.shore.weight_kg for s in sr.shores), 2
+            )
+    if respaced:
+        warnings.append(
+            f"{respaced} guia(s) continua(s) re-espacada(s) com escoras "
+            f"equidistantes (L/n constante - decisao do revisor 2026-06-12)"
+        )
+    return respaced
+
+
+def _drop_lines_glued_to_beams(
+    slab_results: List[SlabShoringResult],
+    beam_lines: Optional[List[LineString]],
+    warnings: List[str],
+    max_dist_m: float = 0.45,
+    angle_tol_deg: float = 5.0,
+) -> int:
+    """Remove linhas de guia PARALELAS e grudadas em vigas (v11).
+
+    Inspecao do revisor (circulos vermelhos): linha de guia de laje
+    correndo a < 0.45 m de uma viga paralela e redundante — a faixa ja e
+    suportada pelo escoramento da propria viga — e gera escoras coladas
+    nas escoras da viga. Remove o segmento e as escoras sobre ele.
+    """
+    import math as _m
+
+    if not beam_lines:
+        return 0
+    dropped = 0
+    for idx, sr in enumerate(slab_results, 1):
+        if getattr(sr, "layout_mode", "grid") != "line_first":
+            continue
+        grid = getattr(sr, "vm_grid", None)
+        if grid is None or not getattr(grid, "segments", None):
+            continue
+        to_drop = []
+        for seg in grid.segments:
+            if seg.role != "primaria":
+                continue
+            sl = LineString([seg.start, seg.end])
+            if sl.length < 0.30:
+                continue
+            ang_s = _m.degrees(_m.atan2(
+                seg.end[1] - seg.start[1], seg.end[0] - seg.start[0])) % 180.0
+            for bl in beam_lines:
+                bc = list(bl.coords)
+                ang_b = _m.degrees(_m.atan2(
+                    bc[-1][1] - bc[0][1], bc[-1][0] - bc[0][0])) % 180.0
+                d_ang = min(abs(ang_s - ang_b), 180.0 - abs(ang_s - ang_b))
+                if d_ang > angle_tol_deg:
+                    continue
+                d1 = bl.distance(Point(seg.start))
+                d2 = bl.distance(Point(seg.end))
+                if max(d1, d2) < max_dist_m:
+                    to_drop.append(seg)
+                    break
+        if not to_drop:
+            continue
+        drop_lines = [LineString([s.start, s.end]) for s in to_drop]
+        grid.segments = [s for s in grid.segments if s not in to_drop]
+        kept = [
+            s for s in sr.shores
+            if min(ln.distance(Point(s.x, s.y)) for ln in drop_lines) > 0.10
+        ]
+        # Painel sem NENHUMA primaria restante = faixa estreita inteira
+        # suportada pelo escoramento da(s) viga(s): nenhuma escora de laje
+        # orfa pode sobrar (invariante line-first §28.8 — escora sempre
+        # sobre linha; CAD-1 v1, 2026-06-12).
+        has_primaria = any(s.role == "primaria" for s in grid.segments)
+        if not has_primaria:
+            kept = []
+        n_removed = len(sr.shores) - len(kept)
+        if n_removed:
+            sr.shores = kept
+            _recalculate_slab_shore_loads(sr)
+            sr.shores_weight_kg = round(
+                sum(s.shore.weight_kg for s in sr.shores), 2
+            )
+        dropped += len(to_drop)
+        if n_removed or to_drop:
+            warnings.append(
+                f"Laje {idx}: {len(to_drop)} linha(s) de guia paralela(s) "
+                f"grudada(s) em viga (< {max_dist_m:.2f} m) removida(s) "
+                f"com {n_removed} escora(s) — faixa suportada pela viga (v11)"
+            )
+    return dropped
+
+
+def _align_beam_shores_to_lattice(
+    beam_results: List,
+    floor_frame: Optional[tuple],
+    warnings: List[str],
+    *,
+    perp_min_angle_deg: float = 45.0,
+) -> Tuple[int, int]:
+    """Alinha escoras de VIGA aos cruzamentos da lattice do pavimento (v12).
+
+    Decisao do revisor (2026-06-12): o motor prioriza as linhas de
+    escoramento das lajes e posiciona as escoras das vigas AO LONGO dessas
+    linhas; so depois verifica a necessidade de escoras complementares.
+    Para cada viga aproximadamente PERPENDICULAR as linhas da lattice
+    (quadro ``floor_frame = (angulo, pitch, ancora)``), os cruzamentos das
+    linhas com o eixo da viga ocorrem a cada ~pitch. A escora de viga mais
+    proxima de cada cruzamento (tolerancia passo/2) e snapada para o ponto
+    de cruzamento; as demais viram COMPLEMENTARES e so permanecem onde o
+    vao entre escoras consecutivas exceder o passo admissivel que o
+    beam_calculator ja decidiu (``spacing_m`` como teto). Vigas PARALELAS
+    as linhas mantem o passo proprio. Torres e escoras de ponta (apoios)
+    nunca sao removidas. Deve rodar ANTES de ``_enforce_min_shore_distance``.
+
+    Retorna ``(n_snapadas, n_complementares_removidas)``.
+    """
+    import math as _m
+
+    if not floor_frame or not beam_results:
+        return 0, 0
+    f_angle, f_pitch, f_anchor = floor_frame
+    if not f_pitch or f_pitch <= 0:
+        return 0, 0
+    rad = _m.radians(f_angle % 180.0)
+    ca, sa = _m.cos(rad), _m.sin(rad)
+
+    def _v(x: float, y: float) -> float:
+        # Coordenada perpendicular as linhas: linhas em v = ancora + k*pitch
+        return -x * sa + y * ca
+
+    snapped_total = 0
+    removed_total = 0
+    for br in beam_results:
+        beam = getattr(br, "beam", None)
+        geom = list(getattr(beam, "geometry", None) or [])
+        shores = list(br.shores or [])
+        if len(geom) < 2 or not shores:
+            continue
+        ax, ay = float(geom[0][0]), float(geom[0][1])
+        bx, by = float(geom[1][0]), float(geom[1][1])
+        length = _m.hypot(bx - ax, by - ay)
+        if length < 1e-6:
+            continue
+        ux, uy = (bx - ax) / length, (by - ay) / length
+        beam_ang = _m.degrees(_m.atan2(uy, ux)) % 180.0
+        d_ang = abs(beam_ang - (f_angle % 180.0))
+        d_ang = min(d_ang, 180.0 - d_ang)
+        if d_ang < perp_min_angle_deg:
+            continue  # viga ~paralela as linhas: mantem o passo proprio
+
+        dv_dt = _v(ux, uy)  # variacao de v por metro ao longo do eixo
+        if abs(dv_dt) < 1e-9:
+            continue
+        v0 = _v(ax, ay)
+        k_a = (v0 - f_anchor) / f_pitch
+        k_b = (v0 + length * dv_dt - f_anchor) / f_pitch
+        k_lo = int(_m.ceil(min(k_a, k_b) - 1e-9))
+        k_hi = int(_m.floor(max(k_a, k_b) + 1e-9))
+        crossings = sorted(
+            t for t in (
+                (f_anchor + k * f_pitch - v0) / dv_dt
+                for k in range(k_lo, k_hi + 1)
+            )
+            if -1e-6 <= t <= length + 1e-6
+        )
+        if not crossings:
+            continue
+
+        step_cap = (
+            br.spacing_m
+            if getattr(br, "spacing_m", 0) and br.spacing_m > 0
+            else ESPACAMENTO_MAX_VIGA
+        )
+        tol = step_cap / 2.0
+
+        # Parametro t (projecao no eixo) de cada escora
+        shore_t = {
+            i: (s.x - ax) * ux + (s.y - ay) * uy for i, s in enumerate(shores)
+        }
+        order = sorted(range(len(shores)), key=lambda i: shore_t[i])
+        # Protegidas de remocao: pontas (apoios) e torres (demanda estrutural)
+        protected = {order[0], order[-1]} | {
+            i for i, s in enumerate(shores)
+            if getattr(s, "tower", None) is not None
+        }
+
+        # 1) Snap: cada cruzamento captura a escora (nao-torre) mais proxima
+        snapped: Dict[int, float] = {}
+        for t_c in crossings:
+            best_i, best_d = None, tol + 1e-9
+            for i, s in enumerate(shores):
+                if i in snapped or getattr(s, "tower", None) is not None:
+                    continue
+                d = abs(shore_t[i] - t_c)
+                if d < best_d:
+                    best_d, best_i = d, i
+            if best_i is None:
+                continue
+            s = shores[best_i]
+            s.x = round(ax + t_c * ux, 3)
+            s.y = round(ay + t_c * uy, 3)
+            shore_t[best_i] = t_c
+            snapped[best_i] = t_c
+        if not snapped:
+            continue
+        snapped_total += len(snapped)
+
+        # 2) Complementares: entre ancoras consecutivas (snapadas/protegidas)
+        # mantem o MINIMO de escoras para que nenhum vao exceda step_cap;
+        # vaos ja cobertos perdem as complementares redundantes.
+        order = sorted(range(len(shores)), key=lambda i: shore_t[i])
+        anchor_set = set(snapped) | protected
+        anchors = [i for i in order if i in anchor_set]
+        keep = set(anchor_set)
+        for a, b in zip(anchors, anchors[1:]):
+            comps = [
+                i for i in order
+                if shore_t[a] < shore_t[i] < shore_t[b] and i not in anchor_set
+            ]
+            last_t = shore_t[a]
+            for j, i in enumerate(comps):
+                next_t = (
+                    shore_t[comps[j + 1]] if j + 1 < len(comps) else shore_t[b]
+                )
+                if next_t - last_t > step_cap + 1e-6:
+                    keep.add(i)
+                    last_t = shore_t[i]
+        removed = len(shores) - len(keep)
+        if removed:
+            n_old = len(shores)
+            kept_shores = [shores[i] for i in order if i in keep]
+            # Escala uniforme das cargas (preserva amplificacao Regra 14)
+            scale = n_old / len(kept_shores) if kept_shores else 1.0
+            for s in kept_shores:
+                cap = s.shore.load_capacity_kn or 1.0
+                s.load_applied_kn = round(s.load_applied_kn * scale, 2)
+                s.utilization_ratio = round(s.load_applied_kn / cap, 4)
+            br.shores = kept_shores
+            br.shore_count = len(kept_shores)
+            br.shores_weight_kg = round(
+                sum(s.shore.weight_kg for s in kept_shores), 2
+            )
+            removed_total += removed
+        else:
+            br.shores = shores
+
+    if snapped_total or removed_total:
+        warnings.append(
+            f"Escoras de viga alinhadas a lattice do pavimento: "
+            f"{snapped_total} snapada(s) em cruzamentos de linha, "
+            f"{removed_total} complementar(es) redundante(s) removida(s) "
+            f"(line-first v12 — vigas perpendiculares as linhas)"
+        )
+    return snapped_total, removed_total
+
+
+def _enforce_min_shore_distance(
+    slab_results: List[SlabShoringResult],
+    beam_results: List,
+    warnings: List[str],
+    min_dist_m: float = 0.30,
+) -> int:
+    """Distancia minima GLOBAL entre escoras (v10, decisao do revisor).
+
+    Nenhuma escora pode ficar a menos de `min_dist_m` de outra (default
+    0.30 m = ESPACAMENTO_MIN; vira campo do perfil §28.9). Prioridade:
+    escora de VIGA vence escora de laje (a viga e estrutural e o passo
+    dela e proprio); entre escoras de laje, a primeira permanece.
+    Implementado com grade hash para nao ser O(n^2) global.
+    """
+    import math as _m
+
+    cell = max(min_dist_m, 0.05)
+    occupied: dict = {}
+
+    def _key(x: float, y: float):
+        return (int(_m.floor(x / cell)), int(_m.floor(y / cell)))
+
+    def _near(x: float, y: float) -> bool:
+        kx, ky = _key(x, y)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for ox, oy in occupied.get((kx + dx, ky + dy), ()):
+                    if _m.hypot(x - ox, y - oy) < min_dist_m:
+                        return True
+        return False
+
+    def _add(x: float, y: float):
+        occupied.setdefault(_key(x, y), []).append((x, y))
+
+    # 1) Escoras de viga tem prioridade: ocupam a grade primeiro
+    for br in beam_results:
+        for s in getattr(br, "shores", []) or []:
+            _add(s.x, s.y)
+
+    dropped = 0
+    for idx, sr in enumerate(slab_results, 1):
+        kept = []
+        removed_here = 0
+        for s in sr.shores:
+            if _near(s.x, s.y):
+                removed_here += 1
+                continue
+            _add(s.x, s.y)
+            kept.append(s)
+        if removed_here and kept:
+            sr.shores = kept
+            _recalculate_slab_shore_loads(sr)
+            sr.shores_weight_kg = round(
+                sum(s.shore.weight_kg for s in sr.shores), 2
+            )
+            dropped += removed_here
+    if dropped:
+        warnings.append(
+            f"{dropped} escora(s) de laje removida(s) por distancia "
+            f"< {min_dist_m:.2f} m de outra escora (check global v10; "
+            f"escora de viga tem prioridade)"
+        )
+    return dropped
+
+
 def _contra_flecha_warnings(beam_length_m: float, beam_name: str) -> list:
     """Generate contra-flecha recommendation for spans > 2m."""
     warnings = []
@@ -784,8 +1379,14 @@ def _filter_beams_to_main_cluster(
     connected component, we discard all detail-view beams.
 
     Uses union-find on beam midpoints: two beams are "connected" if their
-    midpoints are within buffer_m of each other or if their LineStrings
-    (buffered) intersect.
+    LineStrings are within buffer_m of each other.
+
+    CVS-006 (2026-06-12): a versao anterior bufferizava AMBAS as linhas em
+    buffer_m e testava intersecao — limiar efetivo de 2x buffer_m (10 m),
+    que deixava a tabela ESQUEMA DE NIVEIS (linhas no layer estrutural '1',
+    a 9 m da planta) encadear no cluster principal via a barra de corte e
+    receber escoramento fantasma. Conexao agora usa distancia direta entre
+    linhas < buffer_m, como o docstring sempre prometeu.
     """
     if len(beams) <= 1:
         return beams
@@ -801,7 +1402,7 @@ def _filter_beams_to_main_cluster(
         s, e = b.geometry[0], b.geometry[1]
         midpoints.append(((s[0] + e[0]) / 2, (s[1] + e[1]) / 2))
         try:
-            lines.append(LineString([s, e]).buffer(buffer_m))
+            lines.append(LineString([s, e]))
         except Exception:
             lines.append(None)
 
@@ -833,10 +1434,10 @@ def _filter_beams_to_main_cluster(
             # Skip pairs that are very far apart (> 20m between midpoints)
             if dist_sq > 400.0:
                 continue
-            # Connect if buffered lines intersect
+            # Connect if lines are within buffer_m of each other
             if lines[i] is not None and lines[j] is not None:
                 try:
-                    if lines[i].intersects(lines[j]):
+                    if lines[i].distance(lines[j]) < buffer_m:
                         union(i, j)
                 except Exception:
                     pass
@@ -1373,11 +1974,22 @@ def run_calculation(
                 f"Viga {b.name or 'sem nome'} ignorada — confiança {b.score_final:.0%} < 50%"
             )
             continue
-        # Reject TQS axis lines named "Eixo X=..." / "Eixo Y=..."
+        # Reject TQS axis lines named "Eixo X=..." / "Eixo Y=..." — mas
+        # SOMENTE quando nao ha evidencia de secao (v9, 2026-06-12): o
+        # classificador tambem nomeia "Eixo ..." vigas reais detectadas
+        # por par de linhas paralelas sem texto de etiqueta (ex.: vigas de
+        # periferia do CVS-006 com largura 0.20 m), e o filtro as matava
+        # — vigas inteiras ficavam SEM escoramento (inspecao do revisor).
         name = (b.name or "").strip()
         if name.startswith("Eixo X=") or name.startswith("Eixo Y="):
-            rejected_axis += 1
-            continue
+            _w = b.section_width_m
+            _h = b.section_height_m
+            has_section = (_w is not None and _w >= 0.10) or (
+                _h is not None and _h >= 0.10
+            )
+            if not has_section:
+                rejected_axis += 1
+                continue
         # Reject absurd cross-sections (< 10 cm in either direction when known)
         w = b.section_width_m
         h = b.section_height_m
@@ -1423,12 +2035,24 @@ def run_calculation(
         _bhull = _MP([_Pt(xy) for xy in _pillar_pts_beam]).convex_hull
         _beam_hull_buf = _bhull.buffer(_BEAM_HULL_MARGIN)
         before_hull_b = len(valid_beams)
-        valid_beams = [
-            b for b in valid_beams
-            if len(b.geometry) < 2 or _beam_hull_buf.intersects(
+
+        def _hull_keep(b) -> bool:
+            if len(b.geometry) < 2:
+                return True
+            if _beam_hull_buf.intersects(
                 LineString([b.geometry[0], b.geometry[1]])
+            ):
+                return True
+            # v11 (2026-06-12): viga com SECAO detectada (par de linhas
+            # paralelas 0.10-0.60 m) e estrutural mesmo fora do hull — alas
+            # cujos pilares nao foram classificados (ex.: ala superior do
+            # CVS-006) ficavam com vigas reais sem escoramento.
+            _w, _h = b.section_width_m, b.section_height_m
+            return (_w is not None and 0.10 <= _w <= 0.60) or (
+                _h is not None and 0.10 <= _h <= 1.20
             )
-        ]
+
+        valid_beams = [b for b in valid_beams if _hull_keep(b)]
         removed_hull_b = before_hull_b - len(valid_beams)
         if removed_hull_b > 0:
             warnings.append(
@@ -2277,6 +2901,61 @@ def run_calculation(
                 continue
         return best_layer
 
+    # Dedup de paineis sobrepostos (v6, 2026-06-12): poligonos derivados
+    # que se sobrepoem a um painel MAIOR (intersecao >= 50% da propria
+    # area) geram layouts duplicados/cruzados (grade em duas direcoes na
+    # mesma regiao - defeito apontado em inspecao visual). Mantem o maior.
+    if len(slab_polygons) > 1:
+        _order = sorted(
+            range(len(slab_polygons)),
+            key=lambda i: slab_polygons[i].area,
+            reverse=True,
+        )
+        _drop: set = set()
+        for pos, i in enumerate(_order):
+            if i in _drop:
+                continue
+            for j in _order[pos + 1:]:
+                if j in _drop:
+                    continue
+                try:
+                    inter = slab_polygons[i].intersection(slab_polygons[j]).area
+                except Exception:
+                    continue
+                area_j = slab_polygons[j].area
+                if area_j > 0 and inter / area_j >= 0.50:
+                    _drop.add(j)
+        if _drop:
+            warnings.append(
+                f"{len(_drop)} painel(is) de laje sobreposto(s) descartado(s) "
+                f"(intersecao >= 50% com painel maior - dedup v6)"
+            )
+            keep_idx = [i for i in range(len(slab_polygons)) if i not in _drop]
+            slab_polygons = [slab_polygons[i] for i in keep_idx]
+            cantilever_flags = [
+                cantilever_flags[i] for i in keep_idx
+                if i < len(cantilever_flags)
+            ]
+
+    # Quadro de PAVIMENTO para o modo line-first (decisao do revisor
+    # 2026-06-12): eixo UNICO paralelo ao maior sentido do projeto, pitch
+    # unico (alvo modal 1.50 m) e linhas ancoradas numa lattice global —
+    # guias colineares entre paineis, atravessando as vigas em alinhamento.
+    _lf_floor_frame = None
+    if slab_layout_mode == "line_first" and slab_polygons:
+        _bs = [p.bounds for p in slab_polygons]
+        _ub = (
+            min(b[0] for b in _bs), min(b[1] for b in _bs),
+            max(b[2] for b in _bs), max(b[3] for b in _bs),
+        )
+        _w, _h = _ub[2] - _ub[0], _ub[3] - _ub[1]
+        _f_angle = 0.0 if _w >= _h else 90.0  # guia ao longo do maior sentido
+        _f_pitch = 1.50  # alvo modal gold-standard; passo densifica por carga
+        # v = coordenada perpendicular as guias: ancorar no inicio do
+        # pavimento + meia malha
+        _f_anchor = (_ub[1] if _f_angle == 0.0 else _ub[0]) + _f_pitch / 2.0
+        _lf_floor_frame = (_f_angle, _f_pitch, _f_anchor)
+
     # Compute global grid origin: the minimum (x, y) across all slab bounding
     # boxes, offset by DISTANCIA_BORDA_MIN.  All slab grids snap to this origin
     # so shores align across adjacent compartments.
@@ -2544,17 +3223,21 @@ def run_calculation(
         # Solid slab — shore placement
         # Manual §28.8 (gold standard Orguel): modo "line_first" gera linhas
         # de guia por painel e escoras ao longo de cada linha. Paineis 100%
-        # torre mantem o grid legado (malha de torres tem regra propria).
+        # torre TAMBEM usam line-first (v6, 2026-06-12): torres apoiam as
+        # guias, com passo/pitch de torre (2.35-2.85 m c-a-c, gold standard
+        # consolidado) — antes caiam no grid legado e saiam com malha
+        # cruzada destoando do resto do pavimento.
         line_first_layout = None
-        if (
-            slab_layout_mode == "line_first"
-            and not (slab_support_type == SupportType.TOWER and use_tower_entry is not None)
-        ):
+        if slab_layout_mode == "line_first":
+            _is_tower_panel = (
+                slab_support_type == SupportType.TOWER
+                and use_tower_entry is not None
+            )
             try:
                 shores, nx, ny, sx, sy, line_first_layout = _distribute_line_first_shores(
                     slab=slab,
                     polygon=polygon,
-                    shore=selected_shore,
+                    shore=use_tower_entry if _is_tower_panel else selected_shore,
                     total_load_kn=total_load,
                     exclusions=pillar_exclusions + shaft_exclusions,
                     floor_height_m=slab_shore_height,
@@ -2563,6 +3246,8 @@ def run_calculation(
                         for p in pillars
                         if p.element_type == ElementType.PILLAR and p.geometry
                     ],
+                    tower_mode=_is_tower_panel,
+                    floor_frame=_lf_floor_frame,
                 )
             except Exception as exc:
                 logger.warning(
@@ -2953,6 +3638,38 @@ def run_calculation(
     # de 0.10 m de uma linha de guia sobrevive ao pos-processamento.
     _enforce_line_first_shores_on_lines(slab_results, warnings)
 
+    # v6 (inspecao 2026-06-12): fundir guias colineares de paineis
+    # fragmentados em guias continuas, quando nenhuma viga cruza o vao.
+    _merge_collinear_line_first_guides(
+        slab_results,
+        _beam_lines if _beam_lines else None,
+        warnings,
+    )
+
+    # v11 (decisao do revisor 2026-06-12): linha de guia paralela e
+    # grudada (< 0.45 m) numa viga e redundante — remover antes do
+    # re-espacamento.
+    _drop_lines_glued_to_beams(
+        slab_results, _beam_lines if _beam_lines else None, warnings,
+    )
+
+    # v7 (decisao do revisor 2026-06-12): escoras EQUIDISTANTES ao longo
+    # de cada guia continua (L/n constante), absorvendo extras de
+    # transpasse/capitel e diferencas de passo entre paineis fundidos.
+    _respace_line_first_shores(slab_results, warnings)
+
+    # v12 (decisao do revisor 2026-06-12): escoras de viga alinhadas aos
+    # cruzamentos da lattice de linhas do pavimento (vigas perpendiculares
+    # as linhas); complementares apenas onde o vao excede o passo admissivel
+    # da viga. SEMPRE antes do check global de distancia minima.
+    if slab_layout_mode == "line_first" and _lf_floor_frame is not None:
+        _align_beam_shores_to_lattice(beam_results, _lf_floor_frame, warnings)
+
+    # v10 (decisao do revisor 2026-06-12): distancia minima global entre
+    # escoras — escora de laje a < 0.30 m de escora de viga (ou de outra
+    # escora) e removida; a de viga prevalece.
+    _enforce_min_shore_distance(slab_results, beam_results, warnings)
+
     # Sync shore_count with actual len(shores) after all post-processing
     for br in beam_results:
         br.shore_count = len(br.shores)
@@ -2978,6 +3695,10 @@ def run_calculation(
     calc_result.total_shores = all_shores_count
     calc_result.total_load_kn = round(all_load, 2)
     calc_result.is_valid = len(validation_errors) == 0
+    # Pydantic COPIA a lista na construcao do CalculationResult: avisos
+    # appendados pelos pos-passes (review, merge/respace/align line-first,
+    # distancia minima) depois da construcao eram perdidos. Re-sincronizar.
+    calc_result.warnings = warnings
 
     # === VOLUME ESCORADO ===
     # V_escorado = Σ A_laje × pé-direito − Σ V_vigas − Σ V_pilares

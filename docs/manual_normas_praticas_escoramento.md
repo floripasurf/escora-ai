@@ -2475,6 +2475,8 @@ Perfil a cadastrar por locadora (junto do catalogo/inventario em
 | Campo | Valores | Default | Status |
 |---|---|---|---|
 | `laje_layout` | `line_first` (Orguel) / `grid_vm_duplo` (malha VM130+VM80) / `doka_124` | `grid_vm_duplo` | line_first e grid implementados (flag `slab_layout_mode`); doka_124 pendente |
+| `eixo_guias` | `unico_pavimento` (malha de pavimento: eixo paralelo ao maior sentido do projeto + pitch unico 1.50 m + lattice global; linhas colineares atravessando as vigas em alinhamento, pecas quebrando na face) / `por_painel` (pratica Orguel: perpendicular ao vao menor de cada painel) | `unico_pavimento` — DECISAO DO REVISOR 2026-06-12 (v8) | implementado (`floor_frame` do line-first); capacidade preservada pelo passo |
+| `escoras_equidistantes` | true (L/n constante por guia continua; extras de transpasse/capitel absorvidos) / false (extras explicitos, padrao Orguel literal) | true — decisao do revisor 2026-06-12 (v7) | implementado (`_respace_line_first_shores`) |
 | `desenha_barrotes` | true/false (secundarias no DXF e BOM) | true no grid; false no line_first | implementado implicitamente pelo modo |
 | `barrote` | `VM80` / `H20` / `madeira_cliente` | VM80 | parcial (catalogo de vigas) |
 | `passo_sob_viga_m` | 0.50-0.65 (projetos reais) / 0.80 (DOCX) | 0.80 com alerta | conflito registrado em 23.9 |

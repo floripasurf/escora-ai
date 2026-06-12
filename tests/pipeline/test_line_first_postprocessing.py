@@ -139,3 +139,46 @@ class TestEnforceLineFirstShoresOnLines:
         sr = _slab_result([_ps(4.0, 1.90, entry)], vm_grid=grid_2_linhas)
         _enforce_line_first_shores_on_lines([sr], [])
         assert len(sr.shores) == 1  # todas orfas -> mantem (kept vazio)
+
+
+class TestDropLinesGluedToBeams:
+    def test_painel_sem_primaria_restante_perde_escoras_orfas(self):
+        """CAD-1 v1 (2026-06-12): painel cuja UNICA linha era grudada na
+        viga nao pode ficar com escoras orfas fora de linha — a faixa e
+        suportada pelo escoramento da propria viga."""
+        from shapely.geometry import LineString
+        from src.pipeline.stage_calculate import _drop_lines_glued_to_beams
+
+        entry = _shore_entry()
+        grid = VMGrid(primaria_axis="x")
+        grid.add_segment(_segment((0.3, 0.30), (7.7, 0.30)))  # grudada
+        shores = [
+            _ps(0.3, 0.30, entry),
+            _ps(4.0, 0.30, entry),
+            _ps(4.0, 0.45, entry),  # orfa (0.15 m da linha removida)
+        ]
+        sr = _slab_result(shores, vm_grid=grid)
+        beam_lines = [LineString([(0, 0.0), (8, 0.0)])]  # viga a 0.30 m
+        warnings: list = []
+        dropped = _drop_lines_glued_to_beams([sr], beam_lines, warnings)
+        assert dropped == 1
+        assert sr.shores == []  # nenhuma orfa sobrevive
+        assert warnings and "grudada" in warnings[0]
+
+    def test_painel_com_primaria_restante_mantem_escoras_da_outra_linha(self):
+        from shapely.geometry import LineString
+        from src.pipeline.stage_calculate import _drop_lines_glued_to_beams
+
+        entry = _shore_entry()
+        grid = VMGrid(primaria_axis="x")
+        grid.add_segment(_segment((0.3, 0.30), (7.7, 0.30)))  # grudada
+        grid.add_segment(_segment((0.3, 2.50), (7.7, 2.50)))  # longe da viga
+        shores = [
+            _ps(4.0, 0.30, entry),  # na linha grudada -> removida
+            _ps(4.0, 2.50, entry),  # na linha que fica
+        ]
+        sr = _slab_result(shores, vm_grid=grid)
+        beam_lines = [LineString([(0, 0.0), (8, 0.0)])]
+        _drop_lines_glued_to_beams([sr], beam_lines, [])
+        assert len(sr.shores) == 1
+        assert sr.shores[0].y == pytest.approx(2.50)
