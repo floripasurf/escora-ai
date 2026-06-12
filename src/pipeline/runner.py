@@ -21,6 +21,7 @@ from src.pipeline.stage_learn import learn_and_save
 from src.pipeline.learning_store import LearningStore
 from src.parser.region_filter import filter_main_plan
 from src.parser.construction_classifier import classify_construction, ConstructionType
+from src.parser.structural_system import detect_structural_system, SystemRouting
 from src.models.pipeline_models import LevelGroup, PipelineResult
 from src.utils.constants import ALTURA_DEFAULT
 
@@ -265,6 +266,19 @@ def run_pipeline(
         f"({classification.slab_confidence:.0%})"
     )
 
+    # Stage 1.7: Sistema estrutural — passo zero da cadeia (manual §5.1,
+    # pendencia 28). Deteccao textual aqui; contagens geometricas chegam
+    # depois da classificacao de elementos (refinamento futuro).
+    structural_system = detect_structural_system(
+        texts=[t.content for t in parse.texts],
+        construction_type=classification.construction_type,
+    )
+    logger.info(
+        f"Sistema estrutural: {structural_system.system.value} "
+        f"({structural_system.confidence:.0%}) -> "
+        f"roteamento {structural_system.routing.value}"
+    )
+
     # Stage 2: Segment by level
     level_segments = segment_by_level(parse)
 
@@ -285,6 +299,22 @@ def run_pipeline(
         )
     warnings.extend(classification.signals)
     warnings.extend(region_warnings)
+
+    # Sistema estrutural no relatorio (manual §5.1: registrar sistema,
+    # fonte da deteccao e score; pendencias viram avisos rastreaveis).
+    warnings.append(
+        f"Sistema estrutural: {structural_system.system.value} "
+        f"({structural_system.confidence:.0%}) — "
+        f"roteamento: {structural_system.routing.value}"
+    )
+    warnings.extend(structural_system.signals)
+    warnings.extend(structural_system.pendencias)
+    if structural_system.routing == SystemRouting.BLOCKED:
+        warnings.append(
+            "BLOQUEIO (manual §5.1): sistema fora de escopo do Escora.AI — "
+            "saida automatica nao deve ser emitida como projeto executivo; "
+            "encaminhar para revisao de engenharia."
+        )
 
     for seg in level_segments:
         elements = classify_elements(

@@ -38,6 +38,12 @@ escora-ai = "src.cli:app"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# Testes "slow" (regressao com DXFs reais grandes, ex: 104004 ~24 min)
+# ficam fora da suite default; rodar explicitamente com: pytest -m slow
+addopts = "-m 'not slow'"
+markers = [
+    "slow: testes de regressao lentos com DXFs reais (rodar com -m slow)",
+]
 
 [tool.setuptools.packages.find]
 include = ["src*"]

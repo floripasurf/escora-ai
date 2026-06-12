@@ -314,11 +314,12 @@
       "height_mm": 140,
       "moment_capacity_knm": 5.80,
       "EI_knm2": 199.2,
+      "shear_capacity_kn": 20.6,
       "max_span_m": 3.00,
       "weight_per_m_kg": 5.0,
       "price_per_m_brl": 5.55,
       "available": false,
-      "notes": "Viga ALU14 alumínio (Orguel Q7: principal com VM80 secundária). Hoje sem estoque — só ofertada como alternativa técnica. Preço: 5.0kg/m × R$1.11/kg/mês."
+      "notes": "Viga ALU14 alumínio (Orguel Q7: principal com VM80 secundária). Hoje sem estoque — só ofertada como alternativa técnica. Preço: 5.0kg/m × R$1.11/kg/mês. Cortante 20.6 kN = 2100 kgf — JAU VA140 perfil idêntico, Manual JAU p.20/33 (manual §13.3, pendência 17). VM80/VM130 ficam SEM o campo: cortante não publicado pelo fabricante."
     },
     {
       "id": "VD-ALU20",

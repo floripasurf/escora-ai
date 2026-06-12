@@ -274,12 +274,47 @@ def distribute_beam_shores(
     return shores, n_effective, actual_spacing
 
 
-def estimate_beam_shore_height(pe_direito_m: float, beam_height_m: float) -> float:
+# --- h_pilha: altura da pilha forma + vigamento (manual §13.6, pendência 16)
+# CORREÇÃO 2026-06-11: o "0.224 m" do exemplo Orguel p.89 é a ALTURA DA
+# PILHA guia + barrote + compensado (VM130 0.130 + VM80 0.080 + 14 mm),
+# não "ajuste de sapata + forcado" (esses são o RESIDUAL). Parametrizado:
+# h_pilha = h_guia + h_barrote + e_compensado. Com o compensado default do
+# pipeline (18 mm) → 0.228 m.
+H_GUIA_DEFAULT_M = 0.130      # VM130 (Orguel p.19-20)
+H_BARROTE_DEFAULT_M = 0.080   # VM80
+E_COMPENSADO_DEFAULT_M = 0.018  # default_plywood_spec() = 18 mm
+
+
+def compute_h_pilha(
+    h_guia_m: float = H_GUIA_DEFAULT_M,
+    h_barrote_m: float = H_BARROTE_DEFAULT_M,
+    e_compensado_m: float = E_COMPENSADO_DEFAULT_M,
+) -> float:
+    """Altura da pilha forma + VMs descontada do pé-direito (manual §13.6).
+
+    Exemplo canônico Orguel p.89: 0.130 + 0.080 + 0.014 = 0.224 m
+    (compensado 14 mm); com 18 mm → 0.228 m. Quando o catálogo do
+    `distribution_beam` informar `height_mm`, usar o valor real.
+    """
+    return h_guia_m + h_barrote_m + e_compensado_m
+
+
+def estimate_beam_shore_height(
+    pe_direito_m: float,
+    beam_height_m: float,
+    h_pilha_m: float = 0.0,
+) -> float:
     """
     Altura efetiva da escora sob uma viga.
     A escora vai do piso até o fundo da viga.
+
+    `h_pilha_m` (manual §13.6, Orguel p.89: torre sob viga desconta
+    3.30 - 0.90 - 0.224 = 2.176 m): altura de guia + fundo de forma sob
+    a viga. Default 0.0 mantém o comportamento de escora com forcado
+    direto no fundo da viga; passar `compute_h_pilha(...)` quando o apoio
+    for torre com guia ou houver pilha de forma modelada.
     """
-    return pe_direito_m - beam_height_m
+    return pe_direito_m - beam_height_m - h_pilha_m
 
 
 # Limites de flecha admissivel por faixa de vao — manual §22.3 (Orguel p.81)

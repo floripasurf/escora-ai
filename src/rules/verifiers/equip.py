@@ -276,3 +276,93 @@ def _verify_internal_beam_constraints(project: "RuleProject") -> list[Violation]
 
 
 REGISTRY.register(_EQUIP_005, _verify_internal_beam_constraints)
+
+
+# --- EQUIP-006: Estabilidade de torres — esbeltez 4:1 e gatilhos de altura ---
+# Manual §13.7 (pendência 26): JAU p.04 (esbeltez), §13.7 (8 m / 20 m).
+
+_EQUIP_006 = Rule(
+    id="EQUIP-006",
+    category="EQUIP",
+    source=Source(type="manual", ref="Manual §13.7 / JAU p.04"),
+    description_pt=(
+        "Torre isolada: altura <= 4x a menor dimensão da base; acima, "
+        "estaiamento/contraventamento obrigatório; > 8 m revisão; "
+        "> 20 m projeto especial"
+    ),
+    severity="error",
+)
+
+
+def _verify_tower_stability(project: "RuleProject") -> list[Violation]:
+    from src.engine.accessories import check_tower_stability
+
+    violations: list[Violation] = []
+    for shore in project.shore_positions:
+        if shore.shore_type != "tower":
+            continue
+        height = shore.height_m or project.pe_direito_m
+        result = check_tower_stability(height)
+        if result.needs_bracing or result.is_special:
+            severity = "error"
+        elif result.needs_review:
+            severity = "warning"
+        else:
+            continue
+        violations.append(Violation(
+            rule_id="EQUIP-006",
+            severity=severity,
+            message="; ".join(result.messages) or (
+                f"Torre em ({shore.x:.2f}, {shore.y:.2f}) requer verificação"
+            ),
+            actual_value=round(result.slenderness, 2),
+            limit_value=4.0,
+            location=(shore.x, shore.y),
+        ))
+    return violations
+
+
+REGISTRY.register(_EQUIP_006, _verify_tower_stability)
+
+
+# --- EQUIP-007: Interligação de torres adjacentes (manual §13.7, JAU p.11) ---
+
+_EQUIP_007 = Rule(
+    id="EQUIP-007",
+    category="EQUIP",
+    source=Source(type="manual", ref="Manual §13.7 / JAU p.11"),
+    description_pt=(
+        "Torres adjacentes (<= 2.5 m) devem ser interligadas com "
+        "cantoneiras de ligação 300/500 mm ou DT"
+    ),
+    severity="warning",
+)
+
+
+def _verify_tower_ties(project: "RuleProject") -> list[Violation]:
+    from src.engine.accessories import tower_tie_groups
+
+    towers = [
+        (s.x, s.y) for s in project.shore_positions
+        if s.shore_type == "tower"
+    ]
+    groups = tower_tie_groups(towers)
+    violations: list[Violation] = []
+    for group in groups:
+        x0, y0 = towers[group[0]]
+        violations.append(Violation(
+            rule_id="EQUIP-007",
+            severity="warning",
+            message=(
+                f"Grupo de {len(group)} torres adjacentes (<= 2.5 m): "
+                f"interligar com cantoneiras de ligação 300/500 mm ou DT "
+                f"para estabilidade global (manual §13.7, JAU p.11) — "
+                f"incluir no BOM"
+            ),
+            actual_value=len(group),
+            location=(x0, y0),
+        ))
+    return violations
+
+
+REGISTRY.register(_EQUIP_007, _verify_tower_ties)

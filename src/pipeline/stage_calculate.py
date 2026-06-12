@@ -32,6 +32,7 @@ from src.engine.load_calculator import calculate_total_load
 from src.engine.beam_calculator import (
     calculate_beam_total_linear_load,
     distribute_beam_shores,
+    compute_h_pilha,
     estimate_beam_shore_height,
 )
 from src.engine.grid_distributor import distribute_shores, PillarExclusion
@@ -153,10 +154,37 @@ def _max_spacing_for_slab(thickness_m: float) -> float:
     return ESPACAMENTO_MAX_DEFAULT
 
 
+def _level_primary_axis(slab_results) -> Optional[str]:
+    """Eixo de primaria UNICO por pavimento (inspecao visual 2026-06-12).
+
+    O eixo era decidido por painel (perpendicular ao lado maior de CADA
+    um), entao paineis vizinhos/sobrepostos saiam com barrotes em
+    direcoes opostas — grade cruzada no DXF. Pratica real (projetos
+    Orguel): direcao de barroteamento uniforme por regiao/pavimento.
+    Voto ponderado por area: cada painel vota no eixo que escolheria
+    sozinho; vence o eixo com mais area.
+    """
+    votes = {"x": 0.0, "y": 0.0}
+    for sr in slab_results:
+        try:
+            min_x, min_y, max_x, max_y = sr.polygon.bounds
+        except Exception:
+            continue
+        w, h = max_x - min_x, max_y - min_y
+        # Mesmo criterio do _detect_primary_axis: primaria perpendicular
+        # ao lado maior do painel.
+        axis = "y" if w >= h else "x"
+        votes[axis] += max(sr.area_m2, 0.0)
+    if votes["x"] == 0.0 and votes["y"] == 0.0:
+        return None
+    return "x" if votes["x"] >= votes["y"] else "y"
+
+
 def _build_slab_vm_grid(
     sr: SlabShoringResult,
     *,
     global_origin: Optional[tuple[float, float]],
+    preferred_axis: Optional[str] = None,
 ):
     """Build the VM grid from the slab's current, post-processed shores."""
     if len(sr.shores) < 2 or sr.area_m2 <= 0:
@@ -188,7 +216,10 @@ def _build_slab_vm_grid(
         worst_utilization = max((seg.utilization for seg in failed), default=0.0)
         return (len(failed), worst_utilization, len(getattr(grid, "issues", [])))
 
-    default_grid = _candidate()
+    # Eixo uniforme por pavimento (2026-06-12): usar o eixo preferido do
+    # nivel quando fornecido; o eixo alternativo fica apenas como fallback
+    # estrutural EXPLICITO (com issue registrada).
+    default_grid = _candidate(preferred_axis)
     default_score = _grid_score(default_grid)
     if default_score[0] == 0:
         return default_grid
@@ -199,7 +230,9 @@ def _build_slab_vm_grid(
     if alternate_score < default_score:
         alternate_grid.issues.append(
             f"Orientação da malha VM ajustada de {default_grid.primaria_axis} "
-            f"para {alternate_axis} por verificação de momento/flecha."
+            f"para {alternate_axis} por verificação de momento/flecha "
+            f"(diverge do eixo uniforme do pavimento — revisar barroteamento "
+            f"deste painel)."
         )
         return alternate_grid
     return default_grid
@@ -570,20 +603,32 @@ def _finalize_slab_vm_grids(
     warnings: List[str],
 ) -> None:
     """Rebuild VM grids after all shore post-processing and reinforce failures."""
+    # Eixo de barroteamento UNIFORME por pavimento (2026-06-12): todos os
+    # paineis usam a mesma direcao de primaria/secundaria, como nos
+    # projetos Orguel reais. Elimina a "grade cruzada" de paineis
+    # sobrepostos/vizinhos com eixos opostos.
+    preferred_axis = _level_primary_axis(slab_results)
     for idx, sr in enumerate(slab_results, 1):
         total_added = _ensure_minimum_vm_shores(sr)
-        sr.vm_grid = _build_slab_vm_grid(sr, global_origin=global_origin)
+        sr.vm_grid = _build_slab_vm_grid(
+            sr, global_origin=global_origin, preferred_axis=preferred_axis,
+        )
         for _ in range(5):
             added_primary = _add_vm_primary_reinforcement_shores(sr)
             if added_primary:
-                sr.vm_grid = _build_slab_vm_grid(sr, global_origin=global_origin)
+                sr.vm_grid = _build_slab_vm_grid(
+                    sr, global_origin=global_origin,
+                    preferred_axis=preferred_axis,
+                )
 
             added_secondary = _add_vm_secondary_reinforcement_shores(sr)
             added = added_primary + added_secondary
             if not added:
                 break
             total_added += added
-            sr.vm_grid = _build_slab_vm_grid(sr, global_origin=global_origin)
+            sr.vm_grid = _build_slab_vm_grid(
+                sr, global_origin=global_origin, preferred_axis=preferred_axis,
+            )
         if total_added:
             warnings.append(
                 f"Laje {idx} (área {sr.area_m2:.1f}m²) — adicionadas "
@@ -1610,6 +1655,20 @@ def run_calculation(
                         distribution_beam=selected_dist_beam,
                     )
 
+            # Pendência 21 (manual §9/§18): validar pela fração empírica de
+            # torres em VIGAS mistas (29-44%, 12 projetos Orguel medidos).
+            # Fora do envelope = alerta com justificativa, não bloqueio
+            # (as torres aqui vêm de demanda estrutural, não de fração).
+            frac_tw = len(tower_indices) / max(len(shores), 1)
+            if not (0.29 <= frac_tw <= 0.44):
+                warnings.append(
+                    f"Viga {beam.name or 'sem nome'} (misto): fração de "
+                    f"torres {frac_tw:.0%} fora do envelope empírico "
+                    f"29-44% (manual §18) — posicionamento por demanda "
+                    f"estrutural (extremos/interseções/vãos), revisar se "
+                    f"intencional"
+                )
+
         is_valid, errors = validate_result(shores, spacing, spacing)
         validation_errors.extend(errors)
 
@@ -2144,7 +2203,12 @@ def run_calculation(
 
         total_load = calculate_total_load(slab)
 
-        slab_shore_height = pe_direito_m - thickness
+        # Pendência 16 (manual §13.6, Orguel p.89): a abertura/altura do
+        # equipamento em laje desconta também a PILHA forma + vigamento
+        # (h_guia VM130 + h_barrote VM80 + e_compensado). Com o compensado
+        # default de 18 mm → 0.228 m (canônico Orguel com 14 mm → 0.224 m).
+        # Sapata + forcado absorvem o residual (não entram aqui).
+        slab_shore_height = pe_direito_m - thickness - compute_h_pilha()
         if slab_shore_height <= 0:
             warnings.append(
                 f"Laje (área {slab.area_m2:.1f}m²) — altura da escora negativa"
@@ -2460,6 +2524,19 @@ def run_calculation(
                     support_type=SupportType.TOWER,
                     tower=slab_tower,
                     distribution_beam=slab_dist_beam,
+                )
+
+            # Pendência 21 (manual §9/§18): fração empírica de torres em
+            # LAJES mistas = 13-22% (12 projetos Orguel). Alerta, não gerador:
+            # as torres vêm do grid ortogonal guiado pelo vão da VM
+            # (torre-a-torre, escoras quebrando o vão — DOCX resposta 9).
+            frac_tw_slab = len(tower_indices) / max(len(shores), 1)
+            if tower_indices and not (0.13 <= frac_tw_slab <= 0.22):
+                warnings.append(
+                    f"Laje (área {slab.area_m2:.1f}m², misto): fração de "
+                    f"torres {frac_tw_slab:.0%} fora do envelope empírico "
+                    f"13-22% (manual §18) — grid VM torre-a-torre, revisar "
+                    f"se intencional"
                 )
 
         # === CAPITEL DENSIFICATION (Orguel Q6) ===

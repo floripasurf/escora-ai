@@ -21,6 +21,14 @@ import math
 from dataclasses import dataclass, field
 from typing import Iterable, List, Literal, Optional, Sequence, Tuple
 
+from src.engine.vm_checks import (
+    check_shear,
+    seam_positions,
+    snapped_positions as _snapped_positions,
+    # Re-export retro-compat: pipeline/stage_calculate importa este nome
+    # daqui (manual §28.5); implementacao movida para vm_checks (<500 linhas).
+    compute_segment_load_and_moment as _compute_segment_load_and_moment,
+)
 from src.models.plywood import (
     DEFAULT_PLYWOOD_FORMAT_MM,
     PlywoodSpec,
@@ -54,13 +62,19 @@ class VMSegment:
     passes_moment: bool = True
     passes_deflection: bool = True
     notes: str = ""
+    # Pendencia 17 (NBR 15696 Anexo B/4.4): cortante. shear_adm_kn = 0.0
+    # significa "catalogo sem valor publicado" -> verificacao pulada.
+    shear_kn: float = 0.0
+    shear_adm_kn: float = 0.0
+    passes_shear: bool = True
 
     @property
     def utilization(self) -> float:
-        """Maior entre utilizacao por momento e por flecha."""
+        """Maior entre utilizacao por momento, flecha e cortante."""
         u_m = self.moment_kn_m / self.moment_adm_kn_m if self.moment_adm_kn_m > 0 else 0.0
         u_d = self.flecha_mm / self.flecha_adm_mm if self.flecha_adm_mm > 0 else 0.0
-        return max(u_m, u_d)
+        u_v = self.shear_kn / self.shear_adm_kn if self.shear_adm_kn > 0 else 0.0
+        return max(u_m, u_d, u_v)
 
 
 @dataclass
@@ -78,6 +92,10 @@ class VMGrid:
     segments: List[VMSegment] = field(default_factory=list)
     bom: dict = field(default_factory=dict)
     issues: List[str] = field(default_factory=list)
+    # Pendencia 18 (manual §11.2): coordenadas das linhas de emenda de
+    # compensado (ao longo do eixo de distribuicao dos barrotes). Cada
+    # linha recebe +1 barrote extra (transpasse, Orguel p.115).
+    seam_lines: List[float] = field(default_factory=list)
 
     def add_segment(self, seg: VMSegment) -> None:
         self.segments.append(seg)
@@ -215,31 +233,6 @@ def _group_shores_by_row(
     return [sorted(r, key=sort_key) for r in rows]
 
 
-def _compute_segment_load_and_moment(
-    span_m: float,
-    q_kn_m: float,
-    moment_adm_kn_m: float,
-    ei_kn_m2: float,
-    deflection_limit_denominator: int = 500,
-) -> Tuple[float, float, float, float, bool, bool]:
-    """Retorna (M, M_adm, flecha_mm, flecha_adm_mm, passes_M, passes_flecha).
-
-    Manual §22.2 (M=qL²/8) + §22.3 (flecha = 5qL⁴/384EI).
-    """
-    M = q_kn_m * span_m * span_m / 8.0
-    # Flecha bi-apoiada: f = 5qL^4 / (384 EI) -> em metros, converter mm
-    if ei_kn_m2 > 0:
-        flecha_m = 5 * q_kn_m * span_m ** 4 / (384.0 * ei_kn_m2)
-    else:
-        flecha_m = 0.0
-    flecha_mm = flecha_m * 1000.0
-    # Flecha admissivel: 1 + L/X (manual §22.3, NBR 15696 §4.3.2)
-    flecha_adm_mm = 1.0 + (span_m * 1000.0) / deflection_limit_denominator
-    passes_M = moment_adm_kn_m <= 0 or M <= moment_adm_kn_m
-    passes_flecha = flecha_adm_mm <= 0 or flecha_mm <= flecha_adm_mm
-    return M, moment_adm_kn_m, flecha_mm, flecha_adm_mm, passes_M, passes_flecha
-
-
 def build_vm_grid(
     shore_points: Sequence[ShorePoint],
     *,
@@ -249,6 +242,11 @@ def build_vm_grid(
     primaria_ei_kn_m2: float = 461.8,
     secundaria_moment_adm_kn_m: float = 2.08,  # VM80: 212 kgf.m
     secundaria_ei_kn_m2: float = 146.8,
+    # Pendencia 17: cortante admissivel do FABRICANTE (kN). Default 0.0 =
+    # sem valor publicado -> verificacao pulada (VM130/VM80 Orguel/Mecanor
+    # nao publicam cortante; ALU14 = 20.6 kN via JAU VA140, manual §13.3).
+    primaria_shear_adm_kn: float = 0.0,
+    secundaria_shear_adm_kn: float = 0.0,
     plywood: Optional[PlywoodSpec] = None,
     polygon_bbox: Optional[Tuple[float, float, float, float]] = None,
     load_kn_m2: float = 7.7,                   # padrao: laje 12cm + sobrec.
@@ -341,6 +339,12 @@ def build_vm_grid(
                 span_m, q_primaria_kn_m,
                 primaria_moment_adm_kn_m, primaria_ei_kn_m2,
             )
+            # Pendencia 17: cortante. Cada peca de VM primaria apoia-se
+            # bi-apoiada entre duas escoras adjacentes (V = qL/2).
+            V, Vadm, passV = check_shear(
+                span_m, q_primaria_kn_m, primaria_shear_adm_kn,
+                continuous=False,
+            )
             seg = VMSegment(
                 role="primaria",
                 model=primaria_model,
@@ -356,6 +360,9 @@ def build_vm_grid(
                 flecha_adm_mm=round(fadm, 2),
                 passes_moment=passM,
                 passes_deflection=passF,
+                shear_kn=round(V, 3),
+                shear_adm_kn=Vadm,
+                passes_shear=passV,
             )
             grid.add_segment(seg)
             if not passM:
@@ -368,9 +375,13 @@ def build_vm_grid(
                     f"VM primaria ({start_pt[0]:.2f},{start_pt[1]:.2f})->({end_pt[0]:.2f},{end_pt[1]:.2f}): "
                     f"flecha {f:.1f}mm > {fadm:.1f}mm"
                 )
+            if not passV:
+                grid.issues.append(
+                    f"VM primaria ({start_pt[0]:.2f},{start_pt[1]:.2f})->({end_pt[0]:.2f},{end_pt[1]:.2f}): "
+                    f"cortante {V:.2f} > {Vadm:.2f} kN"
+                )
 
-    # 2) Vigas SECUNDARIAS (barrotes): perpendiculares as primarias, com
-    # espacamento = seam_multiple_mm do compensado. Cobrem o bbox da laje.
+    # Limites do painel (usados pelas extensoes de primaria e secundarias)
     if polygon_bbox is not None:
         min_x, min_y, max_x, max_y = polygon_bbox
     else:
@@ -379,101 +390,165 @@ def build_vm_grid(
         min_x, max_x = min(xs), max(xs)
         min_y, max_y = min(ys), max(ys)
 
+    # 1b) EXTENSAO das primarias ate as bordas do painel (inspecao visual
+    # 2026-06-12): a guia deve estender ate a viga de concreto que delimita
+    # a laje — nao pode morrer na ultima escora. O trecho alem da ultima
+    # escora trabalha em BALANCO (M = qL^2/2; flecha = qL^4/8EI).
+    _EXT_MIN_M = 0.05  # extensoes menores que 5 cm sao irrelevantes
+    if primary_axis == "x":
+        axis_lo, axis_hi = min_x, max_x
+    else:
+        axis_lo, axis_hi = min_y, max_y
+
+    for row in rows:
+        if len(row) < 2:
+            continue
+        if primary_axis == "x":
+            perp = sum(s.y for s in row) / len(row)
+            first_c, last_c = row[0].x, row[-1].x
+        else:
+            perp = sum(s.x for s in row) / len(row)
+            first_c, last_c = row[0].y, row[-1].y
+        for ext_lo, ext_hi in ((axis_lo, first_c), (last_c, axis_hi)):
+            ext_len = ext_hi - ext_lo
+            if ext_len < _EXT_MIN_M:
+                continue
+            if primary_axis == "x":
+                start_pt, end_pt = (ext_lo, perp), (ext_hi, perp)
+            else:
+                start_pt, end_pt = (perp, ext_lo), (perp, ext_hi)
+            # Balanco: M = qL^2/2 ; flecha = qL^4/(8EI)
+            M_ext = q_primaria_kn_m * ext_len * ext_len / 2.0
+            if primaria_ei_kn_m2 > 0:
+                f_ext_mm = (q_primaria_kn_m * ext_len ** 4
+                            / (8.0 * primaria_ei_kn_m2)) * 1000.0
+            else:
+                f_ext_mm = 0.0
+            fadm_ext = 1.0 + ext_len * 1000.0 / 500.0
+            passM_ext = (primaria_moment_adm_kn_m <= 0
+                         or M_ext <= primaria_moment_adm_kn_m)
+            passF_ext = f_ext_mm <= fadm_ext
+            grid.add_segment(VMSegment(
+                role="primaria",
+                model=primaria_model,
+                length_mm=select_vm_length_mm(
+                    ext_len, primaria_model, available_primaria_lengths_mm,
+                ),
+                start=start_pt,
+                end=end_pt,
+                axis=primary_axis,
+                load_kn_m=round(q_primaria_kn_m, 2),
+                span_m=round(ext_len, 3),
+                moment_kn_m=round(M_ext, 3),
+                moment_adm_kn_m=primaria_moment_adm_kn_m,
+                flecha_mm=round(f_ext_mm, 2),
+                flecha_adm_mm=round(fadm_ext, 2),
+                passes_moment=passM_ext,
+                passes_deflection=passF_ext,
+                notes="extensao da guia ate a borda do painel (balanco)",
+            ))
+            if not passM_ext:
+                grid.issues.append(
+                    f"VM primaria em balanco ate a borda "
+                    f"({start_pt[0]:.2f},{start_pt[1]:.2f}): momento "
+                    f"{M_ext:.2f} > {primaria_moment_adm_kn_m:.2f} kN.m — "
+                    f"adicionar escora junto a borda"
+                )
+
+    # 2) Vigas SECUNDARIAS (barrotes): perpendiculares as primarias, com
+    # espacamento = seam_multiple_mm do compensado. Cobrem o bbox da laje.
+
     seam_m = seam_mm / 1000.0
     secondary_step_m = secondary_spacing_m if secondary_spacing_m and secondary_spacing_m > 0 else seam_m
     span_secundaria_m = avg_row_spacing  # apoia em duas primarias adjacentes
     q_secundaria_kn_m = load_kn_m2 * secondary_step_m
 
-    # Helper: gera posicoes snap-adas ao grid global (ou local se origem nao dada)
-    def _snapped_positions(lo: float, hi: float, origin: float, step: float) -> List[float]:
-        """Posicoes >= lo, <= hi, snap-adas a `origin + k * step` (k inteiro)."""
-        if step <= 0 or hi - lo < step * 0.5:
-            # Painel muito estreito: cair no comportamento anterior (2 pontos)
-            return [lo, hi] if hi > lo else [lo]
-        k_first = math.ceil((lo - origin) / step)
-        k_last = math.floor((hi - origin) / step)
-        positions = [origin + k * step for k in range(k_first, k_last + 1)]
-        if not positions:
-            # Bbox menor que step: ainda colocar 1 barrote no centro
-            return [(lo + hi) / 2]
-        return positions
-
+    # Eixo de DISTRIBUICAO dos barrotes (perpendicular a eles):
+    # secundarias em X distribuem-se em Y, e vice-versa.
     if secondary_axis == "x":
-        # Secundarias correm em X; uma a cada passo em Y
-        if global_origin is not None:
-            y_positions = _snapped_positions(min_y, max_y, global_origin[1], secondary_step_m)
+        dist_lo, dist_hi = min_y, max_y
+        dist_origin = global_origin[1] if global_origin is not None else None
+    else:
+        dist_lo, dist_hi = min_x, max_x
+        dist_origin = global_origin[0] if global_origin is not None else None
+
+    if dist_origin is not None:
+        positions = _snapped_positions(dist_lo, dist_hi, dist_origin, secondary_step_m)
+    else:
+        # Passo FIXO e uniforme (inspecao visual 2026-06-12): o passo nao
+        # pode ser "esticado" para caber no painel (cada painel ficava com
+        # um espacamento diferente -> grid irregular entre secoes). Barrote
+        # na borda inicial, passo constante e barrote final na borda; o
+        # ULTIMO vao pode ser menor (pratica real de obra).
+        positions = []
+        p = dist_lo
+        while p < dist_hi - 1e-6:
+            positions.append(p)
+            p += secondary_step_m
+        positions.append(dist_hi)
+
+    # Pendencia 18 (manual §11.2 / Orguel p.115): +1 barrote POR LINHA DE
+    # EMENDA de compensado (transpasse lado a lado). As chapas assentam a
+    # partir da borda do painel; emendas em multiplos do COMPRIMENTO da
+    # chapa. O barrote extra existe MESMO quando a emenda coincide com um
+    # barrote do grid regular.
+    seam_coords = seam_positions(dist_lo, dist_hi, plywood.length_mm / 1000.0)
+    grid.seam_lines = list(seam_coords)
+
+    # Verificacoes identicas para todos os barrotes (mesmo vao/carga):
+    L_mm = select_vm_length_mm(
+        span_secundaria_m, secundaria_model, available_secundaria_lengths_mm,
+    )
+    M, Madm, f, fadm, passM, passF = _compute_segment_load_and_moment(
+        span_secundaria_m, q_secundaria_kn_m,
+        secundaria_moment_adm_kn_m, secundaria_ei_kn_m2,
+    )
+    # Pendencia 17: barrote corre continuo sobre as primarias; com >= 3
+    # apoios usar o caso mais desfavoravel (V = 0.625qL, NBR Anexo B).
+    secundaria_continuous = len(rows) >= 3
+    V, Vadm, passV = check_shear(
+        span_secundaria_m, q_secundaria_kn_m, secundaria_shear_adm_kn,
+        continuous=secundaria_continuous,
+    )
+    base_note = (
+        f"barrote (compensado {plywood.format_label()}, "
+        f"passo {int(round(secondary_step_m * 1000))}mm)"
+    )
+    seam_note = "barrote extra de emenda (transpasse, Orguel p.115; manual §11.2)"
+
+    all_positions = [(c, base_note) for c in positions]
+    all_positions += [(c, seam_note) for c in seam_coords]
+    for coord, note in all_positions:
+        if secondary_axis == "x":
+            start_pt, end_pt = (min_x, coord), (max_x, coord)
         else:
-            n_barrotes = max(2, int(round((max_y - min_y) / secondary_step_m)) + 1)
-            actual_step = (max_y - min_y) / max(n_barrotes - 1, 1)
-            y_positions = [min_y + i * actual_step for i in range(n_barrotes)]
-        for y in y_positions:
-            length_geom_m = max_x - min_x
-            L_mm = select_vm_length_mm(
-                span_secundaria_m, secundaria_model,
-                available_secundaria_lengths_mm,
-            )
-            M, Madm, f, fadm, passM, passF = _compute_segment_load_and_moment(
-                span_secundaria_m, q_secundaria_kn_m,
-                secundaria_moment_adm_kn_m, secundaria_ei_kn_m2,
-            )
-            seg = VMSegment(
-                role="secundaria",
-                model=secundaria_model,
-                length_mm=L_mm,
-                start=(min_x, y),
-                end=(max_x, y),
-                axis="x",
-                load_kn_m=round(q_secundaria_kn_m, 2),
-                span_m=round(span_secundaria_m, 3),
-                moment_kn_m=round(M, 3),
-                moment_adm_kn_m=Madm,
-                flecha_mm=round(f, 2),
-                flecha_adm_mm=round(fadm, 2),
-                passes_moment=passM,
-                passes_deflection=passF,
-                notes=(
-                    f"barrote (compensado {plywood.format_label()}, "
-                    f"passo {int(round(secondary_step_m * 1000))}mm)"
-                ),
-            )
-            grid.add_segment(seg)
-    else:  # secondary_axis == "y"
-        if global_origin is not None:
-            x_positions = _snapped_positions(min_x, max_x, global_origin[0], secondary_step_m)
-        else:
-            n_barrotes = max(2, int(round((max_x - min_x) / secondary_step_m)) + 1)
-            actual_step = (max_x - min_x) / max(n_barrotes - 1, 1)
-            x_positions = [min_x + i * actual_step for i in range(n_barrotes)]
-        for x in x_positions:
-            L_mm = select_vm_length_mm(
-                span_secundaria_m, secundaria_model,
-                available_secundaria_lengths_mm,
-            )
-            M, Madm, f, fadm, passM, passF = _compute_segment_load_and_moment(
-                span_secundaria_m, q_secundaria_kn_m,
-                secundaria_moment_adm_kn_m, secundaria_ei_kn_m2,
-            )
-            seg = VMSegment(
-                role="secundaria",
-                model=secundaria_model,
-                length_mm=L_mm,
-                start=(x, min_y),
-                end=(x, max_y),
-                axis="y",
-                load_kn_m=round(q_secundaria_kn_m, 2),
-                span_m=round(span_secundaria_m, 3),
-                moment_kn_m=round(M, 3),
-                moment_adm_kn_m=Madm,
-                flecha_mm=round(f, 2),
-                flecha_adm_mm=round(fadm, 2),
-                passes_moment=passM,
-                passes_deflection=passF,
-                notes=(
-                    f"barrote (compensado {plywood.format_label()}, "
-                    f"passo {int(round(secondary_step_m * 1000))}mm)"
-                ),
-            )
-            grid.add_segment(seg)
+            start_pt, end_pt = (coord, min_y), (coord, max_y)
+        seg = VMSegment(
+            role="secundaria",
+            model=secundaria_model,
+            length_mm=L_mm,
+            start=start_pt,
+            end=end_pt,
+            axis=secondary_axis,
+            load_kn_m=round(q_secundaria_kn_m, 2),
+            span_m=round(span_secundaria_m, 3),
+            moment_kn_m=round(M, 3),
+            moment_adm_kn_m=Madm,
+            flecha_mm=round(f, 2),
+            flecha_adm_mm=round(fadm, 2),
+            passes_moment=passM,
+            passes_deflection=passF,
+            shear_kn=round(V, 3),
+            shear_adm_kn=Vadm,
+            passes_shear=passV,
+            notes=note,
+        )
+        grid.add_segment(seg)
+    if not passV:
+        grid.issues.append(
+            f"VM secundaria ({secundaria_model}) vao {span_secundaria_m:.2f}m: "
+            f"cortante {V:.2f} > {Vadm:.2f} kN"
+        )
 
     return grid
 

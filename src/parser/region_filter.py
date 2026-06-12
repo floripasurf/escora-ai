@@ -286,46 +286,83 @@ def _detect_implicit_rect_frames(
     if not anchors:
         return []
 
+    # Pre-filtro por proximidade de anchor (otimizacao 2026-06-12, sem
+    # mudanca de comportamento): o filtro final so aceita frames com
+    # CENTRO a < DETAIL_EXCLUSION_RADIUS de um anchor e dimensoes <= 50.
+    # Logo, todo segmento de um frame aceito esta a <= radius + 25 + TOL
+    # de um anchor em cada eixo. Sem isso, o pareamento O(n^2) abaixo
+    # explode em DXFs grandes (projeto 104004: horas de CPU, suite presa).
+    _REACH = DETAIL_EXCLUSION_RADIUS + 25.0 + 1.0
+
+    def _near_anchor_h(s) -> bool:
+        return any(
+            abs(s.y - ay) <= _REACH
+            and s.x_min <= ax + _REACH and s.x_max >= ax - _REACH
+            for ax, ay in anchors
+        )
+
+    def _near_anchor_v(s) -> bool:
+        return any(
+            abs(s.x - ax) <= _REACH
+            and s.y_min <= ay + _REACH and s.y_max >= ay - _REACH
+            for ax, ay in anchors
+        )
+
     # Separar segmentos horizontais e verticais
-    h_segs = [s for s in segments if s.type == "H"]
-    v_segs = [s for s in segments if s.type == "V"]
+    h_segs = [s for s in segments if s.type == "H" and _near_anchor_h(s)]
+    v_segs = [s for s in segments if s.type == "V" and _near_anchor_v(s)]
     if len(h_segs) < 2 or len(v_segs) < 2:
         return []
 
     # Tentar formar retangulos: pares de horizontais (top/bottom) e
     # pares de verticais (left/right) que compartilham os mesmos extremos
-    # com tolerancia 0.10m.
+    # com tolerancia 0.10m. Pareamento indexado por bucket de x_min
+    # (pares exigem |dx_min| <= TOL -> basta olhar buckets vizinhos).
     TOL = 0.10
+    h_buckets: dict = {}
+    for s in h_segs:
+        h_buckets.setdefault(int(s.x_min // TOL), []).append(s)
+    v_buckets: dict = {}
+    for v in v_segs:
+        v_buckets.setdefault(int(v.x // TOL), []).append(v)
+
+    def _v_closes(x: float, y_min: float, y_max: float) -> bool:
+        key = int(x // TOL)
+        for k in (key - 1, key, key + 1):
+            for v in v_buckets.get(k, ()):
+                if (abs(v.x - x) < TOL
+                        and v.y_min < y_min + TOL
+                        and v.y_max > y_max - TOL):
+                    return True
+        return False
+
     found: List[Tuple[float, float, float, float]] = []
-    for i, s1 in enumerate(h_segs):
-        for s2 in h_segs[i + 1:]:
-            # Mesmo X mas Y diferente
-            if abs(s1.x_min - s2.x_min) > TOL or abs(s1.x_max - s2.x_max) > TOL:
-                continue
-            if abs(s1.y - s2.y) < 1.0:  # muito proximos -> nao e frame
-                continue
-            x_min = min(s1.x_min, s2.x_min)
-            x_max = max(s1.x_max, s2.x_max)
-            y_min = min(s1.y, s2.y)
-            y_max = max(s1.y, s2.y)
-            w, h = x_max - x_min, y_max - y_min
-            if w < 1.0 or h < 1.0 or w > 50.0 or h > 50.0:
-                continue
-            # Procurar 2 verticais que fecham o quadro
-            v_left = any(
-                abs(v.x - x_min) < TOL
-                and v.y_min < y_min + TOL
-                and v.y_max > y_max - TOL
-                for v in v_segs
-            )
-            v_right = any(
-                abs(v.x - x_max) < TOL
-                and v.y_min < y_min + TOL
-                and v.y_max > y_max - TOL
-                for v in v_segs
-            )
-            if v_left and v_right:
-                found.append((x_min, x_max, y_min, y_max))
+    seen_pairs: set = set()
+    for key, bucket in h_buckets.items():
+        for s1 in bucket:
+            for k in (key - 1, key, key + 1):
+                for s2 in h_buckets.get(k, ()):
+                    if s2 is s1:
+                        continue
+                    pid = (id(s1), id(s2)) if id(s1) < id(s2) else (id(s2), id(s1))
+                    if pid in seen_pairs:
+                        continue
+                    seen_pairs.add(pid)
+                    # Mesmo X mas Y diferente
+                    if abs(s1.x_min - s2.x_min) > TOL or abs(s1.x_max - s2.x_max) > TOL:
+                        continue
+                    if abs(s1.y - s2.y) < 1.0:  # muito proximos -> nao e frame
+                        continue
+                    x_min = min(s1.x_min, s2.x_min)
+                    x_max = max(s1.x_max, s2.x_max)
+                    y_min = min(s1.y, s2.y)
+                    y_max = max(s1.y, s2.y)
+                    w, h = x_max - x_min, y_max - y_min
+                    if w < 1.0 or h < 1.0 or w > 50.0 or h > 50.0:
+                        continue
+                    # Procurar 2 verticais que fecham o quadro
+                    if _v_closes(x_min, y_min, y_max) and _v_closes(x_max, y_min, y_max):
+                        found.append((x_min, x_max, y_min, y_max))
 
     if not found:
         return []
