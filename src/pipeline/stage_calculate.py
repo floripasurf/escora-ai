@@ -248,6 +248,7 @@ def _distribute_line_first_shores(
     pillar_positions: Optional[List[tuple]] = None,
     tower_mode: bool = False,
     floor_frame: Optional[tuple] = None,
+    guide_model: Optional[str] = None,
 ):
     """Posiciona escoras de laje pelo modo line-first (manual §28.8).
 
@@ -283,12 +284,17 @@ def _distribute_line_first_shores(
         # ancoradas na lattice global -> guias colineares atravessando as
         # vigas em alinhamento continuo. A capacidade e preservada pelo
         # PASSO (densifica ao longo da linha em paineis mais carregados).
-        f_angle, f_pitch, f_anchor = floor_frame
+        f_angle, f_pitch, f_anchor = floor_frame[:3]
         extra.update(
             angle_override_deg=f_angle,
             pitch_override_m=f_pitch,
             v_anchor=f_anchor,
         )
+    if guide_model:
+        # Sistema ALU14+VM80 (gold standard §9/§10): painel nervurado usa
+        # primarias ALU14 na lattice do pavimento; as secundarias VM80 de
+        # passo fixo sao adicionadas depois (append_fixed_step_secondaries).
+        extra["guide_model"] = guide_model
     layout = build_line_first_layout(
         polygon,
         q_kn_m2,
@@ -1119,6 +1125,163 @@ def _drop_lines_glued_to_beams(
     return dropped
 
 
+def _dedupe_beam_shores(
+    beam_results: List,
+    warnings: List[str],
+    min_dist_m: float = 0.30,
+) -> int:
+    """Dedup GLOBAL de escoras de viga (v14, audit OP-102).
+
+    Vigas fragmentadas/sobrepostas e cruzamentos viga x viga geravam
+    escoras empilhadas (pares a 0.00-0.30 m — 338 no CAD-1, 694 no
+    CFL-SUB). Duas fases: extremidades e torres ocupam a grade primeiro
+    (apoios estruturais); depois as intermediarias — qualquer uma a
+    < min_dist de escora ja aceita e removida, com re-rateio de carga.
+    """
+    import math as _m
+
+    cell = max(min_dist_m, 0.05)
+    occupied: dict = {}
+
+    def _key(x, y):
+        return (int(_m.floor(x / cell)), int(_m.floor(y / cell)))
+
+    def _near(x, y):
+        kx, ky = _key(x, y)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for ox, oy in occupied.get((kx + dx, ky + dy), ()):
+                    if _m.hypot(x - ox, y - oy) < min_dist_m:
+                        return True
+        return False
+
+    def _add(x, y):
+        occupied.setdefault(_key(x, y), []).append((x, y))
+
+    def _is_anchor(br, i, s):
+        if "tower" in str(getattr(s, "support_type", "")).lower():
+            return True
+        return i == 0 or i == len(br.shores) - 1
+
+    keep_flags: dict = {}
+    # Fase 1: ancoras (extremidades/torres) tem prioridade
+    for br in beam_results:
+        for i, s in enumerate(getattr(br, "shores", []) or []):
+            if _is_anchor(br, i, s):
+                if _near(s.x, s.y):
+                    keep_flags[id(s)] = False
+                else:
+                    _add(s.x, s.y)
+                    keep_flags[id(s)] = True
+    # Fase 2: intermediarias
+    for br in beam_results:
+        for s in getattr(br, "shores", []) or []:
+            if id(s) in keep_flags:
+                continue
+            if _near(s.x, s.y):
+                keep_flags[id(s)] = False
+            else:
+                _add(s.x, s.y)
+                keep_flags[id(s)] = True
+
+    dropped = 0
+    for br in beam_results:
+        ss = getattr(br, "shores", []) or []
+        kept = [s for s in ss if keep_flags.get(id(s), True)]
+        n_rm = len(ss) - len(kept)
+        if n_rm and kept:
+            total = sum(s.load_applied_kn for s in ss)
+            per = total / len(kept)
+            cap = kept[0].shore.load_capacity_kn or 1.0
+            for s in kept:
+                s.load_applied_kn = round(per, 2)
+                s.utilization_ratio = round(per / cap, 4)
+            br.shores = kept
+            dropped += n_rm
+    if dropped:
+        warnings.append(
+            f"{dropped} escora(s) de viga duplicada(s)/colada(s) "
+            f"removida(s) (dedup global v14, < {min_dist_m:.2f} m; "
+            f"extremidades e torres preservadas)"
+        )
+    return dropped
+
+
+def _fill_beam_shore_gaps(
+    beam_results: List,
+    warnings: List[str],
+    max_gap_m: float = 1.80,
+) -> int:
+    """Preenche vaos de viga acima do teto (v14, audit OP-101).
+
+    Apos align-a-lattice + dedup, um vao entre escoras consecutivas (ou
+    entre a extremidade e a primeira escora) pode exceder o teto pratico.
+    Insere escoras no(s) ponto(s) medio(s) — cobertura garantida por
+    construcao; o teto segue o audit OP-101 (1.80 m, folga sobre o 1.00 m
+    do manual §10.3 ja coberto pelo passo proprio da viga).
+    """
+    import math as _m
+    from copy import copy as _copy
+
+    added = 0
+    for br in beam_results:
+        ss = getattr(br, "shores", []) or []
+        if len(ss) < 1:
+            continue
+        # Eixo pela GEOMETRIA da viga (cobre vaos de extremidade — entre a
+        # ponta da viga e a primeira/ultima escora); fallback: linha das
+        # escoras.
+        geom = getattr(getattr(br, "beam", None), "geometry", None)
+        if geom and len(geom) >= 2:
+            (x1, y1), (x2, y2) = geom[0], geom[-1]
+        else:
+            x1, y1 = ss[0].x, ss[0].y
+            x2, y2 = ss[-1].x, ss[-1].y
+        L_ax = _m.hypot(x2 - x1, y2 - y1)
+        if L_ax < 0.10:
+            continue
+        ux, uy = (x2 - x1) / L_ax, (y2 - y1) / L_ax
+        ts = sorted(
+            (((s.x - x1) * ux + (s.y - y1) * uy, s) for s in ss),
+            key=lambda p: p[0],
+        )
+        # Bordas virtuais nas extremidades da viga (sem escora-objeto):
+        # o vao extremidade->primeira escora tambem deve respeitar o teto.
+        first_t, first_s = ts[0]
+        last_t, last_s = ts[-1]
+        walk = [(0.0, first_s)] + ts + [(L_ax, last_s)] if geom else ts
+        new_pts = []
+        for (ta, sa), (tb, _sb) in zip(walk, walk[1:]):
+            gap = tb - ta
+            if gap > max_gap_m:
+                n_ins = int(_m.ceil(gap / max_gap_m)) - 1
+                for k in range(1, n_ins + 1):
+                    t = ta + gap * k / (n_ins + 1)
+                    new_pts.append((x1 + ux * t, y1 + uy * t, sa))
+        if not new_pts:
+            continue
+        for (nx_, ny_, template) in new_pts:
+            clone = _copy(template)
+            clone.x = round(nx_, 3)
+            clone.y = round(ny_, 3)
+            br.shores.append(clone)
+            added += 1
+        # reordenar ao longo do eixo e re-ratear cargas
+        br.shores.sort(key=lambda s: (s.x - x1) * ux + (s.y - y1) * uy)
+        total = sum(s.load_applied_kn for s in br.shores)
+        per = total / len(br.shores)
+        cap = br.shores[0].shore.load_capacity_kn or 1.0
+        for s in br.shores:
+            s.load_applied_kn = round(per, 2)
+            s.utilization_ratio = round(per / cap, 4)
+    if added:
+        warnings.append(
+            f"{added} escora(s) de viga inserida(s) em vao acima de "
+            f"{max_gap_m:.2f} m (preenchimento v14 / audit OP-101)"
+        )
+    return added
+
+
 def _align_beam_shores_to_lattice(
     beam_results: List,
     floor_frame: Optional[tuple],
@@ -1147,7 +1310,7 @@ def _align_beam_shores_to_lattice(
 
     if not floor_frame or not beam_results:
         return 0, 0
-    f_angle, f_pitch, f_anchor = floor_frame
+    f_angle, f_pitch, f_anchor = floor_frame[:3]
     if not f_pitch or f_pitch <= 0:
         return 0, 0
     rad = _m.radians(f_angle % 180.0)
@@ -2954,7 +3117,11 @@ def run_calculation(
         # v = coordenada perpendicular as guias: ancorar no inicio do
         # pavimento + meia malha
         _f_anchor = (_ub[1] if _f_angle == 0.0 else _ub[0]) + _f_pitch / 2.0
-        _lf_floor_frame = (_f_angle, _f_pitch, _f_anchor)
+        # u = coordenada AO LONGO das guias: ancora da lattice global das
+        # secundarias VM80 de passo fixo (paineis nervurados, gold standard
+        # ALU14+VM80) — garante passo constante e alinhado entre paineis.
+        _f_u_anchor = _ub[0] if _f_angle == 0.0 else _ub[1]
+        _lf_floor_frame = (_f_angle, _f_pitch, _f_anchor, _f_u_anchor)
 
     # Compute global grid origin: the minimum (x, y) across all slab bounding
     # boxes, offset by DISTANCIA_BORDA_MIN.  All slab grids snap to this origin
@@ -3131,7 +3298,15 @@ def run_calculation(
         # Check if this panel is a nervura slab — use rib-based shore placement
         is_nervura_panel = nervura_regions and _panel_is_nervura(polygon)
 
-        if is_nervura_panel:
+        # Manual §28.8 + gold standard §9/§10 (ALU14+VM80): no modo
+        # line_first o painel NERVURADO nao cai no grid de nervuras (que
+        # gerava escoras em pontos avulsos e secundarias com passo esticado
+        # POR PAINEL) — ele usa o sistema line-first com primarias ALU14 na
+        # lattice do pavimento e secundarias VM80 de passo FIXO (c/0.60
+        # nervurada; c/0.367 macica espessa) ancorado na lattice global.
+        lf_nervura_panel = bool(is_nervura_panel) and slab_layout_mode == "line_first"
+
+        if is_nervura_panel and not lf_nervura_panel:
             # Place shores at rib intersections and along ribs WITHIN this panel
             from src.engine.nervura_detector import NervuraRegion, distribute_nervura_shores
             from src.models.shore import PositionedShore
@@ -3248,6 +3423,7 @@ def run_calculation(
                     ],
                     tower_mode=_is_tower_panel,
                     floor_frame=_lf_floor_frame,
+                    guide_model="ALU14" if lf_nervura_panel else None,
                 )
             except Exception as exc:
                 logger.warning(
@@ -3433,6 +3609,30 @@ def run_calculation(
                 from src.engine.line_first_builder import layout_to_vm_grid
                 q_unit_kn_m2 = total_load / slab.area_m2 if slab.area_m2 > 0 else 7.7
                 slab_vm_grid = layout_to_vm_grid(line_first_layout, q_unit_kn_m2)
+                if lf_nervura_panel:
+                    # Sistema ALU14+VM80: secundarias VM80 de passo FIXO
+                    # ancorado na lattice GLOBAL do pavimento (nunca
+                    # esticado por painel — gold standard 110749/101112).
+                    from src.engine.line_first_builder import (
+                        append_fixed_step_secondaries,
+                    )
+                    _is_ribbed = is_nervura_panel or str(slab_type) in (
+                        "ribbed", "waffle",
+                    )
+                    append_fixed_step_secondaries(
+                        slab_vm_grid,
+                        line_first_layout,
+                        polygon,
+                        q_unit_kn_m2,
+                        ribbed=_is_ribbed,
+                        u_anchor=(
+                            _lf_floor_frame[3]
+                            if _lf_floor_frame is not None
+                            else None
+                        ),
+                        exclusions=pillar_exclusions + shaft_exclusions,
+                    )
+                    nervura_panel_count += 1
             elif len(shores) >= 2 and slab.area_m2 > 0:
                 bbox = slab.bounding_box
                 q_unit_kn_m2 = total_load / slab.area_m2 if slab.area_m2 > 0 else 7.7
@@ -3476,7 +3676,12 @@ def run_calculation(
 
     if nervura_panel_count > 0:
         warnings.append(
-            f"Laje nervurada: {nervura_panel_count} painel(éis) com escoras nas nervuras"
+            f"Laje nervurada: {nervura_panel_count} painel(éis) "
+            + (
+                "(line-first ALU14 + VM80 c/passo fixo)"
+                if slab_layout_mode == "line_first"
+                else "com escoras nas nervuras"
+            )
         )
     if solid_panel_count > 0:
         warnings.append(
@@ -3664,6 +3869,15 @@ def run_calculation(
     # da viga. SEMPRE antes do check global de distancia minima.
     if slab_layout_mode == "line_first" and _lf_floor_frame is not None:
         _align_beam_shores_to_lattice(beam_results, _lf_floor_frame, warnings)
+
+    # v14 (audit OP-102): dedup global de escoras de viga — fragmentos
+    # sobrepostos e cruzamentos viga x viga empilhavam escoras.
+    _dedupe_beam_shores(beam_results, warnings)
+
+    # v14 (audit OP-101): preencher vaos de viga acima do teto — o align
+    # a lattice/dedup pode abrir vao sem complementar; inserir escora no(s)
+    # ponto(s) medio(s) garante cobertura por construcao.
+    _fill_beam_shore_gaps(beam_results, warnings)
 
     # v10 (decisao do revisor 2026-06-12): distancia minima global entre
     # escoras — escora de laje a < 0.30 m de escora de viga (ou de outra

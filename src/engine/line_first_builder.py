@@ -59,6 +59,17 @@ _PITCH_FLOOR_M = 0.60            # piso de seguranca para o pitch
 CAPITEL_INNER_RADIUS_M = 0.70
 CAPITEL_OUTER_RADIUS_M = 1.50
 
+# Sistema ALU14 + VM80 para lajes NERVURADAS (gold standard §9/§10,
+# projetos 110749/101112): primarias ALU14 na lattice do pavimento +
+# secundarias VM80 com passo FIXO por tipo de laje (texto de calibracao
+# do 110749: "PARA LAJE NERVURADA: VM 80 C/60 cm" / "PARA LAJE MACICA:
+# VM 80 C/36.7 cm"). O passo e ancorado na lattice GLOBAL do pavimento
+# (u_anchor + k*step) — NUNCA esticado por painel — para que paineis
+# vizinhos saiam equidistantes e alinhados.
+SECONDARY_STEP_RIBBED_M = 0.60
+SECONDARY_STEP_SOLID_THICK_M = 0.367
+MIN_SECONDARY_LEN_M = 0.30
+
 # Propriedades dos modelos de guia (manual §13.3, kgf -> kN x0.00980665):
 # model -> (M_adm kN.m, EI kN.m2, comprimentos mm)
 GUIDE_SPECS: Dict[str, Tuple[float, float, List[int]]] = {
@@ -571,3 +582,137 @@ def layout_to_vm_grid(layout: LineFirstLayout, load_kn_m2: float) -> VMGrid:
             )
     grid.issues.extend(layout.issues)
     return grid
+
+
+def append_fixed_step_secondaries(
+    grid: VMGrid,
+    layout: LineFirstLayout,
+    polygon: Polygon,
+    load_kn_m2: float,
+    *,
+    ribbed: bool = True,
+    step_m: Optional[float] = None,
+    u_anchor: Optional[float] = None,
+    model: str = "VM80",
+    exclusions: Optional[Sequence] = None,
+) -> int:
+    """Adiciona secundarias VM80 de passo FIXO ao grid (sistema ALU14+VM80).
+
+    Gold standard (110749/101112): paineis NERVURADOS usam primarias ALU14
+    na lattice do pavimento + secundarias VM80 perpendiculares com passo
+    constante por TIPO de laje — c/0.60 m (nervurada) ou c/0.367 m (macica
+    espessa). As posicoes sao ancoradas na lattice GLOBAL ``u_anchor +
+    k*step`` (coordenada ao longo da direcao das guias), de modo que o
+    passo nunca e esticado por painel e paineis vizinhos compartilham a
+    mesma malha (equidistancia + alinhamento entre paineis).
+
+    Args:
+        grid: VMGrid ja contendo as primarias do layout line-first.
+        layout: layout line-first do painel (angulo/pitch das primarias).
+        polygon: poligono do painel (m).
+        load_kn_m2: carga majorada por m2 (kN/m2).
+        ribbed: True = nervurada (c/0.60); False = macica espessa (c/0.367).
+        step_m: passo explicito (sobrepoe a escolha por tipo de laje).
+        u_anchor: ancora GLOBAL da lattice na coordenada u (ao longo da
+            guia). None = ancora no inicio do proprio painel.
+        exclusions: objetos com min_x/min_y/max_x/max_y a subtrair.
+
+    Returns:
+        Numero de segmentos de secundaria adicionados.
+    """
+    if polygon is None or polygon.is_empty or polygon.area <= 0:
+        return 0
+    step = step_m if step_m and step_m > 0 else (
+        SECONDARY_STEP_RIBBED_M if ribbed else SECONDARY_STEP_SOLID_THICK_M
+    )
+    angle = layout.angle_deg % 180.0
+    rad = math.radians(angle)
+    cos_a, sin_a = math.cos(rad), math.sin(rad)
+
+    clip = polygon.buffer(0)
+    if exclusions:
+        boxes = []
+        for ex in exclusions:
+            try:
+                b = box(ex.min_x, ex.min_y, ex.max_x, ex.max_y)
+                if b.intersects(clip):
+                    boxes.append(b)
+            except Exception:
+                continue
+        if boxes:
+            try:
+                clip = clip.difference(unary_union(boxes))
+            except Exception:
+                pass
+    if clip.is_empty:
+        return 0
+
+    local = affinity.rotate(clip, -angle, origin=(0, 0))
+    min_u, min_v, max_u, max_v = local.bounds
+
+    def to_world(u: float, v: float) -> Tuple[float, float]:
+        return (u * cos_a - v * sin_a, u * sin_a + v * cos_a)
+
+    anchor = u_anchor if u_anchor is not None else min_u
+    k_lo = math.ceil((min_u - anchor) / step - 1e-9)
+    k_hi = math.floor((max_u - anchor) / step + 1e-9)
+    if k_hi < k_lo:
+        return 0
+
+    # Vao da secundaria = pitch entre primarias (apoia de guia em guia);
+    # carga linear = faixa de influencia do passo fixo.
+    span_m = layout.pitch_m if layout.pitch_m > 0 else 1.50
+    q_kn_m = load_kn_m2 * step
+    m_adm, ei, _ = GUIDE_SPECS.get("VM80", (2.08, 146.8, []))
+    M, Madm, f, fadm, passM, passF = compute_segment_load_and_moment(
+        span_m, q_kn_m, m_adm, ei,
+    )
+    lengths_mm = list(DEFAULT_VM_LENGTHS_MM.get(model, [])) or [1000, 2050, 3100]
+    axis = "y" if (angle < 45.0 or angle > 135.0) else "x"
+    note = (
+        f"secundaria {model} passo fixo c/{step * 100:.1f} cm "
+        f"({'nervurada' if ribbed else 'macica espessa'} — sistema "
+        f"ALU14+VM80, lattice global)"
+    )
+
+    added = 0
+    for k in range(k_lo, k_hi + 1):
+        u = anchor + k * step
+        scan = LineString([(u, min_v - 1.0), (u, max_v + 1.0)])
+        try:
+            inter = scan.intersection(local)
+        except Exception:
+            continue
+        parts = (
+            [inter] if inter.geom_type == "LineString"
+            else list(getattr(inter, "geoms", []))
+        )
+        for part in parts:
+            if part.geom_type != "LineString" or part.length < MIN_SECONDARY_LEN_M:
+                continue
+            vs = [c[1] for c in part.coords]
+            v0, v1 = min(vs), max(vs)
+            grid.add_segment(VMSegment(
+                role="secundaria",
+                model=model,
+                length_mm=_select_piece_mm(v1 - v0, lengths_mm),
+                start=to_world(u, v0),
+                end=to_world(u, v1),
+                axis=axis,
+                load_kn_m=round(q_kn_m, 2),
+                span_m=round(span_m, 3),
+                moment_kn_m=round(M, 3),
+                moment_adm_kn_m=Madm,
+                flecha_mm=round(f, 2),
+                flecha_adm_mm=round(fadm, 2),
+                passes_moment=passM,
+                passes_deflection=passF,
+                notes=note,
+            ))
+            added += 1
+    if added and not (passM and passF):
+        grid.issues.append(
+            f"Secundaria {model} c/{step * 100:.1f} cm vao {span_m:.2f} m: "
+            f"falha de momento/flecha — reduzir pitch das primarias."
+        )
+    return added
