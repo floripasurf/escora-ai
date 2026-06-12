@@ -93,6 +93,27 @@ class TestCountCruzetasViga:
         assert counts["ESC450"] == 12
 
 
+class TestCountCruzetasVigaSpacingPerfil:
+    """Perfil §28.9 `passo_sob_viga_m`: passo configuravel (gold standard
+    Orguel 0.50-0.65; legado DOCX 0.80)."""
+
+    def test_spacing_060_yields_denser_count(self):
+        """Viga 6m com passo 0.60 → ceil(6/0.60) = 10 cruzetas."""
+        br = _FakeBeamResult(length_m=6.0, shore_id="ESC450")
+        counts = count_cruzetas_viga([br], spacing_m=0.60)
+        assert counts["ESC450"] == 10
+
+    def test_spacing_none_keeps_legacy_080(self):
+        br = _FakeBeamResult(length_m=6.0, shore_id="ESC450")
+        assert count_cruzetas_viga([br], spacing_m=None) == \
+            count_cruzetas_viga([br])
+
+    def test_invalid_spacing_falls_back_to_legacy(self):
+        br = _FakeBeamResult(length_m=6.0, shore_id="ESC450")
+        counts = count_cruzetas_viga([br], spacing_m=0.0)
+        assert counts["ESC450"] == 8
+
+
 class TestCountCruzetasLaje:
     def test_preserves_025_ratio(self):
         """Lajes mantêm ratio calibrado Orguel (0.25 cruzeta/escora)."""

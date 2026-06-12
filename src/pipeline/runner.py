@@ -11,7 +11,8 @@ Stage 6: Learning
 """
 
 import logging
-from typing import List, Optional
+import re
+from typing import Dict, List, Optional
 from src.pipeline.stage_parse import parse_dxf
 from src.pipeline.stage_segment import segment_by_level
 from src.pipeline.stage_classify import classify_elements
@@ -23,12 +24,87 @@ from src.parser.region_filter import filter_main_plan
 from src.parser.construction_classifier import classify_construction, ConstructionType
 from src.parser.structural_system import detect_structural_system, SystemRouting
 from src.models.pipeline_models import LevelGroup, PipelineResult
+from src.models.methodology import MethodologyProfile, load_methodology
 from src.utils.constants import ALTURA_DEFAULT
 
 logger = logging.getLogger(__name__)
 
 
 DEFAULT_SCALE = 0.02  # 1:50 fallback
+
+# Token "COB" isolado (COB, COB., COB-2) sem capturar COBOGO etc.
+_COB_TOKEN_RE = re.compile(r"(?<![A-ZÇÀ-Ü0-9])COB(?![A-ZÇÀ-Ü0-9])")
+
+
+def _is_cobertura_level(level_name: Optional[str]) -> bool:
+    """True quando o nome do nivel identifica uma COBERTURA.
+
+    O pipeline nomeia niveis via LEVEL_PATTERN (stage_segment): COBERTURA,
+    COBERTA, TIPO n, PAVT n, NIVEL +x... — alem do fallback "DEFAULT".
+    Aceita tambem o token abreviado "COB" (pranchas reais: CVS-COB-...).
+    """
+    if not level_name:
+        return False
+    up = level_name.upper()
+    if "COBERTURA" in up or "COBERTA" in up:
+        return True
+    return bool(_COB_TOKEN_RE.search(up))
+
+
+def derive_methodology_params(
+    profile: MethodologyProfile,
+    slab_layout_mode: Optional[str],
+    level_names: List[str],
+    warnings: List[str],
+) -> Dict:
+    """Deriva os parametros de calculo do perfil de metodologia (§28.9).
+
+    Regra 1/2 do manual §28.9: o perfil define os DEFAULTS; a flag
+    explicita (`slab_layout_mode` informado pelo chamador) sempre vence.
+    O `passo_sob_viga_m` do perfil so e aplicado quando o perfil
+    line_first esta efetivamente ativo (compatibilidade: o modo grid
+    legado mantem 0.80/1.00 do DOCX). Cobertura torre-first exige
+    cobertura="torre_first" no perfil E nivel detectado como cobertura;
+    deteccao ambigua (nivel "DEFAULT"/sem nome) mantem o comportamento
+    atual com warning (conservador).
+    """
+    effective_mode = slab_layout_mode or profile.slab_layout_mode
+    params: Dict = {
+        "slab_layout_mode": effective_mode,
+        "eixo_guias": profile.eixo_guias,
+        "escoras_equidistantes": profile.escoras_equidistantes,
+        "tripes_fracao": profile.tripes_fracao,
+        "min_dist_escoras_m": profile.min_dist_escoras_m,
+        "passo_sob_viga_m": None,
+        "cobertura_torre_first": False,
+    }
+    if slab_layout_mode is None and profile.slab_layout_mode != "grid":
+        warnings.append(
+            f"Perfil de metodologia (§28.9): slab_layout_mode="
+            f"{effective_mode} derivado do perfil da locadora/branch"
+        )
+
+    if (
+        profile.laje_layout == "line_first"
+        and effective_mode == "line_first"
+    ):
+        params["passo_sob_viga_m"] = profile.passo_sob_viga_m
+
+    if profile.cobertura == "torre_first":
+        named = [n for n in level_names if n and n.upper() != "DEFAULT"]
+        if any(_is_cobertura_level(n) for n in named):
+            params["cobertura_torre_first"] = True
+            warnings.append(
+                "Perfil §28.9: cobertura torre-first aplicado — nivel "
+                f"identificado como cobertura ({', '.join(named)})"
+            )
+        elif not named:
+            warnings.append(
+                "Perfil §28.9: cobertura=torre_first NAO aplicado — nivel "
+                "sem nome de pavimento detectavel (deteccao ambigua); "
+                "mantendo comportamento padrao"
+            )
+    return params
 
 # $INSUNITS value → meters multiplier
 _INSUNITS_TO_METERS = {
@@ -198,8 +274,24 @@ def run_pipeline(
     mode: str = "price",
     inventory_name: Optional[str] = None,
     branch_id: Optional[str] = None,
-    slab_layout_mode: str = "grid",
+    slab_layout_mode: Optional[str] = None,
+    methodology: Optional[MethodologyProfile] = None,
 ) -> PipelineResult:
+    """Run the full pipeline (Stages 0-7).
+
+    slab_layout_mode: None (default) deriva do perfil de metodologia da
+    locadora/branch (§28.9); "grid" ou "line_first" explicitos sempre
+    vencem o perfil. `methodology` permite injetar um perfil explicito
+    (caso contrario e carregado de data/locadoras.json /
+    ESCORA_LOCADORAS_FILE via branch_id).
+    """
+    # Perfil de metodologia da locadora/branch (manual §28.9): define os
+    # DEFAULTS de layout/passos; flags explicitas sempre vencem.
+    profile = (
+        methodology
+        if methodology is not None
+        else load_methodology(branch_id=branch_id)
+    )
     # Stage 0: Load learning store for accumulated knowledge (per-branch when
     # branch_id is provided, so each locadora unit keeps its own corrections).
     store = LearningStore(branch_id=branch_id)
@@ -348,6 +440,16 @@ def run_pipeline(
         levels.append(level)
         all_elements.extend(elements)
 
+    # Perfil §28.9: derivar slab_layout_mode e demais parametros do perfil
+    # da locadora/branch (flag explicita vence; cobertura torre-first
+    # depende do nome do nivel ja segmentado).
+    methodology_params = derive_methodology_params(
+        profile,
+        slab_layout_mode,
+        [lv.level_name for lv in levels],
+        warnings,
+    )
+
     # Stage 5: Calculation
     calculation = None
     if levels:
@@ -452,7 +554,7 @@ def run_pipeline(
                 mode=mode,
                 inventory=inventory,
                 text_entities=all_texts,
-                slab_layout_mode=slab_layout_mode,
+                **methodology_params,
             )
             # A1: Resumo agregado por categoria para diagnóstico rápido.
             # Em projetos TQS com layers numéricos a classificação por keyword

@@ -281,6 +281,7 @@ def build_line_first_layout(
     capitel_centers: Optional[Sequence[Tuple[float, float]]] = None,
     pitch_override_m: Optional[float] = None,
     v_anchor: Optional[float] = None,
+    tripod_ratio: float = TRIPOD_RATIO,
 ) -> LineFirstLayout:
     """Gera linhas de guia + escoras para um painel de laje (line-first).
 
@@ -298,6 +299,8 @@ def build_line_first_layout(
         capitel_centers: centros (x, y) de pilares para adensamento de
             capitel SOBRE as linhas (anel 0.70-1.50 m, Orguel Q6): insere
             escora no midpoint de cada passo cujo centro caia no anel.
+        tripod_ratio: fracao de tripes sobre o total de escoras (nota 17
+            Orguel: 0.30; perfil §28.9 `tripes_fracao` pode sobrescrever).
     """
     layout = LineFirstLayout(guide_model=guide_model)
     if polygon is None or polygon.is_empty or polygon.area <= 0:
@@ -523,10 +526,11 @@ def build_line_first_layout(
 
     layout.step_m = round(panel_step, 3)
     layout.shores = [(round(x, 3), round(y, 3)) for x, y in all_shores]
+    ratio = tripod_ratio if 0.0 <= tripod_ratio <= 1.0 else TRIPOD_RATIO
     layout.bom = LineFirstBOM(
         guides=bom_guides,
         shore_count=len(layout.shores),
-        tripod_count=int(math.ceil(TRIPOD_RATIO * len(layout.shores))),
+        tripod_count=int(math.ceil(ratio * len(layout.shores))),
     )
     return layout
 

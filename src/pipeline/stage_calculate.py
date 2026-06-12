@@ -249,6 +249,7 @@ def _distribute_line_first_shores(
     tower_mode: bool = False,
     floor_frame: Optional[tuple] = None,
     guide_model: Optional[str] = None,
+    tripod_ratio: Optional[float] = None,
 ):
     """Posiciona escoras de laje pelo modo line-first (manual §28.8).
 
@@ -295,6 +296,9 @@ def _distribute_line_first_shores(
         # primarias ALU14 na lattice do pavimento; as secundarias VM80 de
         # passo fixo sao adicionadas depois (append_fixed_step_secondaries).
         extra["guide_model"] = guide_model
+    if tripod_ratio is not None:
+        # Perfil §28.9 `tripes_fracao` (nota 17 Orguel: 0.30 default).
+        extra["tripod_ratio"] = tripod_ratio
     layout = build_line_first_layout(
         polygon,
         q_kn_m2,
@@ -1185,9 +1189,36 @@ def _dedupe_beam_shores(
                 keep_flags[id(s)] = True
 
     dropped = 0
+    moved = 0
     for br in beam_results:
         ss = getattr(br, "shores", []) or []
+        if not ss:
+            continue
         kept = [s for s in ss if keep_flags.get(id(s), True)]
+        if not kept:
+            # Nunca reduzir viga a 0 escoras (OP-101 prevalece sobre
+            # OP-102): REALOCAR a escora ao longo do eixo da viga para
+            # fora do raio min_dist (tipico: fragmentos colineares da
+            # mesma viga com pontas a < 0.30 m). Sem vaga livre, mantem
+            # no lugar (comportamento anterior).
+            s0 = ss[0]
+            geom = list(
+                getattr(getattr(br, "beam", None), "geometry", None) or []
+            )
+            if len(geom) >= 2:
+                (gx1, gy1), (gx2, gy2) = geom[0], geom[-1]
+                g_len = _m.hypot(gx2 - gx1, gy2 - gy1)
+                if g_len > 1e-6:
+                    gux, guy = (gx2 - gx1) / g_len, (gy2 - gy1) / g_len
+                    for frac in (0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8):
+                        cx_ = gx1 + gux * g_len * frac
+                        cy_ = gy1 + guy * g_len * frac
+                        if not _near(cx_, cy_):
+                            s0.x, s0.y = round(cx_, 3), round(cy_, 3)
+                            moved += 1
+                            break
+            _add(s0.x, s0.y)
+            kept = [s0]
         n_rm = len(ss) - len(kept)
         if n_rm and kept:
             total = sum(s.load_applied_kn for s in ss)
@@ -1204,6 +1235,12 @@ def _dedupe_beam_shores(
             f"removida(s) (dedup global v14, < {min_dist_m:.2f} m; "
             f"extremidades e torres preservadas)"
         )
+    if moved:
+        warnings.append(
+            f"{moved} escora(s) unica(s) de viga realocada(s) ao longo do "
+            f"eixo para fora do raio de {min_dist_m:.2f} m (fragmentos "
+            f"colineares — OP-101 prevalece sobre OP-102)"
+        )
     return dropped
 
 
@@ -1211,6 +1248,7 @@ def _fill_beam_shore_gaps(
     beam_results: List,
     warnings: List[str],
     max_gap_m: float = 1.80,
+    min_dist_m: float = 0.30,
 ) -> int:
     """Preenche vaos de viga acima do teto (v14, audit OP-101).
 
@@ -1219,9 +1257,38 @@ def _fill_beam_shore_gaps(
     Insere escoras no(s) ponto(s) medio(s) — cobertura garantida por
     construcao; o teto segue o audit OP-101 (1.80 m, folga sobre o 1.00 m
     do manual §10.3 ja coberto pelo passo proprio da viga).
+
+    A insercao e ciente de CONFLITO global (audit OP-102): se o ponto
+    medio cair a < min_dist_m de uma escora de outra viga (tipico em
+    cruzamentos), a escora inserida e deslocada ao longo do eixo ate uma
+    posicao livre que mantenha os sub-vaos <= max_gap_m; sem posicao
+    viavel, o ponto medio e mantido (OP-101 prevalece sobre OP-102).
     """
     import math as _m
     from copy import copy as _copy
+
+    # Grade global de escoras de viga existentes (deteccao de conflito)
+    cell = max(min_dist_m, 0.05)
+    occupied: dict = {}
+
+    def _occ_key(x, y):
+        return (int(_m.floor(x / cell)), int(_m.floor(y / cell)))
+
+    def _conflict(x, y):
+        kx, ky = _occ_key(x, y)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for ox, oy in occupied.get((kx + dx, ky + dy), ()):
+                    if _m.hypot(x - ox, y - oy) < min_dist_m:
+                        return True
+        return False
+
+    def _occ_add(x, y):
+        occupied.setdefault(_occ_key(x, y), []).append((x, y))
+
+    for br in beam_results:
+        for s in getattr(br, "shores", []) or []:
+            _occ_add(s.x, s.y)
 
     added = 0
     for br in beam_results:
@@ -1255,9 +1322,35 @@ def _fill_beam_shore_gaps(
             gap = tb - ta
             if gap > max_gap_m:
                 n_ins = int(_m.ceil(gap / max_gap_m)) - 1
+                prev_t = ta
                 for k in range(1, n_ins + 1):
-                    t = ta + gap * k / (n_ins + 1)
-                    new_pts.append((x1 + ux * t, y1 + uy * t, sa))
+                    ideal = ta + gap * k / (n_ins + 1)
+                    remaining = n_ins - k
+                    chosen = ideal
+                    if _conflict(x1 + ux * ideal, y1 + uy * ideal):
+                        # Conflito global (OP-102, cruzamento de vigas):
+                        # deslocar ao longo do eixo mantendo sub-vaos
+                        # <= max_gap; sem opcao viavel, OP-101 prevalece.
+                        for off in (
+                            min_dist_m + 0.05, -(min_dist_m + 0.05),
+                            min_dist_m + 0.20, -(min_dist_m + 0.20),
+                        ):
+                            t_try = ideal + off
+                            if not (ta < t_try < tb):
+                                continue
+                            if t_try - prev_t > max_gap_m + 1e-6:
+                                continue
+                            if (tb - t_try) > max_gap_m * (remaining + 1) + 1e-6:
+                                continue
+                            if _conflict(x1 + ux * t_try, y1 + uy * t_try):
+                                continue
+                            chosen = t_try
+                            break
+                    _occ_add(x1 + ux * chosen, y1 + uy * chosen)
+                    prev_t = chosen
+                    new_pts.append(
+                        (x1 + ux * chosen, y1 + uy * chosen, sa)
+                    )
         if not new_pts:
             continue
         for (nx_, ny_, template) in new_pts:
@@ -2092,6 +2185,12 @@ def run_calculation(
     inventory: Optional[Any] = None,
     text_entities: Optional[List[Dict[str, Any]]] = None,
     slab_layout_mode: str = "grid",
+    passo_sob_viga_m: Optional[float] = None,
+    cobertura_torre_first: bool = False,
+    eixo_guias: str = "unico_pavimento",
+    escoras_equidistantes: bool = True,
+    tripes_fracao: Optional[float] = None,
+    min_dist_escoras_m: float = ESPACAMENTO_MIN,
 ) -> CalculationResult:
     """Run the full calculation pipeline.
 
@@ -2103,6 +2202,22 @@ def run_calculation(
         slab_type: Detected slab type (solid, ribbed, waffle, etc.)
         slab_layout_mode: "grid" (default, grid de pontos legado) ou
             "line_first" (linhas de guia Orguel gold-standard, manual §28.8).
+        passo_sob_viga_m: passo do conjunto escora+cruzeta sob viga vindo
+            do perfil de metodologia (§28.9). None = legado
+            (ESPACAMENTO_MAX_VIGA para escoras; 0.80 m para cruzetas).
+        cobertura_torre_first: True quando o perfil tem
+            cobertura="torre_first" E o nivel foi detectado como cobertura
+            (gold standard §28.8 item 10) — vigas apoiadas em TORRES a
+            1.25-1.65 m c-a-c; lajes seguem o line-first normal.
+        eixo_guias: "unico_pavimento" (malha de pavimento, default) ou
+            "por_painel" (direcao da guia por painel — pratica Orguel
+            literal, sem lattice global). So afeta o modo line_first.
+        escoras_equidistantes: aplica o re-espacamento L/n constante por
+            guia continua (v7). So afeta o modo line_first.
+        tripes_fracao: fracao de tripes do BOM line-first (nota 17 Orguel,
+            default 0.30 no builder).
+        min_dist_escoras_m: distancia minima global entre escoras
+            (audit OP-102 / perfil §28.9).
 
     Returns:
         CalculationResult with beam/slab shoring results.
@@ -2114,6 +2229,13 @@ def run_calculation(
         warnings.append(
             f"Pé-direito usando valor padrão {pe_direito_m:.2f}m — "
             "confirme no preview antes de aprovar"
+        )
+
+    if cobertura_torre_first:
+        warnings.append(
+            "Cobertura torre-first ativa (perfil §28.9 + gold standard "
+            "§28.8 item 10): vigas apoiadas em torres a 1.25-1.65 m c-a-c; "
+            "lajes em line-first normal"
         )
 
     # Separate beams and pillars
@@ -2316,6 +2438,20 @@ def run_calculation(
             beam_height_m=beam_height,
         )
 
+        # Cobertura torre-first (gold standard §28.8 item 10, perfil §28.9):
+        # vigas de COBERTURA usam torres como apoio principal a 1.25-1.65 m
+        # c-a-c com VM entre torres; escoras telescopicas so complementares.
+        # Sobrepoe a decisao padrao apenas quando ha catalogo de torres —
+        # sem torres disponiveis o fluxo legado permanece (conservador).
+        if cobertura_torre_first and tower_catalog:
+            support_type = SupportType.TOWER
+            tower_fraction = 1.0
+            decision_rule = "rule-cobertura-torre-first"
+            decision_reasons = [
+                "Cobertura torre-first (perfil §28.9 / gold standard §28.8 "
+                "item 10): torres sob viga a 1.25-1.65 m c-a-c + VM entre "
+                "torres; escoras telescopicas apenas complementares"
+            ]
 
         # --- ML advisory prediction ---
         if ml_predictor.is_loaded:
@@ -2453,10 +2589,24 @@ def run_calculation(
         dy = abs(end_pt[1] - start_pt[1])
         direction = "x" if dx >= dy else "y"
 
-        # Spacing: TOWER uses wider, MIXED uses telescopic (dense) spacing
-        beam_max_spacing = ESPACAMENTO_MAX_VIGA
+        # Spacing: TOWER uses wider, MIXED uses telescopic (dense) spacing.
+        # Perfil §28.9: `passo_sob_viga_m` sobrescreve o passo telescopico
+        # sob viga (gold standard Orguel 0.50-0.65; DOCX/legado 0.80-1.00).
+        beam_max_spacing = (
+            passo_sob_viga_m
+            if passo_sob_viga_m and passo_sob_viga_m > 0
+            else ESPACAMENTO_MAX_VIGA
+        )
         if support_type == SupportType.TOWER and tower_shore_entry is not None:
-            beam_max_spacing = max(ESPACAMENTO_MAX_VIGA * 1.5, 1.50)
+            if cobertura_torre_first:
+                # Torre-first de cobertura: torres a 1.25-1.65 m c-a-c
+                # (gold standard item 10) — teto 1.65, distribuicao uniforme.
+                from src.engine.tower_selector import (
+                    COBERTURA_TOWER_SPACING_RANGE_M,
+                )
+                beam_max_spacing = COBERTURA_TOWER_SPACING_RANGE_M[1]
+            else:
+                beam_max_spacing = max(ESPACAMENTO_MAX_VIGA * 1.5, 1.50)
         if density_correction > 0:
             beam_max_spacing = beam_max_spacing / density_correction
 
@@ -2480,6 +2630,34 @@ def run_calculation(
             is_cantilever_end=assoc["is_cantilever_end"],
             forced_positions=intersection_positions,
         )
+
+        # Cobertura torre-first: marcar as escoras da viga como TORRES
+        # (apoio principal a 1.25-1.65 m c-a-c — gold standard §28.8 item
+        # 10). Necessario para o DXF (layer TORRE_VIGA), contagem de
+        # torres e BOM de cruzetas; escoras telescopicas ficam apenas
+        # como complementares de pos-processamento.
+        if (
+            cobertura_torre_first
+            and support_type == SupportType.TOWER
+            and tower_shore_entry is not None
+        ):
+            from src.models.shore import PositionedShore as _PSCob
+            shores = [
+                _PSCob(
+                    x=s.x, y=s.y,
+                    shore=tower_shore_entry,
+                    load_applied_kn=s.load_applied_kn,
+                    utilization_ratio=round(
+                        s.load_applied_kn
+                        / (tower_shore_entry.load_capacity_kn or 1.0),
+                        4,
+                    ),
+                    support_type=SupportType.TOWER,
+                    tower=selected_tower,
+                    distribution_beam=selected_dist_beam,
+                )
+                for s in shores
+            ]
 
         # === MIXED BEAM SUPPORT (posicionamento estrutural) ===
         # Torres em pontos de demanda estrutural, não fração fixa.
@@ -3104,8 +3282,14 @@ def run_calculation(
     # 2026-06-12): eixo UNICO paralelo ao maior sentido do projeto, pitch
     # unico (alvo modal 1.50 m) e linhas ancoradas numa lattice global —
     # guias colineares entre paineis, atravessando as vigas em alinhamento.
+    # Perfil §28.9 `eixo_guias`: "por_painel" desliga a malha de pavimento
+    # (direcao da guia volta a ser por painel — pratica Orguel literal).
     _lf_floor_frame = None
-    if slab_layout_mode == "line_first" and slab_polygons:
+    if (
+        slab_layout_mode == "line_first"
+        and slab_polygons
+        and eixo_guias != "por_painel"
+    ):
         _bs = [p.bounds for p in slab_polygons]
         _ub = (
             min(b[0] for b in _bs), min(b[1] for b in _bs),
@@ -3424,6 +3608,7 @@ def run_calculation(
                     tower_mode=_is_tower_panel,
                     floor_frame=_lf_floor_frame,
                     guide_model="ALU14" if lf_nervura_panel else None,
+                    tripod_ratio=tripes_fracao,
                 )
             except Exception as exc:
                 logger.warning(
@@ -3828,7 +4013,17 @@ def run_calculation(
         is_valid=True,
     )
 
-    review_corrections = review_and_fix(calc_result, pillars, valid_beams)
+    # Perfil §28.9: o thinning por capacidade nao pode desfazer o passo
+    # denso intencional sob viga (passo_sob_viga_m < 0.80 do gold standard).
+    _beam_redundancy = None
+    if passo_sob_viga_m and passo_sob_viga_m > 0:
+        _beam_redundancy = min(
+            0.80, max(passo_sob_viga_m - 0.05, ESPACAMENTO_MIN),
+        )
+    review_corrections = review_and_fix(
+        calc_result, pillars, valid_beams,
+        beam_redundancy_dist_m=_beam_redundancy,
+    )
     warnings.extend(review_corrections)
 
     # O review/dedup final pode remover ou mover escoras. Recalcular a malha
@@ -3861,7 +4056,10 @@ def run_calculation(
     # v7 (decisao do revisor 2026-06-12): escoras EQUIDISTANTES ao longo
     # de cada guia continua (L/n constante), absorvendo extras de
     # transpasse/capitel e diferencas de passo entre paineis fundidos.
-    _respace_line_first_shores(slab_results, warnings)
+    # Perfil §28.9 `escoras_equidistantes=false` mantem os extras explicitos
+    # (padrao Orguel literal).
+    if escoras_equidistantes:
+        _respace_line_first_shores(slab_results, warnings)
 
     # v12 (decisao do revisor 2026-06-12): escoras de viga alinhadas aos
     # cruzamentos da lattice de linhas do pavimento (vigas perpendiculares
@@ -3872,17 +4070,21 @@ def run_calculation(
 
     # v14 (audit OP-102): dedup global de escoras de viga — fragmentos
     # sobrepostos e cruzamentos viga x viga empilhavam escoras.
-    _dedupe_beam_shores(beam_results, warnings)
+    _dedupe_beam_shores(beam_results, warnings, min_dist_m=min_dist_escoras_m)
 
     # v14 (audit OP-101): preencher vaos de viga acima do teto — o align
     # a lattice/dedup pode abrir vao sem complementar; inserir escora no(s)
-    # ponto(s) medio(s) garante cobertura por construcao.
-    _fill_beam_shore_gaps(beam_results, warnings)
+    # ponto(s) medio(s) garante cobertura por construcao. Teto 1.80 m
+    # mantido (audit OP-101); min_dist do perfil evita pares OP-102.
+    _fill_beam_shore_gaps(beam_results, warnings, min_dist_m=min_dist_escoras_m)
 
     # v10 (decisao do revisor 2026-06-12): distancia minima global entre
     # escoras — escora de laje a < 0.30 m de escora de viga (ou de outra
-    # escora) e removida; a de viga prevalece.
-    _enforce_min_shore_distance(slab_results, beam_results, warnings)
+    # escora) e removida; a de viga prevalece. O minimo vem do perfil
+    # §28.9 (`min_dist_escoras_m`, default 0.30).
+    _enforce_min_shore_distance(
+        slab_results, beam_results, warnings, min_dist_m=min_dist_escoras_m,
+    )
 
     # Sync shore_count with actual len(shores) after all post-processing
     for br in beam_results:
@@ -3909,6 +4111,9 @@ def run_calculation(
     calc_result.total_shores = all_shores_count
     calc_result.total_load_kn = round(all_load, 2)
     calc_result.is_valid = len(validation_errors) == 0
+    # Perfil §28.9: propagar o passo sob viga para os geradores de BOM
+    # (cruzetas seguem o mesmo passo do conjunto escora+cruzeta).
+    calc_result.passo_sob_viga_m = passo_sob_viga_m
     # Pydantic COPIA a lista na construcao do CalculationResult: avisos
     # appendados pelos pos-passes (review, merge/respace/align line-first,
     # distancia minima) depois da construcao eram perdidos. Re-sincronizar.

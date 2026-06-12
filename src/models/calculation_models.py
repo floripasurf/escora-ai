@@ -95,3 +95,10 @@ class CalculationResult(BaseModel):
         default_factory=list,
         description="Breakdown de volume por painel (laje, beiral, platibanda...)",
     )
+    passo_sob_viga_m: Optional[float] = Field(
+        default=None,
+        description=(
+            "Passo escora+cruzeta sob viga vindo do perfil de metodologia "
+            "(§28.9); None = legado (0.80 m DOCX para cruzetas)"
+        ),
+    )

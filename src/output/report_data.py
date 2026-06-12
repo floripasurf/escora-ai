@@ -259,7 +259,10 @@ def build_report_data(
             c for sid, (_s, c) in shore_counts.items()
             if sid.startswith("TWR-")
         )
-        beam_cruzetas = count_cruzetas_viga(calc.beam_results)
+        beam_cruzetas = count_cruzetas_viga(
+            calc.beam_results,
+            spacing_m=getattr(calc, "passo_sob_viga_m", None),
+        )
         slab_cruzetas = count_cruzetas_laje(slab_telescopic_counts)
         for acc, qty in compute_cruzeta_bom(
             accessories, beam_cruzetas, slab_cruzetas, tower_count,

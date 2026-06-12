@@ -34,7 +34,8 @@ def process_dxf(
     inventory_name: Optional[str] = None,
     output_suffix: str = "",
     branch_id: Optional[str] = None,
-    slab_layout_mode: str = "grid",
+    slab_layout_mode: Optional[str] = None,
+    methodology=None,
 ) -> dict:
     """Run the full pipeline on a DXF file and generate output.
 
@@ -44,8 +45,10 @@ def process_dxf(
     branch_id scopes the learning store so each locadora branch keeps its
     own accumulated knowledge.
 
-    slab_layout_mode: "grid" (default) ou "line_first" (linhas de guia
-    Orguel gold-standard, manual §28.8).
+    slab_layout_mode: None (default) deriva do perfil de metodologia da
+    locadora/branch (manual §28.9 — campo `metodologia` em locadoras.json
+    / ESCORA_LOCADORAS_FILE); "grid" ou "line_first" explicitos vencem o
+    perfil. `methodology` (MethodologyProfile) injeta um perfil explicito.
     """
     pipeline_runner = run_pipeline
     if pipeline_runner is None:
@@ -57,6 +60,7 @@ def process_dxf(
         inventory_name=inventory_name,
         branch_id=branch_id,
         slab_layout_mode=slab_layout_mode,
+        methodology=methodology,
     )
     calc = result.calculation
 
@@ -449,7 +453,10 @@ def _generate_bom_csv(calc, output_path: str, report_data=None):
         )
         _, _, accessories = load_tower_catalog()
         _, slab_telescopic, tower_count = _count_shores_by_id(calc)
-        beam_cruzetas = count_cruzetas_viga(calc.beam_results)
+        beam_cruzetas = count_cruzetas_viga(
+            calc.beam_results,
+            spacing_m=getattr(calc, "passo_sob_viga_m", None),
+        )
         slab_cruzetas = count_cruzetas_laje(slab_telescopic)
         for acc, qty in compute_cruzeta_bom(
             accessories, beam_cruzetas, slab_cruzetas, tower_count,

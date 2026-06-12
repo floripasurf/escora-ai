@@ -48,11 +48,17 @@ def review_and_fix(
     calc: CalculationResult,
     pillars: List[ClassifiedElement],
     beams: List[ClassifiedElement],
+    beam_redundancy_dist_m: Optional[float] = None,
 ) -> List[str]:
     """Review all shore positions and fix placement errors.
 
     Modifies calc in-place (removes invalid shores, recalculates loads).
     Returns list of correction descriptions for warnings.
+
+    beam_redundancy_dist_m: limiar de "escoras coladas" para o thinning
+    por capacidade em VIGAS. Default None = REDUNDANCY_DIST_M (0.80).
+    O perfil de metodologia (§28.9, passo_sob_viga_m < 0.80) reduz o
+    limiar para que o passo denso intencional nao seja desfeito.
     """
     corrections: List[str] = []
 
@@ -69,7 +75,10 @@ def review_and_fix(
     corrections.extend(_fix_global_overlaps(calc.beam_results, calc.slab_results))
 
     # === PASS 3b: Load-aware thinning of redundant close shores ===
-    corrections.extend(_thin_redundant_shores(calc.beam_results, calc.slab_results))
+    corrections.extend(_thin_redundant_shores(
+        calc.beam_results, calc.slab_results,
+        beam_redundancy_dist_m=beam_redundancy_dist_m,
+    ))
 
     # === PASS 4: Remove slab shores outside polygon ===
     corrections.extend(_fix_outside_polygon(calc.slab_results))
@@ -336,6 +345,7 @@ def _fix_global_overlaps(
 def _thin_redundant_shores(
     beam_results: List[BeamShoringResult],
     slab_results: List[SlabShoringResult],
+    beam_redundancy_dist_m: Optional[float] = None,
 ) -> List[str]:
     """Remove shores that are too close to a neighbor when physics allows it.
 
@@ -349,6 +359,11 @@ def _thin_redundant_shores(
     Iterates until no more removals are possible.
     """
     corrections: List[str] = []
+    beam_dist = (
+        beam_redundancy_dist_m
+        if beam_redundancy_dist_m and beam_redundancy_dist_m > 0
+        else REDUNDANCY_DIST_M
+    )
 
     # --- Beams ---
     for br in beam_results:
@@ -370,7 +385,7 @@ def _thin_redundant_shores(
                 break
             # Find the tightest pair
             idx_to_remove = _find_closest_redundant(
-                [(s.x, s.y) for s in br.shores], REDUNDANCY_DIST_M
+                [(s.x, s.y) for s in br.shores], beam_dist
             )
             if idx_to_remove is None:
                 break
