@@ -119,3 +119,28 @@ class TestCVSCOBRegression:
         pillars = [e for e in all_elements if e.element_type == ElementType.PILLAR]
         for pillar in pillars:
             assert len(pillar.geometry) == 1
+
+
+@pytest.mark.skipif(not DXF_PATH.exists(), reason="CVS-COB DXF not in fixtures")
+class TestMethodologyTraceability:
+    """Rastreabilidade da metodologia anexada ao PipelineResult (§28.9)."""
+
+    def test_default_origin_is_locadora_profile(self):
+        result = run_pipeline(str(DXF_PATH))
+        assert result.methodology is not None
+        assert result.methodology["origem"] == "perfil_locadora"
+        assert "laje_layout" in result.methodology
+        assert "efetivo" in result.methodology
+
+    def test_injected_profile_marks_override(self):
+        from src.models.methodology import PROFILE_ORGUEL_LINE_FIRST
+        result = run_pipeline(
+            str(DXF_PATH), methodology=PROFILE_ORGUEL_LINE_FIRST,
+        )
+        # Fix do review: methodology injetado (sem slab_layout_mode) e override.
+        assert result.methodology["origem"] == "override"
+        assert result.methodology["laje_layout"] == "line_first"
+
+    def test_explicit_slab_layout_marks_override(self):
+        result = run_pipeline(str(DXF_PATH), slab_layout_mode="line_first")
+        assert result.methodology["origem"] == "override"

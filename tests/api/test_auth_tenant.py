@@ -99,6 +99,52 @@ def test_me_returns_locadora_and_branches(client):
     assert data["selected_branch"]["inventory_name"] == "orguel_sjc"
 
 
+# ---------- methodology contract (Fase 2) ----------
+
+def _assert_line_first_profile(m):
+    """loc-a is seeded line_first → herda passo 0.60 + cobertura torre_first."""
+    assert m is not None, "branch payload deve trazer 'metodologia'"
+    assert m["laje_layout"] == "line_first"
+    assert m["passo_sob_viga_m"] == 0.60
+    assert m["cobertura"] == "torre_first"
+    assert m["labels"]["laje_layout"]["pt"] == "Line-first Orguel"
+    # barrote agora EXPLICITO (Fase 5): escopo cliente, nao inferido
+    assert m["barrote_resumo"]["usa_barrote"] is False
+    assert m["barrote_resumo"]["inferido"] is False
+    assert m["barrote_resumo"]["escopo"] == "cliente"
+    assert m["barrotes_escopo"] == "cliente"
+
+
+def test_login_returns_methodology_per_branch(client_unauth):
+    r = client_unauth.post(
+        "/api/v1/auth/login",
+        json={"username": "eng_a", "password": "senhaA"},
+    )
+    assert r.status_code == 200
+    branch = next(b for b in r.json()["branches"] if b["id"] == "test-a")
+    _assert_line_first_profile(branch["metodologia"])
+
+
+def test_me_returns_methodology_for_branches_and_selected(client):
+    data = client.get("/api/v1/auth/me").json()
+    _assert_line_first_profile(data["selected_branch"]["metodologia"])
+    branch = next(b for b in data["branches"] if b["id"] == "test-a")
+    _assert_line_first_profile(branch["metodologia"])
+
+
+def test_methodology_defaults_to_grid_when_unset(client_unauth):
+    """loc-b nao define metodologia → perfil grid legado (com barrote)."""
+    r = client_unauth.post(
+        "/api/v1/auth/login",
+        json={"username": "eng_b", "password": "senhaB"},
+    )
+    assert r.status_code == 200
+    branch = next(b for b in r.json()["branches"] if b["id"] == "test-b")
+    m = branch["metodologia"]
+    assert m["laje_layout"] == "grid_vm_duplo"
+    assert m["barrote_resumo"]["usa_barrote"] is True
+
+
 def test_logout_revokes_session(client_unauth):
     r = client_unauth.post(
         "/api/v1/auth/login",

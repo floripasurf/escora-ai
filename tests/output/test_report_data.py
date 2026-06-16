@@ -94,6 +94,61 @@ class TestBuildReportData:
         assert isinstance(report, ReportData)
         assert report.project_name == "CVS-COB"
 
+    def test_methodology_is_propagated_from_metadata(self):
+        """Rastreabilidade (§28.9): metadata.methodology chega em ReportData."""
+        meta = ReportMetadata(
+            project_name="CVS-COB", date="2026-03-25", scale=1.0,
+            dxf_filename="x.DXF",
+            methodology={"laje_layout": "line_first", "origem": "perfil_locadora"},
+        )
+        report = build_report_data(_calc_result(beam_results=[_beam_result()]), meta)
+        assert report.methodology["laje_layout"] == "line_first"
+
+    def test_methodology_defaults_to_none(self):
+        report = build_report_data(_calc_result(), _metadata())
+        assert report.methodology is None
+
+
+class TestConsumptionCsvMethodology:
+    """Rastreabilidade no CSV de consumo: comentario na 1a linha, header na 2a.
+
+    Trava o contrato: nenhum leitor interno consome este arquivo (so download),
+    entao um comentario '#' antes do header e seguro — DictReader funciona ao
+    pular a 1a linha.
+    """
+
+    def _report(self, methodology=None):
+        return build_report_data(
+            _calc_result(beam_results=[_beam_result()]),
+            ReportMetadata(
+                project_name="x", date="2026-04-10", scale=1.0,
+                dxf_filename="x.DXF", methodology=methodology,
+            ),
+        )
+
+    def test_first_line_is_methodology_comment_then_header(self, tmp_path):
+        import csv
+        from src.output.csv_generator import (
+            write_consumption_csv, CONSUMPTION_FIELDNAMES,
+        )
+        out = str(tmp_path / "consumo.csv")
+        write_consumption_csv(
+            self._report({"laje_layout": "line_first", "origem": "perfil_locadora"}),
+            out,
+        )
+        with open(out, encoding="utf-8-sig") as f:
+            lines = f.read().splitlines()
+        assert lines[0].startswith("# Metodologia:")
+        assert "Line-first Orguel" in lines[0]
+        # header na 2a linha (independe de haver linhas de dados)
+        header = lines[1].split(";")
+        assert set(CONSUMPTION_FIELDNAMES).issubset(header)
+        # DictReader funciona ignorando o comentario
+        with open(out, encoding="utf-8-sig") as f:
+            next(f)  # pula o comentario
+            reader = csv.DictReader(f, delimiter=";")
+            assert set(CONSUMPTION_FIELDNAMES).issubset(reader.fieldnames)
+
     def test_summary_totals(self):
         calc = _calc_result(
             beam_results=[_beam_result()],

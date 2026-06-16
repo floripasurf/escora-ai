@@ -246,6 +246,7 @@ async def get_status(
         "has_diagrams": bool((job.get("results_data") or {}).get("mermaid_diagrams")),
         "optimization_mode": job.get("optimization_mode"),
         "inventory_name": job.get("inventory_name"),
+        "methodology": results.get("methodology"),
     }
 
 

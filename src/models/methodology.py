@@ -37,6 +37,45 @@ logger = logging.getLogger(__name__)
 LAJE_LAYOUTS = ("grid_vm_duplo", "line_first")
 EIXO_GUIAS_VALUES = ("unico_pavimento", "por_painel")
 COBERTURA_VALUES = ("padrao", "torre_first")
+BARROTES_ESCOPO_VALUES = ("locadora", "cliente")
+
+# Rotulos pt-BR para rastreabilidade em relatorios (camada de modelo; os
+# rotulos pt/en estruturados para a UI ficam em api/services/methodology_view).
+_LAJE_LAYOUT_PT = {
+    "grid_vm_duplo": "Grid VM duplo",
+    "line_first": "Line-first Orguel",
+}
+
+
+def describe_methodology(methodology: Optional[Dict[str, Any]]) -> str:
+    """Frase pt-BR de rastreabilidade para PDF/CSV (§28.9).
+
+    Recebe o dict efetivo anexado ao PipelineResult (perfil cru + chave
+    ``efetivo`` + ``origem``). Responde "qual metodologia gerou este desenho".
+    """
+    if not methodology:
+        return "Metodologia: padrão (grid VM duplo)"
+    layout = methodology.get("laje_layout", "grid_vm_duplo")
+    parts = [_LAJE_LAYOUT_PT.get(layout, layout)]
+    # Barrote: campo explicito (Fase 5); fallback p/ inferencia em dados antigos.
+    escopo = methodology.get("barrotes_escopo")
+    if escopo is None:
+        escopo = "cliente" if layout == "line_first" else "locadora"
+    # "por conta de" = RESPONSABILIDADE pela camada de barrotes (madeira); nao
+    # implica inclusao no romaneio (barrotes de madeira nao sao quantificados).
+    if escopo == "cliente":
+        parts.append("barrotes por conta do cliente")
+    else:
+        parts.append("barrotes por conta da locadora")
+    efetivo = methodology.get("efetivo") or {}
+    passo = efetivo.get("passo_sob_viga_m")
+    if passo:
+        parts.append(f"passo sob viga {float(passo):.2f} m")
+    if efetivo.get("cobertura_torre_first"):
+        parts.append("cobertura torre-first")
+    if methodology.get("origem") == "override":
+        parts.append("(override do projeto)")
+    return "Metodologia: " + " · ".join(parts)
 
 
 @dataclass(frozen=True)
@@ -58,6 +97,19 @@ class MethodologyProfile:
             vigas de cobertura apoiadas em torres a 1.25-1.65 m c-a-c).
         min_dist_escoras_m: distancia minima global entre escoras
             (audit OP-102 / v10).
+
+    Barrotes (Fase 5 — atributo EXPLICITO da locadora, antes inferido de
+    laje_layout):
+        barrotes_escopo: quem fornece a camada de BARROTES (madeira) sobre as
+            guias — "locadora" (faz parte do servico) ou "cliente" (por conta
+            da obra; caso Orguel, nota 15 gold standard §28.8).
+
+    IMPORTANTE: este campo descreve APENAS a camada de barrotes de madeira do
+    cliente. Ele NAO controla as secundarias VM metalicas geradas pelo engine
+    (VM80 do grid e do sistema nervurado ALU14+VM80): estas sao GUIAS
+    ESTRUTURAIS, dirigidas por laje_layout/nervura, sempre desenhadas e
+    quantificadas quando estruturalmente necessarias (decisao de produto
+    2026-06). Por isso nao ha flags de desenhar/quantificar/modelo/passo aqui.
     """
 
     laje_layout: str = "grid_vm_duplo"
@@ -67,11 +119,21 @@ class MethodologyProfile:
     tripes_fracao: float = 0.30
     cobertura: str = "padrao"
     min_dist_escoras_m: float = 0.30
+    barrotes_escopo: str = "locadora"
 
     @property
     def slab_layout_mode(self) -> str:
         """Mapeia laje_layout para a flag slab_layout_mode do pipeline."""
         return "line_first" if self.laje_layout == "line_first" else "grid"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serializa os campos do perfil (rastreabilidade, §28.9).
+
+        Camada de modelo: apenas os campos crus do perfil, sem rotulos de UI
+        (estes ficam em api/services/methodology_view). Usado pelo pipeline e
+        pelos relatorios para registrar "qual metodologia gerou este desenho".
+        """
+        return {f.name: getattr(self, f.name) for f in fields(self)}
 
 
 # Perfil grid legado (defaults da tabela §28.9): comportamento atual.
@@ -83,6 +145,7 @@ PROFILE_ORGUEL_LINE_FIRST = MethodologyProfile(
     laje_layout="line_first",
     passo_sob_viga_m=0.60,
     cobertura="torre_first",
+    barrotes_escopo="cliente",
 )
 
 # Base por laje_layout: um JSON que so diga {"laje_layout": "line_first"}
@@ -112,6 +175,8 @@ def _coerce_field(name: str, value: Any) -> Optional[Any]:
         return value if value in EIXO_GUIAS_VALUES else None
     if name == "cobertura":
         return value if value in COBERTURA_VALUES else None
+    if name == "barrotes_escopo":
+        return value if value in BARROTES_ESCOPO_VALUES else None
     if name == "escoras_equidistantes":
         return value if isinstance(value, bool) else None
     if name in ("passo_sob_viga_m", "tripes_fracao", "min_dist_escoras_m"):

@@ -90,6 +90,7 @@ def process_dxf(
         date=date.today().strftime("%d/%m/%Y"),
         scale=result.scale,
         dxf_filename=Path(input_path).name,
+        methodology=result.methodology,
     )
     report_data = build_report_data(calc, metadata)
 
@@ -187,6 +188,7 @@ def process_dxf(
         "pillar_count": pillar_count,
         "slab_count": len(calc.slab_results),
         "total_shores": total_beam_shores + total_slab_shores,
+        "methodology": result.methodology,  # rastreabilidade §28.9
         "warnings": result.warnings[:60],  # Limit warnings (diagnostics first)
         "output_dxf_path": output_dxf,
         "dwg_path": dwg_path,

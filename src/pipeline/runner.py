@@ -602,6 +602,25 @@ def run_pipeline(
         calculation=calculation,
     )
 
+    # Rastreabilidade (§28.9): registra qual metodologia gerou este resultado.
+    # Inclui o perfil cru + os parametros EFETIVOS aplicados no calculo e a
+    # origem (perfil da locadora vs override explicito do chamador).
+    result.methodology = {
+        **profile.to_dict(),
+        "efetivo": {
+            "slab_layout_mode": methodology_params["slab_layout_mode"],
+            "passo_sob_viga_m": methodology_params["passo_sob_viga_m"],
+            "cobertura_torre_first": methodology_params["cobertura_torre_first"],
+        },
+        # Override = qualquer entrada explicita do chamador (flag de layout OU
+        # perfil injetado), que vence o perfil da locadora (§28.9 regra 1).
+        "origem": (
+            "override"
+            if (slab_layout_mode is not None or methodology is not None)
+            else "perfil_locadora"
+        ),
+    }
+
     # Stage 6: Rule verification (feature flag: ESCORA_RUN_RULES, default on)
     import os
     if os.environ.get("ESCORA_RUN_RULES", "1") != "0" and result.calculation is not None:

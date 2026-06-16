@@ -637,6 +637,26 @@
             transform: translateX(3px);
         }
 
+        /* ---------- Methodology badge (read-only, projects tab) ---------- */
+        .methodology-badge {
+            display: flex;
+            align-items: baseline;
+            flex-wrap: wrap;
+            gap: 6px 10px;
+            padding: 11px 16px;
+            margin: 0 0 18px;
+            background: var(--accent-soft);
+            border: 1px solid var(--line);
+            border-left: 3px solid var(--accent);
+            border-radius: var(--radius-sm);
+            font-family: var(--sans);
+            font-size: 0.86rem;
+        }
+        .methodology-badge .mb-key { color: var(--fg-mute); }
+        .methodology-badge .mb-val { color: var(--fg); font-weight: 600; }
+        .methodology-badge .mb-sep { color: var(--fg-mute); }
+        .methodology-badge .mb-barrote { color: var(--fg-mute); }
+
         /* ---------- Session badge (floating top-right) ---------- */
         #sessionBadge {
             position: fixed;
@@ -1450,6 +1470,8 @@
                     <input type="file" id="fileInput" accept=".dxf,.dwg">
                 </div>
 
+                <div class="methodology-badge" id="methodologyBadge" style="display:none;"></div>
+
                 <div class="section-head">
                     <span class="section-title">Projetos</span>
                     <span class="section-count" id="jobCount">00</span>
@@ -1857,6 +1879,22 @@
             const branch = SESSION && SESSION.branches.find(b => b.id === BRANCH_ID);
             const label = branch ? `${SESSION.locadora_name} \u00B7 ${branch.branch_name}` : 'logado';
             document.getElementById('sbLabel').textContent = label;
+            renderMethodologyBadge(branch);
+        }
+
+        function renderMethodologyBadge(branch) {
+            const el = document.getElementById('methodologyBadge');
+            if (!el) return;
+            const m = branch && branch.metodologia;
+            if (!m) { el.style.display = 'none'; el.innerHTML = ''; return; }
+            const layout = (m.labels && m.labels.laje_layout && m.labels.laje_layout.pt) || m.laje_layout || '\u2014';
+            const barrote = (m.barrote_resumo && m.barrote_resumo.labels && m.barrote_resumo.labels.pt) || '';
+            el.innerHTML = `
+                <span class="mb-key">Metodologia:</span>
+                <span class="mb-val">${layout}</span>
+                ${barrote ? `<span class="mb-sep">\u00B7</span><span class="mb-barrote">${barrote}</span>` : ''}
+            `;
+            el.style.display = 'flex';
         }
 
         async function bootstrap() {

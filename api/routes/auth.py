@@ -23,9 +23,28 @@ from src.auth.branches import (
     resolve_session,
     revoke_session,
 )
+from src.models.methodology import load_methodology
 from api.deps import get_current_branch
+from api.services.methodology_view import serialize_profile
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
+
+
+def _branch_dto(b: Branch, locadora_id: str) -> "BranchDTO":
+    """Monta o BranchDTO com a metodologia resolvida da locadora/branch.
+
+    A metodologia e um atributo da locadora (§28.9): load_methodology faz o
+    merge locadora -> branch e cai nos defaults em codigo na ausencia do campo.
+    """
+    return BranchDTO(
+        id=b.id,
+        branch_name=b.branch_name,
+        inventory_name=b.inventory_name,
+        display_name=b.display_name,
+        metodologia=serialize_profile(
+            load_methodology(branch_id=b.id, locadora_id=locadora_id)
+        ),
+    )
 
 
 class LoginRequest(BaseModel):
@@ -51,6 +70,7 @@ class BranchDTO(BaseModel):
     branch_name: str
     inventory_name: str
     display_name: str
+    metodologia: Optional[dict] = None
 
 
 class LoginResponse(BaseModel):
@@ -83,15 +103,7 @@ async def login(body: LoginRequest):
         name=user.name,
         locadora_id=locadora.id,
         locadora_name=locadora.name,
-        branches=[
-            BranchDTO(
-                id=b.id,
-                branch_name=b.branch_name,
-                inventory_name=b.inventory_name,
-                display_name=b.display_name,
-            )
-            for b in locadora.branches
-        ],
+        branches=[_branch_dto(b, locadora.id) for b in locadora.branches],
     )
 
 
@@ -123,12 +135,7 @@ async def signup(body: SignupRequest):
         locadora_id=locadora.id if locadora else user.locadora_id,
         locadora_name=locadora.name if locadora else body.company,
         branches=[
-            BranchDTO(
-                id=b.id,
-                branch_name=b.branch_name,
-                inventory_name=b.inventory_name,
-                display_name=b.display_name,
-            )
+            _branch_dto(b, locadora.id)
             for b in (locadora.branches if locadora else [])
         ],
     )
@@ -195,25 +202,23 @@ async def me(
                 selected = b
                 break
 
+    def _branch_payload(b: Branch) -> dict:
+        return {
+            "id": b.id,
+            "branch_name": b.branch_name,
+            "inventory_name": b.inventory_name,
+            "display_name": b.display_name,
+            "metodologia": serialize_profile(
+                load_methodology(branch_id=b.id, locadora_id=locadora.id)
+            ),
+        }
+
     return {
         "username": session["username"],
         "locadora_id": locadora.id,
         "locadora_name": locadora.name,
-        "branches": [
-            {
-                "id": b.id,
-                "branch_name": b.branch_name,
-                "inventory_name": b.inventory_name,
-                "display_name": b.display_name,
-            }
-            for b in locadora.branches
-        ],
-        "selected_branch": {
-            "id": selected.id,
-            "branch_name": selected.branch_name,
-            "inventory_name": selected.inventory_name,
-            "display_name": selected.display_name,
-        } if selected else None,
+        "branches": [_branch_payload(b) for b in locadora.branches],
+        "selected_branch": _branch_payload(selected) if selected else None,
     }
 
 

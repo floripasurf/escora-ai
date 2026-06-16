@@ -67,3 +67,4 @@ class PipelineResult(BaseModel):
     errors: List[str] = Field(default_factory=list)
     calculation: Optional[Any] = Field(default=None, description="CalculationResult when engine stage runs")
     violations: List[Violation] = Field(default_factory=list, description="Rule violations detected by the rule registry")
+    methodology: Optional[dict] = Field(default=None, description="Perfil de metodologia efetivo (§28.9) — rastreabilidade do output")

@@ -7,6 +7,7 @@ resumo de consumo por pé-direito (`*_consumo.csv`).
 import csv
 from typing import List
 
+from src.models.methodology import describe_methodology
 from src.output.report_data import ReportData
 
 
@@ -73,6 +74,8 @@ def write_consumption_csv(report: ReportData, output_path: str) -> str:
         })
 
     with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
+        # Rastreabilidade (§28.9): metodologia como comentario antes da tabela.
+        f.write(f"# {describe_methodology(report.methodology)}\n")
         writer = csv.DictWriter(f, fieldnames=CONSUMPTION_FIELDNAMES, delimiter=";")
         writer.writeheader()
         writer.writerows(rows)

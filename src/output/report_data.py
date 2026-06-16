@@ -42,6 +42,7 @@ class ReportMetadata:
     date: str
     scale: float
     dxf_filename: str
+    methodology: Optional[dict] = None
 
 
 @dataclass
@@ -139,6 +140,7 @@ class ReportData:
     volume_totals: Dict[str, float] = field(default_factory=dict)
     consumption_rows: List[ConsumptionByHeightRow] = field(default_factory=list)
     consumption_totals: Dict[str, float] = field(default_factory=dict)
+    methodology: Optional[dict] = None
 
 
 def _format_section(width_m: Optional[float], height_m: Optional[float]) -> str:
@@ -331,6 +333,7 @@ def build_report_data(
         volume_totals=volume_totals,
         consumption_rows=consumption_rows,
         consumption_totals=consumption_totals,
+        methodology=metadata.methodology,
     )
 
 

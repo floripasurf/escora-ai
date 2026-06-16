@@ -15,6 +15,7 @@ from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable,
     PageBreak, KeepTogether,
 )
+from src.models.methodology import describe_methodology
 from src.output.report_data import ReportData
 from src.utils.constants import (
     GAMMA_CONCRETO, GAMMA_F, Q_SOBRECARGA_DEFAULT, Q_FORMA_DEFAULT,
@@ -116,6 +117,7 @@ def generate_pdf(report: ReportData, output_path: str) -> str:
         f"Projeto: {report.project_name} &nbsp;&nbsp;|&nbsp;&nbsp; Data: {report.date}",
         styles["Normal"],
     ))
+    elements.append(Paragraph(describe_methodology(report.methodology), styles["Normal"]))
     elements.append(Spacer(1, 8 * mm))
 
     # === SUMMARY ===
@@ -239,6 +241,7 @@ def generate_memoria_calculo(report: ReportData, output_path: str) -> str:
         f"Projeto: {report.project_name} &nbsp;|&nbsp; Data: {report.date}",
         styles["Normal"],
     ))
+    el.append(Paragraph(describe_methodology(report.methodology), styles["Normal"]))
     el.append(Spacer(1, 4 * mm))
     el.append(HRFlowable(width="100%", thickness=1, color=HEADER_BG))
     el.append(Spacer(1, 6 * mm))
@@ -540,10 +543,15 @@ def generate_orcamento(report: ReportData, output_path: str,
     el.append(Spacer(1, 6 * mm))
 
     # --- PROPOSAL INFO ---
+    # Rastreabilidade (§28.9): metodologia tambem no orcamento (artefato baixavel).
+    # describe_methodology ja prefixa "Metodologia: " — removido aqui pois o rotulo
+    # da coluna ja diz "Metodologia:".
+    metodologia_txt = describe_methodology(report.methodology).removeprefix("Metodologia: ")
     info_data = [
         ["Projeto:", report.project_name],
         ["Cliente:", client_name or "(a definir)"],
         ["Data:", today],
+        ["Metodologia:", metodologia_txt],
         ["Validade:", f"{validity_days} dias"],
         ["Prazo de entrega:", f"{delivery_days} dias úteis"],
         ["Período de locação:", f"{rental_period_days} dias"],

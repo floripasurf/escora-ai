@@ -23,6 +23,7 @@ SEED_LOCADORAS = {
         {
             "id": "loc-a",
             "name": "Locadora A",
+            "metodologia": {"laje_layout": "line_first"},
             "branches": [
                 {
                     "id": "test-a",
