@@ -46,7 +46,7 @@ SEED_LOCADORAS = {
                 {
                     "id": "test-b",
                     "branch_name": "Unit B",
-                    "inventory_name": "orguel_sjc",
+                    "inventory_name": "loc_b_unit",
                 }
             ],
             "users": [

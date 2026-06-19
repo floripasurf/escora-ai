@@ -317,7 +317,7 @@
         }
 
         /* ---------- Inputs ---------- */
-        input[type="text"], input[type="password"], input[type="email"], input[type="tel"], input:not([type]) {
+        input[type="text"], input[type="password"], input[type="email"], input[type="tel"], input[type="number"], input:not([type]), select {
             font-family: var(--sans);
             font-size: 0.92rem;
             padding: 13px 14px;
@@ -329,7 +329,7 @@
             transition: border-color 0.15s, box-shadow 0.15s;
             width: 100%;
         }
-        input:focus {
+        input:focus, select:focus {
             border-color: var(--accent);
             box-shadow: 0 0 0 3px rgba(207, 255, 26, 0.12);
         }
@@ -1017,6 +1017,28 @@
         .inventory-actions {
             display: flex;
             gap: 8px;
+            flex-wrap: wrap;
+        }
+        .inventory-editor {
+            display: none;
+            background: var(--bg-1);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+        .inventory-editor.open { display: block; }
+        .inventory-editor-grid {
+            display: grid;
+            grid-template-columns: 1.1fr 1.2fr 0.7fr 0.8fr 0.8fr 0.8fr;
+            gap: 10px;
+            align-items: center;
+        }
+        .inventory-editor-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+            margin-top: 10px;
         }
         .inventory-note {
             font-size: 0.85rem;
@@ -1055,6 +1077,20 @@
         .inv-table tr:hover td {
             background: var(--bg-2);
         }
+        .inv-muted {
+            color: var(--fg-mute);
+        }
+        .inv-actions-cell {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+            min-width: 150px;
+        }
+        .inv-empty {
+            color: var(--fg-dim);
+            text-align: center;
+            padding: 24px 14px !important;
+        }
         .inv-status {
             display: inline-flex;
             padding: 3px 10px;
@@ -1072,6 +1108,11 @@
             border: 1px solid rgba(251, 191, 36, 0.35);
             color: var(--warn);
             background: rgba(251, 191, 36, 0.08);
+        }
+        .inv-status-out {
+            border: 1px solid rgba(248, 113, 113, 0.35);
+            color: var(--err);
+            background: rgba(248, 113, 113, 0.08);
         }
 
         /* ========== NEW: Account Tab ========== */
@@ -1151,6 +1192,9 @@
             .landing-hero { padding: 3rem 1rem 2rem; }
             .landing-hero h1 { font-size: 2rem; }
             .tab-btn { padding: 10px 16px; font-size: 0.82rem; }
+            .inventory-editor-grid { grid-template-columns: 1fr; }
+            .inventory-editor-actions { justify-content: stretch; }
+            .inventory-editor-actions .btn { flex: 1; }
         }
         @media (min-width: 641px) and (max-width: 900px) {
             .landing-visuals { grid-template-columns: 1fr 1fr; }
@@ -1485,12 +1529,36 @@
                     <div class="inventory-header">
                         <h2>Inventário de Equipamentos</h2>
                         <div class="inventory-actions">
-                            <button class="btn" onclick="alert('Funcionalidade em desenvolvimento')">Importar Inventário</button>
-                            <button class="btn btn-primary" onclick="alert('Funcionalidade em desenvolvimento')">Adicionar Item</button>
+                            <button class="btn" onclick="downloadInventoryTemplateXlsx()">Baixar Excel</button>
+                            <button class="btn" onclick="downloadInventoryTemplate()">Baixar CSV</button>
+                            <button class="btn" onclick="openInventoryCsv()">Importar Excel/CSV</button>
+                            <button class="btn btn-primary" onclick="openInventoryForm()">Adicionar Item</button>
                         </div>
                     </div>
                     <div class="inventory-note">
-                        Inventário sincronizado com o motor de calculo para otimização automática.
+                        <span id="inventoryMeta">Carregando inventário...</span>
+                    </div>
+                    <input type="file" id="inventoryCsvInput" accept=".csv,.xlsx" style="display:none;">
+                    <div id="inventoryEditor" class="inventory-editor">
+                        <div class="inventory-editor-grid">
+                            <input id="invModel" type="text" placeholder="Modelo">
+                            <select id="invSection">
+                                <option value="telescopic_shores">Escora metalica</option>
+                                <option value="tower_modules">Torre de escoramento</option>
+                                <option value="distribution_beams">Viga de distribuicao</option>
+                                <option value="accessories">Acessório</option>
+                            </select>
+                            <input id="invQty" type="number" min="0" step="1" placeholder="Qtd">
+                            <input id="invCapacity" type="number" min="0" step="0.01" placeholder="kN">
+                            <input id="invHeightMin" type="number" min="0" step="0.01" placeholder="Alt. min">
+                            <input id="invHeightMax" type="number" min="0" step="0.01" placeholder="Alt. max">
+                        </div>
+                        <input id="invNotes" type="text" placeholder="Observações" style="margin-top:10px;">
+                        <div class="inventory-editor-actions">
+                            <button class="btn" onclick="closeInventoryForm()">Cancelar</button>
+                            <button class="btn btn-primary" onclick="saveInventoryItem()">Salvar Item</button>
+                        </div>
+                        <div id="inventoryMsg" class="msg-line"></div>
                     </div>
                     <div class="inv-table-wrap">
                         <table class="inv-table">
@@ -1500,59 +1568,13 @@
                                     <th>Tipo</th>
                                     <th>Quantidade</th>
                                     <th>Capacidade (kN)</th>
+                                    <th>Altura (m)</th>
                                     <th>Status</th>
+                                    <th></th>
                                 </tr>
                             </thead>
-                            <tbody>
-                                <tr>
-                                    <td>ESC310</td>
-                                    <td>Escora metalica</td>
-                                    <td>18.663</td>
-                                    <td>15,0</td>
-                                    <td><span class="inv-status inv-status-ok">Disponivel</span></td>
-                                </tr>
-                                <tr>
-                                    <td>ESC450</td>
-                                    <td>Escora metalica</td>
-                                    <td>6.284</td>
-                                    <td>15,0</td>
-                                    <td><span class="inv-status inv-status-ok">Disponivel</span></td>
-                                </tr>
-                                <tr>
-                                    <td>Torre TA-100</td>
-                                    <td>Torre de escoramento</td>
-                                    <td>420</td>
-                                    <td>100,0</td>
-                                    <td><span class="inv-status inv-status-ok">Disponivel</span></td>
-                                </tr>
-                                <tr>
-                                    <td>Torre TA-150</td>
-                                    <td>Torre de escoramento</td>
-                                    <td>185</td>
-                                    <td>150,0</td>
-                                    <td><span class="inv-status inv-status-low">Estoque baixo</span></td>
-                                </tr>
-                                <tr>
-                                    <td>VM130</td>
-                                    <td>Viga de distribuição</td>
-                                    <td>3.200</td>
-                                    <td>&mdash;</td>
-                                    <td><span class="inv-status inv-status-ok">Disponivel</span></td>
-                                </tr>
-                                <tr>
-                                    <td>VM80</td>
-                                    <td>Viga de distribuição</td>
-                                    <td>2.100</td>
-                                    <td>&mdash;</td>
-                                    <td><span class="inv-status inv-status-ok">Disponivel</span></td>
-                                </tr>
-                                <tr>
-                                    <td>VM50</td>
-                                    <td>Viga de distribuição</td>
-                                    <td>1.450</td>
-                                    <td>&mdash;</td>
-                                    <td><span class="inv-status inv-status-low">Estoque baixo</span></td>
-                                </tr>
+                            <tbody id="inventoryBody">
+                                <tr><td colspan="7" class="inv-empty">Carregando...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -1621,6 +1643,8 @@
             : 'https://escora.blackcube.dev';
         const API = `${BACKEND}/api/v1`;
         const jobs = {};
+        let INVENTORY = null;
+        let EDITING_INVENTORY_MODEL = null;
 
         // XSS-safe text escaping for all user-controlled strings
         function esc(s) {
@@ -1628,6 +1652,14 @@
             const d = document.createElement('div');
             d.textContent = String(s);
             return d.innerHTML;
+        }
+
+        function jsArg(s) {
+            return String(s == null ? '' : s)
+                .replace(/\\/g, '\\\\')
+                .replace(/'/g, "\\'")
+                .replace(/\r/g, '')
+                .replace(/\n/g, '\\n');
         }
         let TOKEN = localStorage.getItem('escora_token') || '';
         let BRANCH_ID = localStorage.getItem('escora_branch_id') || '';
@@ -1676,6 +1708,7 @@
                 btn.classList.toggle('active', btn.dataset.tab === tabId);
             });
             if (tabId === 'accountTab') updateAccountInfo();
+            if (tabId === 'inventoryTab') refreshInventory();
         }
 
         function updateAccountInfo() {
@@ -1844,6 +1877,7 @@
         function selectBranch(branchId) {
             BRANCH_ID = branchId;
             localStorage.setItem('escora_branch_id', BRANCH_ID);
+            INVENTORY = null;
             show('appCard');
             renderHeaderBadge();
             refreshJobsList();
@@ -1857,6 +1891,8 @@
             localStorage.removeItem('escora_token');
             localStorage.removeItem('escora_branch_id');
             Object.keys(jobs).forEach(k => delete jobs[k]);
+            INVENTORY = null;
+            EDITING_INVENTORY_MODEL = null;
             show('landingPage');
             const el = document.getElementById('sessionBadge');
             if (el) el.remove();
@@ -1963,11 +1999,210 @@
             } catch (e) {}
         }
 
+        async function refreshInventory() {
+            if (!TOKEN || !BRANCH_ID) return;
+            const meta = document.getElementById('inventoryMeta');
+            if (meta) meta.textContent = 'Carregando inventario...';
+            try {
+                const res = await fetch(`${API}/inventory`, { headers: authHeaders() });
+                if (!res.ok) {
+                    if (meta) meta.textContent = await safeErrorMessage(res);
+                    return;
+                }
+                INVENTORY = await res.json();
+                renderInventory();
+            } catch (e) {
+                if (meta) meta.textContent = 'Erro de conexao: ' + e.message;
+            }
+        }
+
+        function renderInventory() {
+            const body = document.getElementById('inventoryBody');
+            const meta = document.getElementById('inventoryMeta');
+            if (!body || !INVENTORY) return;
+
+            const items = INVENTORY.items || [];
+            const branch = SESSION && SESSION.branches.find(b => b.id === BRANCH_ID);
+            const unit = branch ? branch.branch_name : INVENTORY.inventory_name;
+            const updated = INVENTORY.updated_at ? ` · atualizado em ${INVENTORY.updated_at}` : '';
+            if (meta) meta.textContent = `${unit} · ${items.length} modelos${updated}`;
+
+            if (!items.length) {
+                body.innerHTML = '<tr><td colspan="7" class="inv-empty">Nenhum item cadastrado</td></tr>';
+                return;
+            }
+
+            body.innerHTML = items.map(item => {
+                const cap = item.capacity_kn == null ? '<span class="inv-muted">&mdash;</span>' : fmtInv(item.capacity_kn, 2);
+                const hMin = item.height_min_m == null ? '' : fmtInv(item.height_min_m, 2);
+                const hMax = item.height_max_m == null ? '' : fmtInv(item.height_max_m, 2);
+                const height = hMin || hMax ? `${hMin || '?'}-${hMax || '?'}` : '<span class="inv-muted">&mdash;</span>';
+                const statusClass = item.status === 'low' ? 'inv-status-low' : (item.status === 'out' ? 'inv-status-out' : 'inv-status-ok');
+                const modelArg = esc(jsArg(item.model_id));
+                return `
+                    <tr>
+                        <td>${esc(item.model_id)}</td>
+                        <td>${esc(item.type)}</td>
+                        <td>${fmtInv(item.qty, 0)}</td>
+                        <td>${cap}</td>
+                        <td>${height}</td>
+                        <td><span class="inv-status ${statusClass}">${esc(item.status_label)}</span></td>
+                        <td>
+                            <div class="inv-actions-cell">
+                                <button class="btn" onclick="openInventoryForm('${modelArg}')">Editar</button>
+                                <button class="btn btn-danger" onclick="deleteInventoryItem('${modelArg}')">Remover</button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function fmtInv(value, digits) {
+            if (value == null || value === '') return '\u2014';
+            return Number(value).toLocaleString('pt-BR', {
+                minimumFractionDigits: digits,
+                maximumFractionDigits: digits,
+            });
+        }
+
+        function inventoryMsg(text, ok = false) {
+            const msg = document.getElementById('inventoryMsg');
+            if (!msg) return;
+            msg.textContent = text || '';
+            msg.classList.toggle('ok', ok);
+        }
+
+        function currentInventoryItem(modelId) {
+            return (INVENTORY && INVENTORY.items || []).find(i => i.model_id === modelId);
+        }
+
+        function openInventoryForm(modelId = '') {
+            const item = modelId ? currentInventoryItem(modelId) : null;
+            EDITING_INVENTORY_MODEL = item ? item.model_id : null;
+            const editor = document.getElementById('inventoryEditor');
+            const model = document.getElementById('invModel');
+            editor.classList.add('open');
+            model.disabled = Boolean(item);
+            model.value = item ? item.model_id : '';
+            document.getElementById('invSection').value = item ? item.section : 'telescopic_shores';
+            document.getElementById('invQty').value = item ? item.qty : '';
+            document.getElementById('invCapacity').value = item && item.capacity_kn != null ? item.capacity_kn : '';
+            document.getElementById('invHeightMin').value = item && item.height_min_m != null ? item.height_min_m : '';
+            document.getElementById('invHeightMax').value = item && item.height_max_m != null ? item.height_max_m : '';
+            document.getElementById('invNotes').value = item ? (item.notes || '') : '';
+            inventoryMsg('');
+            model.focus();
+        }
+
+        function closeInventoryForm() {
+            const editor = document.getElementById('inventoryEditor');
+            if (editor) editor.classList.remove('open');
+            const model = document.getElementById('invModel');
+            if (model) model.disabled = false;
+            EDITING_INVENTORY_MODEL = null;
+            inventoryMsg('');
+        }
+
+        function formNumber(id) {
+            const raw = document.getElementById(id).value;
+            return raw === '' ? null : Number(raw);
+        }
+
+        async function saveInventoryItem() {
+            const model = (EDITING_INVENTORY_MODEL || document.getElementById('invModel').value).trim();
+            const qty = formNumber('invQty');
+            if (!model) { inventoryMsg('Informe o modelo'); return; }
+            if (qty == null || qty < 0 || !Number.isFinite(qty)) { inventoryMsg('Quantidade invalida'); return; }
+
+            const current = currentInventoryItem(model);
+            const body = {
+                section: document.getElementById('invSection').value,
+                qty: Math.floor(qty),
+                capacity_kn: formNumber('invCapacity'),
+                height_min_m: formNumber('invHeightMin'),
+                height_max_m: formNumber('invHeightMax'),
+                notes: document.getElementById('invNotes').value.trim(),
+            };
+            if (current && current.capacity_curve) body.capacity_curve = current.capacity_curve;
+
+            try {
+                const res = await fetch(`${API}/inventory/items/${encodeURIComponent(model)}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                    body: JSON.stringify(body),
+                });
+                if (!res.ok) {
+                    inventoryMsg(await safeErrorMessage(res));
+                    return;
+                }
+                INVENTORY = await res.json();
+                renderInventory();
+                closeInventoryForm();
+            } catch (e) {
+                inventoryMsg('Erro de conexao: ' + e.message);
+            }
+        }
+
+        async function deleteInventoryItem(model) {
+            if (!confirm(`Remover ${model} do inventario desta unidade?`)) return;
+            try {
+                const res = await fetch(`${API}/inventory/items/${encodeURIComponent(model)}`, {
+                    method: 'DELETE',
+                    headers: authHeaders(),
+                });
+                if (!res.ok) {
+                    inventoryMsg(await safeErrorMessage(res));
+                    return;
+                }
+                INVENTORY = await res.json();
+                renderInventory();
+                closeInventoryForm();
+            } catch (e) {
+                inventoryMsg('Erro de conexao: ' + e.message);
+            }
+        }
+
+        function openInventoryCsv() {
+            if (!confirm('Importar CSV/XLSX substitui o inventario inteiro desta unidade. Continuar?')) return;
+            document.getElementById('inventoryCsvInput').click();
+        }
+
+        async function uploadInventoryCsv(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+            try {
+                const res = await fetch(`${API}/inventory/import-csv`, {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: formData,
+                });
+                if (!res.ok) {
+                    inventoryMsg(await safeErrorMessage(res));
+                    return;
+                }
+                INVENTORY = await res.json();
+                renderInventory();
+                closeInventoryForm();
+            } catch (e) {
+                inventoryMsg('Erro de conexao: ' + e.message);
+            }
+        }
+
+        function downloadInventoryTemplate() {
+            downloadFile('/inventory/template.csv', 'modelo-inventario.csv');
+        }
+
+        function downloadInventoryTemplateXlsx() {
+            downloadFile('/inventory/template.xlsx', 'modelo-inventario.xlsx');
+        }
+
         bootstrap();
 
         // Upload handling
         const uploadZone = document.getElementById('uploadZone');
         const fileInput = document.getElementById('fileInput');
+        const inventoryCsvInput = document.getElementById('inventoryCsvInput');
 
         ['dragover', 'dragenter'].forEach(e => {
             uploadZone.addEventListener(e, (ev) => {
@@ -1987,6 +2222,12 @@
             if (fileInput.files[0]) uploadFile(fileInput.files[0]);
             fileInput.value = '';
         });
+        if (inventoryCsvInput) {
+            inventoryCsvInput.addEventListener('change', () => {
+                if (inventoryCsvInput.files[0]) uploadInventoryCsv(inventoryCsvInput.files[0]);
+                inventoryCsvInput.value = '';
+            });
+        }
 
         async function uploadFile(file) {
             if (!TOKEN || !BRANCH_ID) { show('loginCard'); return; }

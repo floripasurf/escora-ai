@@ -30,7 +30,7 @@
         {
           "id": "loc-lages-raphael-default",
           "branch_name": "Sede",
-          "inventory_name": "default"
+          "inventory_name": "loc-lages-raphael-default"
         }
       ],
       "users": [

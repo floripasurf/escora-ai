@@ -162,6 +162,21 @@ class TestInventoryMode:
         assert shore is not None
         assert any("Sem estoque" in rec.message for rec in caplog.records)
 
+    def test_select_shore_inventory_matches_legacy_alias(
+        self, catalog, inv_only_esc310, caplog,
+    ):
+        with caplog.at_level("WARNING"):
+            shore = select_shore(
+                catalog,
+                required_height_m=2.8,
+                required_capacity_kn=8.0,
+                mode="inventory",
+                inventory=inv_only_esc310,
+            )
+        assert shore is not None
+        assert shore.id == "ESC2000-3100"
+        assert not any("Sem estoque" in rec.message for rec in caplog.records)
+
     def test_decide_support_type_inventory_no_towers_falls_back_to_shores(
         self, catalog, inv_no_towers,
     ):

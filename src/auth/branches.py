@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import secrets
+import shutil
 import sqlite3
 import threading
 import time
@@ -105,6 +106,7 @@ class User:
     name: str
     password_hash: str
     locadora_id: str
+    role: str = "engineer"
 
 
 @dataclass
@@ -145,6 +147,7 @@ def load_registry() -> Dict[str, Locadora]:
                 name=u.get("name", u["username"]),
                 password_hash=u["password_hash"],
                 locadora_id=loc.id,
+                role=u.get("role", "engineer"),
             ))
         out[loc.id] = loc
     return out
@@ -309,6 +312,7 @@ def create_user(
         slug = re.sub(r"[^a-z0-9-]", "-", email.split("@")[0].lower())
         loc_id = f"loc-{slug}"
         branch_id = f"{loc_id}-default"
+        inventory_name = branch_id
 
         new_locadora = {
             "id": loc_id,
@@ -317,7 +321,7 @@ def create_user(
                 {
                     "id": branch_id,
                     "branch_name": "Sede",
-                    "inventory_name": "default",
+                    "inventory_name": inventory_name,
                 }
             ],
             "users": [
@@ -326,6 +330,7 @@ def create_user(
                     "name": name,
                     "password_hash": hash_password(password),
                     "phone": phone,
+                    "role": "owner",
                 }
             ],
         }
@@ -346,7 +351,67 @@ def create_user(
         name=name,
         password_hash="",
         locadora_id=loc_id,
+        role="owner",
     )
+
+
+def repair_default_inventory_names() -> int:
+    """Replace shared 'default' inventory names with per-branch names.
+
+    Older signups used inventory_name="default", which can make unrelated
+    locadoras share the same stock file. This migration is intentionally small
+    and JSON-backed so current deployments can repair themselves at startup.
+    """
+    path = _locadoras_path()
+    if not path.exists():
+        return 0
+    data = json.loads(path.read_text(encoding="utf-8"))
+    changed = 0
+    for entry in data.get("locadoras", []):
+        for branch in entry.get("branches", []):
+            if branch.get("inventory_name") != "default":
+                continue
+            new_name = branch.get("id")
+            if not new_name:
+                continue
+            branch["inventory_name"] = new_name
+            changed += 1
+            _copy_default_inventory_if_needed(new_name)
+
+    if not changed:
+        return 0
+
+    tmp_path = path.with_suffix(".tmp")
+    content = json.dumps(data, indent=2, ensure_ascii=False)
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        import fcntl
+
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        f.write(content)
+        f.flush()
+        os.fsync(f.fileno())
+    tmp_path.replace(path)
+    logger.info(f"Repaired {changed} shared default inventory name(s)")
+    return changed
+
+
+def _copy_default_inventory_if_needed(new_name: str) -> None:
+    try:
+        from src.engine.inventory import DEFAULT_INVENTORY_DIR, inventory_path
+
+        dest = inventory_path(new_name)
+        if dest.exists():
+            return
+        source = inventory_path("default")
+        if not source.exists():
+            fallback = DEFAULT_INVENTORY_DIR / "default.json"
+            source = fallback if fallback.exists() else source
+        if not source.exists():
+            return
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, dest)
+    except Exception as e:
+        logger.warning(f"Failed to copy default inventory to {new_name}: {e}")
 
 
 def change_password(username: str, old_password: str, new_password: str) -> bool:

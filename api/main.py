@@ -13,6 +13,7 @@ from api.routes.auth import router as auth_router
 from api.routes.projects import router as projects_router
 from api.routes.design import router as design_router
 from api.routes.drawing import router as drawing_router
+from api.routes.inventory import router as inventory_router
 from api.config import settings
 from api.services import job_service
 
@@ -32,6 +33,7 @@ app.include_router(jobs_router)
 app.include_router(projects_router)
 app.include_router(design_router)
 app.include_router(drawing_router)
+app.include_router(inventory_router)
 
 # Serve static frontend
 STATIC_DIR = Path(__file__).parent.parent / "web" / "static"
@@ -64,7 +66,8 @@ def _startup() -> None:
     if swept:
         logger.warning(f"Startup: marked {swept} orphan job(s) as error")
     # Session store (SQLite) warm-up.
-    from src.auth.branches import init_sessions_db
+    from src.auth.branches import init_sessions_db, repair_default_inventory_names
+    repair_default_inventory_names()
     init_sessions_db()
 
 

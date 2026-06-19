@@ -72,7 +72,10 @@ def select_shore(
         return None
 
     if mode == "inventory" and inventory is not None:
-        in_stock_items = [s for s in compatible if in_stock(inventory, s.id)]
+        in_stock_items = [
+            s for s in compatible
+            if in_stock(inventory, s.id, aliases=s.aliases)
+        ]
         if in_stock_items:
             return min(
                 in_stock_items,
