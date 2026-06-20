@@ -18,6 +18,16 @@ def _login(username: str, password: str, branch_id: str) -> TestClient:
     return tc
 
 
+def test_owner_can_read_usage_summary(client):
+    r = client.get("/api/v1/admin/usage")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "summary" in body and "recent" in body
+    assert "total" in body["summary"]
+    assert "by_status" in body["summary"]
+    assert "error_rate" in body["summary"]
+
+
 def test_owner_can_manage_locadora_branches_and_users(client):
     loc = client.get("/api/v1/admin/locadora")
     assert loc.status_code == 200

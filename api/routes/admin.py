@@ -8,6 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from api.deps import get_current_user, require_owner_or_admin
+from api.services import job_service
+from api.services.usage_stats import summarize_jobs
 from src.auth.branches import User, hash_password
 from src.auth.registry import (
     ROLE_ADMIN,
@@ -62,6 +64,45 @@ async def get_my_locadora(user: User = Depends(require_owner_or_admin)):
     if locadora is None:
         raise HTTPException(status_code=404, detail="Locadora nao encontrada")
     return locadora
+
+
+@router.get("/usage")
+async def get_usage(user: User = Depends(require_owner_or_admin)):
+    """Telemetria de piloto: agrega os jobs das unidades da locadora.
+
+    Mede o uso por parceiro (volume, taxa de erro, tempo medio, revisoes)
+    sem tabela nova — agrega a tabela `jobs` ja existente.
+    """
+    locadora = public_locadora(user.locadora_id)
+    if locadora is None:
+        raise HTTPException(status_code=404, detail="Locadora nao encontrada")
+    jobs = []
+    for b in locadora.get("branches", []):
+        jobs.extend(job_service.list_jobs(branch_id=b["id"]))
+    summary = summarize_jobs(jobs)
+    ordered = sorted(
+        jobs,
+        key=lambda j: j.get("updated_at") or j.get("created_at"),
+        reverse=True,
+    )
+    recent = [
+        {
+            "id": j["id"],
+            "filename": j.get("filename"),
+            "status": j.get("status"),
+            "branch_id": j.get("branch_id"),
+            "requires_review": bool(
+                (j.get("results_data") or {}).get("requires_review")
+            ),
+            "updated_at": (
+                j["updated_at"].isoformat()
+                if hasattr(j.get("updated_at"), "isoformat")
+                else j.get("updated_at")
+            ),
+        }
+        for j in ordered[:15]
+    ]
+    return {"summary": summary, "recent": recent}
 
 
 @router.post("/branches")

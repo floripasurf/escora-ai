@@ -1739,6 +1739,7 @@
                             <h3>Administração</h3>
                             <button class="btn" onclick="loadAdminPanel()">Atualizar</button>
                         </div>
+                        <div id="adminUsage" class="admin-usage" style="margin-bottom:14px;font-size:0.88rem;color:var(--fg-dim)"></div>
                         <div class="admin-grid">
                             <div>
                                 <h4>Unidades</h4>
@@ -1988,9 +1989,33 @@
                 }
                 ADMIN_STATE = await res.json();
                 renderAdminPanel();
+                loadUsage();
                 adminMsg('');
             } catch (e) {
                 adminMsg('Erro de conexao: ' + e.message);
+            }
+        }
+
+        async function loadUsage() {
+            const box = document.getElementById('adminUsage');
+            if (!box) return;
+            try {
+                const res = await fetch(`${API}/admin/usage`, { headers: authHeaders() });
+                if (!res.ok) { box.innerHTML = ''; return; }
+                const data = await res.json();
+                const s = data.summary || {};
+                const byStatus = Object.entries(s.by_status || {})
+                    .map(([k, v]) => `${esc(k)}: ${v}`).join(' · ');
+                const avg = s.avg_elapsed_seconds != null
+                    ? `${Math.round(s.avg_elapsed_seconds)}s` : '—';
+                box.innerHTML = `
+                    <b>Telemetria (todas as unidades)</b><br>
+                    Projetos: ${s.total || 0} · Taxa de erro: ${Math.round((s.error_rate || 0) * 100)}%
+                    · Tempo médio: ${avg} · Revisão obrigatória: ${s.requires_review || 0}
+                    ${byStatus ? `<br><span style="opacity:.8">${byStatus}</span>` : ''}
+                `;
+            } catch (_) {
+                box.innerHTML = '';
             }
         }
 
@@ -2837,6 +2862,16 @@
             document.getElementById('fileInput').click();
         }
 
+        function reportJob(jobId, stem) {
+            const branch = currentBranch();
+            const unit = branch ? branch.branch_name : '';
+            const subject = `[estrutura.app] Resultado a revisar — job ${jobId}`;
+            const body = `Projeto: ${stem || ''}\nJob ID: ${jobId}\nUnidade: ${unit}\n\n`
+                + `Descreva o problema no resultado (o que ficou errado, o que esperava):\n`;
+            window.location.href = `mailto:contato@estrutura.app?subject=`
+                + encodeURIComponent(subject) + `&body=` + encodeURIComponent(body);
+        }
+
         async function uploadFile(file) {
             if (!TOKEN || !BRANCH_ID) { show('loginCard'); return; }
             if (!canRunProjects()) { alert('Seu papel permite apenas visualizar resultados.'); return; }
@@ -3036,6 +3071,7 @@
                             ${job.has_ifc ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/ifc','${stem}.ifc');return false" class="btn btn-accent">\u2193 IFC</a>` : ''}
                             ${canOperate ? `<button class="btn btn-green" onclick="uploadRevision('${job.id}')">\u2191 Revisão</button>` : ''}
                             ${canOperate ? `<input type="file" class="revision-input" id="rev-${job.id}" accept=".dxf">` : ''}
+                            <button class="btn" onclick="reportJob('${job.id}','${esc(stem)}')">\u26a0 Reportar</button>
                             ${canOperate ? `<button class="btn btn-danger" onclick="deleteJob('${job.id}')">\u2715</button>` : ''}
                         </div>
                     `;
