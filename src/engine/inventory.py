@@ -320,6 +320,7 @@ def parse_inventory_csv(
     Cabecalhos aceitos (case-insensitive, sem acento):
         modelo, tipo, quantidade, capacidade_kn, altura_min_m,
         altura_max_m, curva, notes
+    Marcadores como N/A, N/D e "-" sao tratados como campo nao preenchido.
 
     Retorna dict pronto para ser gravado em data/inventory/<tenant>.json.
     """
@@ -349,6 +350,16 @@ def parse_inventory_csv(
         except ValueError:
             return None
 
+    def _is_empty_marker(value: str) -> bool:
+        marker = _norm(value).replace("/", "").replace("-", "").replace(".", "")
+        return marker in {"", "na", "nd", "naoaplicavel", "naoseaplica"}
+
+    def _cell(row: list[str], index: Optional[int]) -> str:
+        if index is None or index >= len(row):
+            return ""
+        value = row[index].strip()
+        return "" if _is_empty_marker(value) else value
+
     i_modelo = _idx("modelo")
     i_tipo = _idx("tipo")
     i_qty = _idx("quantidade")
@@ -365,7 +376,7 @@ def parse_inventory_csv(
         )
 
     def _curve(s: str) -> Optional[List[List[float]]]:
-        if not s.strip():
+        if not s.strip() or _is_empty_marker(s):
             return None
         pairs = []
         for chunk in s.split(";"):
@@ -377,32 +388,37 @@ def parse_inventory_csv(
         return pairs or None
 
     for row in rows[1:]:
-        if not row or not row[i_modelo].strip():
+        if not row or not _cell(row, i_modelo):
             continue
-        modelo = row[i_modelo].strip()
-        tipo_norm = _norm(row[i_tipo])
+        modelo = _cell(row, i_modelo)
+        tipo_raw = _cell(row, i_tipo)
+        tipo_norm = _norm(tipo_raw)
         section = None
         for keyword, sec in CSV_SECTION_BY_TIPO:
             if keyword in tipo_norm:
                 section = sec
                 break
         if section is None:
-            logger.warning(f"Tipo '{row[i_tipo]}' nao reconhecido para {modelo}; pulando")
+            logger.warning(f"Tipo '{tipo_raw}' nao reconhecido para {modelo}; pulando")
             continue
-        qty = int(float(row[i_qty]))
+        qty = int(float(_cell(row, i_qty)))
         item: Dict[str, Any] = {"qty": qty}
-        if i_cap is not None and row[i_cap].strip():
-            item["capacity_kn"] = float(row[i_cap])
-        if i_hmin is not None and row[i_hmin].strip():
-            item["height_min_m"] = float(row[i_hmin])
-        if i_hmax is not None and row[i_hmax].strip():
-            item["height_max_m"] = float(row[i_hmax])
+        cap = _cell(row, i_cap)
+        if cap:
+            item["capacity_kn"] = float(cap)
+        hmin = _cell(row, i_hmin)
+        if hmin:
+            item["height_min_m"] = float(hmin)
+        hmax = _cell(row, i_hmax)
+        if hmax:
+            item["height_max_m"] = float(hmax)
         if i_curva is not None:
-            curve = _curve(row[i_curva])
+            curve = _curve(_cell(row, i_curva))
             if curve:
                 item["capacity_curve"] = curve
-        if i_notes is not None and row[i_notes].strip():
-            item["notes"] = row[i_notes]
+        notes = _cell(row, i_notes)
+        if notes:
+            item["notes"] = notes
         sections[section][modelo] = item
 
     return {

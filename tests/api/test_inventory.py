@@ -1,6 +1,7 @@
 """Self-service inventory API tests."""
 
 from concurrent.futures import ThreadPoolExecutor
+import csv
 import json
 import os
 from pathlib import Path
@@ -154,12 +155,25 @@ def test_template_csv_lists_catalog_models_zeroed(client):
     r = client.get("/api/v1/inventory/template.csv")
     assert r.status_code == 200
     text = r.text
+    rows = list(csv.DictReader(io.StringIO(text)))
+    by_model = {row["Modelo"]: row for row in rows}
+
+    assert all(value not in (None, "") for row in rows for value in row.values())
     assert "ESC2000-3100,Escora metalica,0" in text
     assert "ESC310,Escora metalica,0" in text
     assert "TWR-TA150,Torre de escoramento,0" in text
     assert "VD-VM50-410,Viga de distribuicao,0" in text
     assert "VD-VM80-155,Barrote / viga de distribuicao,0" in text
     assert "CRZ-TORRE,Acessorio,0" in text
+    assert by_model["TWR-TA100"]["Capacidade (kN)"] == "39.3"
+    assert by_model["TWR-TA100"]["Altura minima (m)"] == "1.0"
+    assert by_model["TWR-TA100"]["Curva"] == "1:39.3;5:34.8;10:32.8;15:30.8;20:28.9"
+    assert by_model["TWR-TA150"]["Capacidade (kN)"] == "78.5"
+    assert by_model["TWR-TA150"]["Altura minima (m)"] == "1.5"
+    assert by_model["TWR-TA150"]["Curva"] == "1.5:78.5;7.5:69.5;15:65.5;22.5:61.6;30:57.7"
+    assert by_model["VD-VM130-155"]["Momento adm (kN.m)"] == "5.06"
+    assert by_model["VD-VM130-155"]["Vao max (m)"] == "1.55"
+    assert not by_model["VD-VM130-155"]["Observacoes"].startswith("M_adm=")
 
 
 def test_template_xlsx_download_is_valid_workbook(client):

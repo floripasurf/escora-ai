@@ -1,15 +1,15 @@
 {
   "catalog_version": "2.0",
   "type": "shoring_tower",
-  "updated": "2026-04-06",
-  "source": "Catálogo Orguel / Mecanor — painéis e vigas reais",
+  "updated": "2026-06-19",
+  "source": "Catálogo Orguel / Mecanor — painéis e vigas reais; capacidades reconciliadas com catalog/tower_capacity.yaml",
   "towers": [
     {
       "id": "TWR-TA100",
       "manufacturer": "Orguel/Mecanor",
       "model": "TA-100",
       "system": "tubular",
-      "load_capacity_kn": 100.0,
+      "load_capacity_kn": 39.3,
       "module_height_m": 1.00,
       "base_dimension_m": 1.00,
       "max_height_m": 20.0,
@@ -17,16 +17,16 @@
       "includes_bracing": true,
       "price_per_module_brl": 27.75,
       "capacity_curve": [
-        [1.0, 100.0], [5.0, 88.5], [10.0, 83.5], [15.0, 78.5], [20.0, 73.5]
+        [1.0, 39.3], [5.0, 34.8], [10.0, 32.8], [15.0, 30.8], [20.0, 28.9]
       ],
-      "notes": "Torre base 1.00m. Painéis: A(150cm), B(125cm), C(100cm). Derating proporcional à TA-150. Preço: 25.0kg × R$1.11/kg/mês."
+      "notes": "Torre base 1.00m. Painéis: A(150cm), B(125cm), C(100cm). Capacidade estimada por proporção de 50% da curva TA-150 corrigida (catalog/tower_capacity.yaml). Preço: 25.0kg × R$1.11/kg/mês."
     },
     {
       "id": "TWR-TA150",
       "manufacturer": "Orguel/Mecanor",
       "model": "TA-150",
       "system": "tubular",
-      "load_capacity_kn": 200.0,
+      "load_capacity_kn": 78.5,
       "module_height_m": 1.50,
       "base_dimension_m": 1.54,
       "max_height_m": 30.0,
@@ -34,23 +34,23 @@
       "includes_bracing": true,
       "price_per_module_brl": 42.18,
       "capacity_curve": [
-        [1.5, 200.0], [7.5, 177.0], [15.0, 167.0], [22.5, 157.0], [30.0, 147.0]
+        [1.5, 78.5], [7.5, 69.5], [15.0, 65.5], [22.5, 61.6], [30.0, 57.7]
       ],
-      "notes": "Torre base 1.54m. Painéis: A(1540x1500), B(1540x1250), C(1540x1000). Padrão para vigas. Manual p.35: capacidade varia de 200kN (1 mod) a 147kN (20 mod). Preço: 38.0kg × R$1.11/kg/mês."
+      "notes": "Torre base 1.54m. Painéis: A(1540x1500), B(1540x1250), C(1540x1000). Padrão para vigas. Manual p.86 / catalog/tower_capacity.yaml: 2000-1470 kgf por montante × 4 montantes = 78.5-57.7 kN por torre. Preço: 38.0kg × R$1.11/kg/mês."
     },
     {
       "id": "TWR-SH-LTT",
       "manufacturer": "SH",
       "model": "Torre LTT",
       "system": "tubular",
-      "load_capacity_kn": 120.0,
+      "load_capacity_kn": 117.7,
       "module_height_m": 1.50,
       "base_dimension_m": 1.30,
       "max_height_m": 30.0,
       "weight_per_module_kg": 38.0,
       "includes_bracing": true,
       "price_per_module_brl": 42.18,
-      "notes": "Torre padrão SH, capacidade 12tf. Preço: 38.0kg × R$1.11/kg/mês."
+      "notes": "Torre padrão SH, capacidade 12tf ≈ 117.7 kN. Preço: 38.0kg × R$1.11/kg/mês."
     }
   ],
   "distribution_beams": [

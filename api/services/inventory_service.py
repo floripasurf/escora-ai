@@ -22,6 +22,7 @@ from src.engine.inventory import (
 )
 
 SECTIONS = ("telescopic_shores", "tower_modules", "distribution_beams", "accessories")
+NOT_APPLICABLE = "N/A"
 
 SECTION_LABELS = {
     "telescopic_shores": "Escora metalica",
@@ -336,17 +337,20 @@ def template_rows() -> list[list[Any]]:
         def _num(value: Any) -> Any:
             return value if value not in (None, "", 0.0) else ""
 
+        def _display(value: Any) -> Any:
+            return value if value not in (None, "") else NOT_APPLICABLE
+
         rows.append([
             model_id,
             tipo,
             0,
-            _num(capacity),
-            h_min if h_min is not None else "",
-            h_max if h_max is not None else "",
-            _num(moment),
-            _num(span),
-            _curve_text(curve),
-            (notes or "").strip(),
+            _display(_num(capacity)),
+            _display(h_min if h_min is not None else ""),
+            _display(h_max if h_max is not None else ""),
+            _display(_num(moment)),
+            _display(_num(span)),
+            _display(_curve_text(curve)),
+            _display((notes or "").strip()),
         ])
 
     shores_path = _catalog_root() / "telescopic_shores.json"
@@ -385,6 +389,7 @@ def template_rows() -> list[list[Any]]:
                 tower.get("id", ""),
                 "Torre de escoramento",
                 capacity=tower.get("load_capacity_kn"),
+                h_min=tower.get("module_height_m"),
                 h_max=tower.get("max_height_m"),
                 curve=tower.get("capacity_curve"),
                 notes=tower.get("notes", ""),
