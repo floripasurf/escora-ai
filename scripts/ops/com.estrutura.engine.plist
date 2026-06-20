@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd unit para o engine do estrutura.app no Mac Mini.
+
+  Mantém o uvicorn vivo (KeepAlive) e sobe no boot (RunAtLoad), resolvendo o
+  ponto único de falha "processo único sem auto-restart". Fixa ESCORA_DATA_DIR
+  num caminho ABSOLUTO e estável (sem isso o engine cai no ./data relativo ao
+  CWD e pode re-seedar um banco vazio).
+
+  Setup (trocar os 3 placeholders __...__ pelos caminhos reais):
+    cp scripts/ops/com.estrutura.engine.plist ~/Library/LaunchAgents/
+    # edite ~/Library/LaunchAgents/com.estrutura.engine.plist
+    launchctl load -w ~/Library/LaunchAgents/com.estrutura.engine.plist
+    launchctl list | grep estrutura          # confere
+  Logs em __DATA_DIR__/logs/engine.{out,err}.log
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.estrutura.engine</string>
+
+    <key>WorkingDirectory</key>
+    <string>__REPO_DIR__</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__VENV_BIN__/uvicorn</string>
+        <string>api.main:app</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
+        <string>--port</string>
+        <string>8000</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>ESCORA_DATA_DIR</key>
+        <string>__DATA_DIR__</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__DATA_DIR__/logs/engine.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__DATA_DIR__/logs/engine.err.log</string>
+</dict>
+</plist>
