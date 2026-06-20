@@ -84,6 +84,30 @@ class TestRunCalculation:
         assert result.total_load_kn > 0
         assert len(result.beam_results) > 0
 
+    def test_inventory_mode_surfaces_stock_substitution(self):
+        # In inventory mode with an empty stock, every model the engine picks is
+        # out of stock → the partner must see a substitution warning in the
+        # result (not only in server logs).
+        from src.engine.inventory import InventoryAvailability
+        beams = [
+            _beam(0, 0, 10, 0), _beam(0, 6, 10, 6),
+            _beam(0, 0, 0, 6), _beam(10, 0, 10, 6),
+        ]
+        pillars = [
+            _pillar(0, 0), _pillar(10, 0), _pillar(0, 6), _pillar(10, 6),
+        ]
+        empty_inv = InventoryAvailability(
+            locadora="PilotoVazio", updated_at="2026-06-20", items={},
+        )
+        result = run_calculation(
+            beams + pillars, pe_direito_m=2.80,
+            mode="inventory", inventory=empty_inv,
+        )
+        assert result.total_shores > 0
+        assert any(
+            "Estoque insuficiente" in w for w in result.warnings
+        ), result.warnings
+
     def test_simple_grid_produces_slab_results(self):
         beams = [
             _beam(0, 0, 10, 0),

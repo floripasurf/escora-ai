@@ -45,6 +45,7 @@ def select_shore(
     required_capacity_kn: float,
     mode: Literal["price", "inventory"] = "price",
     inventory: Optional[InventoryAvailability] = None,
+    warnings: Optional[List[str]] = None,
 ) -> Optional[ShoreCatalogEntry]:
     """Seleciona a escora mais adequada do catálogo.
 
@@ -85,6 +86,11 @@ def select_shore(
             compatible, key=lambda s: s.effective_capacity(required_height_m),
         )
         logger.warning(f"Sem estoque {inventory.locadora}: usando {chosen.id}")
+        if warnings is not None:
+            warnings.append(
+                f"Estoque insuficiente em {inventory.locadora}: escora '{chosen.id}' "
+                "usada sem confirmacao de estoque (verifique disponibilidade)."
+            )
         return chosen
 
     return min(compatible, key=lambda s: s.effective_capacity(required_height_m))

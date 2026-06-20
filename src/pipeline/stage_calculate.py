@@ -2224,6 +2224,10 @@ def run_calculation(
     """
     warnings: List[str] = []
     validation_errors: List[str] = []
+    # Coletor de substituicoes por falta de estoque (modo inventario). Cada
+    # select_* abaixo registra aqui quando usa um modelo fora de estoque; ao
+    # final deduplicamos e prependamos em warnings para o parceiro ver.
+    stock_subs: List[str] = []
 
     if pe_direito_is_default:
         warnings.append(
@@ -2538,7 +2542,7 @@ def run_calculation(
 
         # Select tower when TOWER or MIXED requires it
         if support_type in (SupportType.TOWER, SupportType.MIXED) and tower_catalog:
-            selected_tower = select_tower(tower_catalog, shore_height, load_per_shore_estimate, mode=mode, inventory=inventory)
+            selected_tower = select_tower(tower_catalog, shore_height, load_per_shore_estimate, mode=mode, inventory=inventory, warnings=stock_subs)
             if selected_tower:
                 rule_suffix = f" [{decision_rule}]" if decision_rule else ""
                 warnings.append(
@@ -2550,7 +2554,7 @@ def run_calculation(
                 if dist_beam_catalog:
                     selected_dist_beam = select_distribution_beam(
                         dist_beam_catalog, span_m=1.0, load_kn_m=total_linear_load,
-                        mode=mode, inventory=inventory,
+                        mode=mode, inventory=inventory, warnings=stock_subs,
                     )
                 from src.models.shore import ShoreCatalogEntry
                 tower_shore_entry = ShoreCatalogEntry(
@@ -2573,7 +2577,7 @@ def run_calculation(
         if support_type == SupportType.TOWER and tower_shore_entry is not None:
             selected_shore = tower_shore_entry
         else:
-            selected_shore = select_shore(catalog, shore_height, load_per_shore_estimate, mode=mode, inventory=inventory) if catalog else None
+            selected_shore = select_shore(catalog, shore_height, load_per_shore_estimate, mode=mode, inventory=inventory, warnings=stock_subs) if catalog else None
 
         if not selected_shore:
             warnings.append(
@@ -3385,7 +3389,7 @@ def run_calculation(
         slab_tower = None
         use_tower_entry = None  # ShoreCatalogEntry representing the tower
         if slab_support_type in (SupportType.TOWER, SupportType.MIXED) and tower_catalog:
-            slab_tower = select_tower(tower_catalog, slab_shore_height, load_per_shore_estimate, mode=mode, inventory=inventory)
+            slab_tower = select_tower(tower_catalog, slab_shore_height, load_per_shore_estimate, mode=mode, inventory=inventory, warnings=stock_subs)
             if slab_tower:
                 slab_rule_suffix = f" [{slab_decision_rule}]" if slab_decision_rule else ""
                 warnings.append(
@@ -3413,7 +3417,7 @@ def run_calculation(
         if slab_support_type == SupportType.TOWER and use_tower_entry is not None:
             selected_shore = use_tower_entry
         else:
-            selected_shore = select_shore(catalog, slab_shore_height, load_per_shore_estimate, mode=mode, inventory=inventory) if catalog else None
+            selected_shore = select_shore(catalog, slab_shore_height, load_per_shore_estimate, mode=mode, inventory=inventory, warnings=stock_subs) if catalog else None
 
         if not selected_shore:
             if slab_tower and slab_support_type == SupportType.TOWER:
@@ -3707,6 +3711,7 @@ def run_calculation(
                 slab_dist_beam = select_distribution_beam(
                     dist_beam_catalog, span_m=slab_vm_span,
                     load_kn_m=slab_vm_load, mode=mode, inventory=inventory,
+                    warnings=stock_subs,
                 )
 
             from src.models.shore import PositionedShore as _PS
@@ -3999,6 +4004,13 @@ def run_calculation(
     # Final quality check: catches overlapping shores, shores on pillars,
     # shores on beam axes, and shores outside polygon boundaries.
     from src.engine.shore_reviewer import review_and_fix
+
+    # Substituicoes por falta de estoque (modo inventario): deduplica e
+    # prepende para o parceiro ver no resultado, mesmo entre centenas de
+    # warnings de calculo/ML. Sem isto, a troca de modelo so apareceria no log.
+    if stock_subs:
+        unique_subs = list(dict.fromkeys(stock_subs))
+        warnings[:0] = unique_subs
 
     calc_result = CalculationResult(
         beam_results=beam_results,

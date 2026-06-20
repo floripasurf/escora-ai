@@ -396,6 +396,7 @@ def select_tower(
     required_capacity_kn: float,
     mode: Literal["price", "inventory"] = "price",
     inventory: Optional[InventoryAvailability] = None,
+    warnings: Optional[List[str]] = None,
 ) -> Optional[TowerCatalogEntry]:
     """Select the most economical tower that meets height and load requirements.
 
@@ -428,6 +429,11 @@ def select_tower(
             compatible, key=lambda t: t.total_price_brl(required_height_m),
         )
         logger.warning(f"Sem estoque {inventory.locadora}: usando torre {chosen.id}")
+        if warnings is not None:
+            warnings.append(
+                f"Estoque insuficiente em {inventory.locadora}: torre '{chosen.id}' "
+                "usada sem confirmacao de estoque (verifique disponibilidade)."
+            )
         return chosen
 
     return min(compatible, key=lambda t: t.total_price_brl(required_height_m))
@@ -480,6 +486,7 @@ def select_distribution_beam(
     mode: Literal["price", "inventory"] = "price",
     inventory: Optional[InventoryAvailability] = None,
     n_supports: int = 2,
+    warnings: Optional[List[str]] = None,
 ) -> Optional[DistributionBeamEntry]:
     """Select distribution beam that can span between towers/shores.
 
@@ -526,6 +533,11 @@ def select_distribution_beam(
             return min(in_stock_items, key=lambda b: b.price_per_m_brl)
         chosen = min(compatible, key=lambda b: b.price_per_m_brl)
         logger.warning(f"Sem estoque {inventory.locadora}: usando viga {chosen.id}")
+        if warnings is not None:
+            warnings.append(
+                f"Estoque insuficiente em {inventory.locadora}: viga '{chosen.id}' "
+                "usada sem confirmacao de estoque (verifique disponibilidade)."
+            )
         return chosen
 
     return min(compatible, key=lambda b: b.price_per_m_brl)

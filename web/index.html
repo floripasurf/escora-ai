@@ -1619,6 +1619,13 @@
                     <input type="file" id="fileInput" accept=".dxf,.dwg">
                 </div>
 
+                <div id="optModeRow" style="margin:6px 2px 2px;font-size:0.88rem;color:var(--fg-dim);display:flex;align-items:center;gap:8px;">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                        <input type="checkbox" id="inventoryModeToggle">
+                        Calcular usando o estoque da minha unidade (modo inventário)
+                    </label>
+                </div>
+
                 <div class="methodology-badge" id="methodologyBadge" style="display:none;"></div>
 
                 <div class="section-head">
@@ -2825,6 +2832,8 @@
             if (!canRunProjects()) { alert('Seu papel permite apenas visualizar resultados.'); return; }
             const formData = new FormData();
             formData.append('file', file);
+            const useInventory = document.getElementById('inventoryModeToggle')?.checked;
+            formData.append('optimization_mode', useInventory ? 'inventory' : 'price');
 
             try {
                 const res = await fetch(`${API}/jobs`, {
@@ -2990,7 +2999,16 @@
                     const branch = currentBranch();
                     const stockUnit = branch ? branch.branch_name : 'unidade atual';
                     const stockName = job.inventory_name || (branch && branch.inventory_name) || '';
-                    content += `<div class="history-meta" style="margin-top:10px">Calculado com estoque da unidade ${esc(stockUnit)}${stockName ? ` · ${esc(stockName)}` : ''}</div>`;
+                    const usedInventory = job.optimization_mode === 'inventory';
+                    if (usedInventory) {
+                        content += `<div class="history-meta" style="margin-top:10px">Calculado com o estoque da unidade ${esc(stockUnit)}${stockName ? ` · ${esc(stockName)}` : ''}</div>`;
+                        const stockWarnings = [...new Set((job.warnings || []).filter(w => /estoque insuficiente/i.test(w)))];
+                        if (stockWarnings.length) {
+                            content += `<div class="history-meta" style="margin-top:6px;color:var(--err)">⚠ ${stockWarnings.length} substituição(ões) por falta de estoque — a sugestão usa modelos que podem não estar disponíveis. Confira o inventário.</div>`;
+                        }
+                    } else {
+                        content += `<div class="history-meta" style="margin-top:10px">Otimizado por custo — não usou o estoque da unidade. Marque "modo inventário" no envio para calcular com seu estoque.</div>`;
+                    }
                     content += `
                         <div class="actions">
                             <a href="#" onclick="downloadFile('/jobs/${job.id}/download','${stem}_escoras.dxf');return false" class="btn btn-primary">\u2193 DXF</a>
