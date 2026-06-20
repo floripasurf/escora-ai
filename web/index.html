@@ -2212,6 +2212,7 @@
             show('appCard');
             renderHeaderBadge();
             updateRoleUi();
+            if (canConsultInventory()) refreshInventory();
             refreshJobsList();
         }
 
@@ -2247,7 +2248,8 @@
                 document.getElementById('sbOut').onclick = logout;
             }
             const branch = currentBranch();
-            const label = branch ? `${SESSION.locadora_name} \u00B7 ${branch.branch_name} \u00B7 ${branch.inventory_name}` : 'logado';
+            const updated = INVENTORY && INVENTORY.updated_at ? ` \u00B7 atualizado ${INVENTORY.updated_at}` : '';
+            const label = branch ? `${SESSION.locadora_name} \u00B7 ${branch.branch_name} \u00B7 ${branch.inventory_name}${updated}` : 'logado';
             document.getElementById('sbLabel').textContent = label;
             renderMethodologyBadge(branch);
             updateRoleUi();
@@ -2277,6 +2279,7 @@
                 if (BRANCH_ID && SESSION.branches.some(b => b.id === BRANCH_ID)) {
                     show('appCard');
                     renderHeaderBadge();
+                    if (canConsultInventory()) refreshInventory();
                     refreshJobsList();
                 } else {
                     renderBranchPicker(SESSION.branches);
@@ -2345,6 +2348,7 @@
                     return;
                 }
                 INVENTORY = await res.json();
+                renderHeaderBadge();
                 renderInventory();
                 if (canManageInventory()) refreshInventoryHistory();
             } catch (e) {
