@@ -277,6 +277,8 @@ def create_user(
     company: str,
     phone: str,
     password: str,
+    branch_name: str = "Sede",
+    inventory_name: str = "",
 ) -> Optional[User]:
     """Register a new user with their own locadora + default branch.
 
@@ -296,6 +298,8 @@ def create_user(
             owner_email=email,
             owner_phone=phone,
             password_hash=hash_password(password),
+            branch_name=branch_name or "Sede",
+            inventory_name=inventory_name or None,
         )
         if created is None:
             return None

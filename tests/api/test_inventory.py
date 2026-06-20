@@ -59,6 +59,7 @@ def test_put_inventory_item_persists_for_engine_loader(client):
             "capacity_kn": 18.5,
             "height_min_m": 2.1,
             "height_max_m": 5.0,
+            "capacity_curve": [[2.1, 18.5], [5.0, 10.0]],
             "notes": "Escora estendida",
         },
     )
@@ -71,6 +72,7 @@ def test_put_inventory_item_persists_for_engine_loader(client):
     inv = load_inventory("orguel_sjc")
     assert inv.items["ESC500"] == 7
     assert inv.specs["ESC500"].height_max_m == 5.0
+    assert inv.specs["ESC500"].capacity_curve == [(2.1, 18.5), (5.0, 10.0)]
 
 
 def test_delete_inventory_item(client):

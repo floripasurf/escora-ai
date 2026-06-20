@@ -100,6 +100,13 @@ def _slug(value: str) -> str:
     return value or "item"
 
 
+def _inventory_slug(value: str) -> str:
+    value = value.strip().lower()
+    value = re.sub(r"[^a-z0-9_.-]+", "-", value)
+    value = re.sub(r"-+", "-", value).strip("-")
+    return value or "inventory"
+
+
 def _unique_id(conn: sqlite3.Connection, table: str, base: str) -> str:
     candidate = base
     n = 2
@@ -142,6 +149,7 @@ def init_registry_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_branches_locadora ON branches(locadora_id);
             CREATE INDEX IF NOT EXISTS idx_users_locadora ON users(locadora_id);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_branches_inventory_name ON branches(inventory_name);
             """
         )
         count = conn.execute("SELECT COUNT(*) FROM locadoras").fetchone()[0]
@@ -176,6 +184,8 @@ def _seed_from_json(conn: sqlite3.Connection, path: Path) -> None:
             branch_id = str(branch.get("id") or "").strip()
             branch_name = str(branch.get("branch_name") or branch_id).strip()
             inventory_name = str(branch.get("inventory_name") or branch_id).strip()
+            if inventory_name == "default":
+                inventory_name = branch_id
             if not branch_id:
                 continue
             b_meta = {}
@@ -307,6 +317,8 @@ def create_locadora_with_owner(
     owner_email: str,
     owner_phone: str,
     password_hash: str,
+    branch_name: str = "Sede",
+    inventory_name: Optional[str] = None,
 ) -> Optional[Dict[str, str]]:
     init_registry_db()
     email = owner_email.strip().lower()
@@ -318,7 +330,11 @@ def create_locadora_with_owner(
             return None
         loc_base = f"loc-{_slug(email.split('@')[0])}"
         loc_id = _unique_id(conn, "locadoras", loc_base)
-        branch_id = f"{loc_id}-default"
+        first_branch_name = (branch_name or "Sede").strip() or "Sede"
+        branch_id = _unique_id(conn, "branches", f"{loc_id}-{_slug(first_branch_name)}")
+        inventory = _inventory_slug(inventory_name) if inventory_name else branch_id
+        if conn.execute("SELECT 1 FROM branches WHERE inventory_name = ?", (inventory,)).fetchone():
+            raise ValueError("Nome de inventario ja cadastrado")
         loc_name = (name or owner_name or email).strip()
         now = time.time()
         conn.execute(
@@ -330,7 +346,7 @@ def create_locadora_with_owner(
             INSERT INTO branches (id, locadora_id, branch_name, inventory_name, metadata_json, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (branch_id, loc_id, "Sede", branch_id, _json_dumps({}), now),
+            (branch_id, loc_id, first_branch_name, inventory, _json_dumps({}), now),
         )
         conn.execute(
             """
@@ -339,7 +355,12 @@ def create_locadora_with_owner(
             """,
             (email, loc_id, owner_name or email, password_hash, ROLE_OWNER, owner_phone or "", now),
         )
-    return {"locadora_id": loc_id, "branch_id": branch_id, "username": email}
+    return {
+        "locadora_id": loc_id,
+        "branch_id": branch_id,
+        "inventory_name": inventory,
+        "username": email,
+    }
 
 
 def create_branch(locadora_id: str, branch_name: str, inventory_name: Optional[str] = None) -> Dict[str, str]:
@@ -353,7 +374,9 @@ def create_branch(locadora_id: str, branch_name: str, inventory_name: Optional[s
         if loc is None:
             raise KeyError(locadora_id)
         branch_id = _unique_id(conn, "branches", f"{locadora_id}-{_slug(name)}")
-        inv = (inventory_name or branch_id).strip()
+        inv = _inventory_slug(inventory_name) if inventory_name else branch_id
+        if conn.execute("SELECT 1 FROM branches WHERE inventory_name = ?", (inv,)).fetchone():
+            raise ValueError("Nome de inventario ja cadastrado")
         now = time.time()
         conn.execute(
             """
@@ -426,4 +449,3 @@ def repair_default_inventory_names() -> int:
             conn.execute("UPDATE branches SET inventory_name = ? WHERE id = ?", (row["id"], row["id"]))
             changed += 1
     return changed
-

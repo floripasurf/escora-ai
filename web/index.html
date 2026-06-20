@@ -1517,6 +1517,8 @@
                         <input id="signupName" type="text" placeholder="Nome completo">
                         <input id="signupEmail" type="email" placeholder="Email">
                         <input id="signupCompany" type="text" placeholder="Empresa / Locadora">
+                        <input id="signupBranch" type="text" placeholder="Primeira unidade" value="Sede">
+                        <input id="signupInventory" type="text" placeholder="Nome do inventário (opcional)">
                         <input id="signupPhone" type="tel" placeholder="Telefone">
                         <input id="signupPass" type="password" placeholder="Senha">
                         <input id="signupPass2" type="password" placeholder="Confirmar senha">
@@ -1643,6 +1645,7 @@
                             <input id="invHeightMin" type="number" min="0" step="0.01" placeholder="Alt. min">
                             <input id="invHeightMax" type="number" min="0" step="0.01" placeholder="Alt. max">
                         </div>
+                        <input id="invCurve" type="text" placeholder="Curva altura:capacidade; ex. 1:100;5:88.5" style="margin-top:10px;">
                         <input id="invNotes" type="text" placeholder="Observações" style="margin-top:10px;">
                         <div class="inventory-editor-actions">
                             <button class="btn" onclick="closeInventoryForm()">Cancelar</button>
@@ -2127,6 +2130,8 @@
             const name = document.getElementById('signupName').value.trim();
             const email = document.getElementById('signupEmail').value.trim();
             const company = document.getElementById('signupCompany').value.trim();
+            const branchName = document.getElementById('signupBranch').value.trim();
+            const inventoryName = document.getElementById('signupInventory').value.trim();
             const phone = document.getElementById('signupPhone').value.trim();
             const pass = document.getElementById('signupPass').value;
             const pass2 = document.getElementById('signupPass2').value;
@@ -2142,7 +2147,15 @@
                 const res = await fetch(`${API}/auth/signup`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name, email, company, phone, password: pass }),
+                    body: JSON.stringify({
+                        name,
+                        email,
+                        company,
+                        phone,
+                        password: pass,
+                        branch_name: branchName || 'Sede',
+                        inventory_name: inventoryName,
+                    }),
                 });
                 if (!res.ok) {
                     const data = await res.json().catch(() => ({}));
@@ -2405,6 +2418,7 @@
             document.getElementById('invCapacity').value = item && item.capacity_kn != null ? item.capacity_kn : '';
             document.getElementById('invHeightMin').value = item && item.height_min_m != null ? item.height_min_m : '';
             document.getElementById('invHeightMax').value = item && item.height_max_m != null ? item.height_max_m : '';
+            document.getElementById('invCurve').value = item ? curveToText(item.capacity_curve) : '';
             document.getElementById('invNotes').value = item ? (item.notes || '') : '';
             inventoryMsg('');
             model.focus();
@@ -2424,6 +2438,26 @@
             return raw === '' ? null : Number(raw);
         }
 
+        function curveToText(curve) {
+            if (!Array.isArray(curve) || !curve.length) return '';
+            return curve.map(pair => `${pair[0]}:${pair[1]}`).join(';');
+        }
+
+        function parseCurveText(raw) {
+            const text = (raw || '').trim();
+            if (!text) return null;
+            return text.split(';').map(part => {
+                const bits = part.trim().split(':');
+                if (bits.length !== 2) throw new Error('Use pares altura:capacidade separados por ponto e virgula');
+                const h = Number(bits[0].replace(',', '.'));
+                const c = Number(bits[1].replace(',', '.'));
+                if (!Number.isFinite(h) || !Number.isFinite(c) || h < 0 || c < 0) {
+                    throw new Error('Curva de capacidade invalida');
+                }
+                return [h, c];
+            });
+        }
+
         async function saveInventoryItem() {
             if (!canManageInventory()) { inventoryMsg('Seu papel permite apenas consultar o inventario.'); return; }
             const model = (EDITING_INVENTORY_MODEL || document.getElementById('invModel').value).trim();
@@ -2431,7 +2465,13 @@
             if (!model) { inventoryMsg('Informe o modelo'); return; }
             if (qty == null || qty < 0 || !Number.isFinite(qty)) { inventoryMsg('Quantidade invalida'); return; }
 
-            const current = currentInventoryItem(model);
+            let curve = null;
+            try {
+                curve = parseCurveText(document.getElementById('invCurve').value);
+            } catch (e) {
+                inventoryMsg(e.message);
+                return;
+            }
             const body = {
                 section: document.getElementById('invSection').value,
                 qty: Math.floor(qty),
@@ -2440,7 +2480,7 @@
                 height_max_m: formNumber('invHeightMax'),
                 notes: document.getElementById('invNotes').value.trim(),
             };
-            if (current && current.capacity_curve) body.capacity_curve = current.capacity_curve;
+            if (curve) body.capacity_curve = curve;
 
             try {
                 const res = await fetch(`${API}/inventory/items/${encodeURIComponent(model)}`, {

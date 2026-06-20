@@ -58,6 +58,8 @@ class SignupRequest(BaseModel):
     company: str = ""
     phone: str = ""
     password: str
+    branch_name: str = "Sede"
+    inventory_name: str = ""
 
 
 class ChangePasswordRequest(BaseModel):
@@ -118,13 +120,18 @@ async def signup(body: SignupRequest):
     import re
     if not re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", body.email.strip()):
         raise HTTPException(status_code=400, detail="Email inválido")
-    user = create_user(
-        name=body.name,
-        email=body.email,
-        company=body.company,
-        phone=body.phone,
-        password=body.password,
-    )
+    try:
+        user = create_user(
+            name=body.name,
+            email=body.email,
+            company=body.company,
+            phone=body.phone,
+            password=body.password,
+            branch_name=body.branch_name,
+            inventory_name=body.inventory_name,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     if user is None:
         raise HTTPException(status_code=409, detail="Este email já está cadastrado")
     # Auto-login after signup

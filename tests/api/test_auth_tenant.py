@@ -99,6 +99,43 @@ def test_me_returns_locadora_and_branches(client):
     assert data["selected_branch"]["inventory_name"] == "orguel_sjc"
 
 
+def test_signup_accepts_first_branch_and_inventory_name(client_unauth):
+    r = client_unauth.post(
+        "/api/v1/auth/signup",
+        json={
+            "name": "Owner Piloto",
+            "email": "owner.piloto@example.com",
+            "company": "Locadora Piloto",
+            "phone": "",
+            "password": "senha123",
+            "branch_name": "Curitiba",
+            "inventory_name": "piloto_curitiba",
+        },
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["role"] == "owner"
+    assert data["locadora_name"] == "Locadora Piloto"
+    assert data["branches"][0]["branch_name"] == "Curitiba"
+    assert data["branches"][0]["inventory_name"] == "piloto_curitiba"
+
+
+def test_signup_rejects_duplicate_inventory_name(client_unauth):
+    r = client_unauth.post(
+        "/api/v1/auth/signup",
+        json={
+            "name": "Owner Conflito",
+            "email": "owner.conflito@example.com",
+            "company": "Locadora Conflito",
+            "password": "senha123",
+            "branch_name": "Sede",
+            "inventory_name": "orguel_sjc",
+        },
+    )
+    assert r.status_code == 400
+    assert "inventario" in r.json()["detail"].lower()
+
+
 # ---------- methodology contract (Fase 2) ----------
 
 def _assert_line_first_profile(m):
