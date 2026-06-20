@@ -1831,6 +1831,10 @@
             return ['owner', 'admin'].includes(currentRole());
         }
 
+        function canConsultInventory() {
+            return ['owner', 'admin', 'operator'].includes(currentRole());
+        }
+
         function canManageInventory() {
             return canManageTenant();
         }
@@ -1883,6 +1887,13 @@
             document.querySelectorAll('[data-manage-inventory]').forEach(el => {
                 el.style.display = canManage ? '' : 'none';
             });
+            document.querySelectorAll('[data-tab="inventoryTab"]').forEach(el => {
+                el.style.display = canConsultInventory() ? '' : 'none';
+            });
+            const inventoryTab = document.getElementById('inventoryTab');
+            if (!canConsultInventory() && inventoryTab && inventoryTab.style.display !== 'none') {
+                switchTab('projectsTab');
+            }
             const uploadZoneEl = document.getElementById('uploadZone');
             if (uploadZoneEl) {
                 uploadZoneEl.style.opacity = canRunProjects() ? '1' : '0.55';

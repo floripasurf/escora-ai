@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from api.deps import get_current_branch, require_owner_or_admin
+from api.deps import get_current_branch, require_operator_or_admin, require_owner_or_admin
 from api.services.inventory_service import (
     InventoryItemInput,
     delete_inventory_item,
@@ -64,7 +64,10 @@ class InventoryReplaceRequest(BaseModel):
 
 
 @router.get("")
-async def get_inventory(branch: Branch = Depends(get_current_branch)):
+async def get_inventory(
+    branch: Branch = Depends(get_current_branch),
+    _: User = Depends(require_operator_or_admin),
+):
     return inventory_summary(branch)
 
 
@@ -183,7 +186,7 @@ async def restore_history_entry(
 
 
 @router.get("/template.csv")
-async def download_template():
+async def download_template(_: User = Depends(require_operator_or_admin)):
     return Response(
         content=template_csv(),
         media_type="text/csv; charset=utf-8",
@@ -192,7 +195,7 @@ async def download_template():
 
 
 @router.get("/template.xlsx")
-async def download_template_xlsx():
+async def download_template_xlsx(_: User = Depends(require_operator_or_admin)):
     return Response(
         content=template_xlsx(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

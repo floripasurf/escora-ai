@@ -85,6 +85,8 @@ def test_viewer_is_read_only_for_jobs(client):
     viewer = _login("viewer_a", "senhaview", "test-a")
 
     assert viewer.get("/api/v1/jobs").status_code == 200
+    assert viewer.get("/api/v1/inventory").status_code == 403
+    assert viewer.get("/api/v1/inventory/template.xlsx").status_code == 403
     upload = viewer.post(
         "/api/v1/jobs",
         files={"file": ("planta.dxf", "0\nEOF\n", "application/dxf")},
