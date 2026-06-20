@@ -60,6 +60,19 @@ class SignupRequest(BaseModel):
     password: str
     branch_name: str = "Sede"
     inventory_name: str = ""
+    invite_code: Optional[str] = None
+    accept_terms: bool = False
+
+
+def _signup_invite_codes() -> set:
+    """Conjunto de códigos de convite válidos (env SIGNUP_INVITE_CODES).
+
+    Lido de os.environ a cada chamada (espelha data_root) para o beta ser
+    controlado sem redeploy. Vazio/ausente = signup aberto (dev/local).
+    """
+    import os
+    raw = os.environ.get("SIGNUP_INVITE_CODES", "")
+    return {c.strip() for c in raw.split(",") if c.strip()}
 
 
 class ChangePasswordRequest(BaseModel):
@@ -115,6 +128,18 @@ async def login(body: LoginRequest):
 async def signup(body: SignupRequest):
     if not body.name or not body.email or not body.password:
         raise HTTPException(status_code=400, detail="Nome, email e senha são obrigatórios")
+    if not body.accept_terms:
+        raise HTTPException(
+            status_code=400,
+            detail="É necessário aceitar os termos de uso e o aviso de validação técnica",
+        )
+    # Beta controlado: quando há códigos configurados, signup exige um válido.
+    valid_codes = _signup_invite_codes()
+    if valid_codes and (not body.invite_code or body.invite_code.strip() not in valid_codes):
+        raise HTTPException(
+            status_code=403,
+            detail="Código de convite inválido ou ausente (cadastro em beta restrito)",
+        )
     if len(body.password) < 6:
         raise HTTPException(status_code=400, detail="A senha precisa ter ao menos 6 caracteres")
     import re

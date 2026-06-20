@@ -1536,6 +1536,11 @@
                         <input id="signupPhone" type="tel" placeholder="Telefone">
                         <input id="signupPass" type="password" placeholder="Senha">
                         <input id="signupPass2" type="password" placeholder="Confirmar senha">
+                        <input id="signupInvite" type="text" placeholder="Código de convite (beta)">
+                        <label style="display:flex;align-items:flex-start;gap:8px;font-size:0.82rem;color:var(--fg-dim);text-align:left;margin:4px 0;cursor:pointer;">
+                            <input id="signupTerms" type="checkbox" style="margin-top:3px;">
+                            <span>Li e aceito os termos de uso. Entendo que os resultados são um rascunho auditável e exigem validação de um engenheiro responsável (ART/RRT) antes de qualquer uso em obra.</span>
+                        </label>
                         <button class="btn btn-primary" onclick="doSignup()">Criar conta</button>
                         <div id="signupMsg" class="msg-line"></div>
                     </div>
@@ -2241,6 +2246,8 @@
             const phone = document.getElementById('signupPhone').value.trim();
             const pass = document.getElementById('signupPass').value;
             const pass2 = document.getElementById('signupPass2').value;
+            const inviteCode = document.getElementById('signupInvite').value.trim();
+            const acceptTerms = document.getElementById('signupTerms').checked;
             const msg = document.getElementById('signupMsg');
             msg.classList.remove('ok');
             msg.textContent = '';
@@ -2248,6 +2255,7 @@
             if (!name || !email || !pass) { msg.textContent = 'Preencha nome, email e senha'; return; }
             if (pass.length < 6) { msg.textContent = 'Senha precisa ter ao menos 6 caracteres'; return; }
             if (pass !== pass2) { msg.textContent = 'Confirmação de senha não confere'; return; }
+            if (!acceptTerms) { msg.textContent = 'É necessário aceitar os termos de uso'; return; }
 
             try {
                 const res = await fetch(`${API}/auth/signup`, {
@@ -2261,6 +2269,8 @@
                         password: pass,
                         branch_name: branchName || 'Sede',
                         inventory_name: inventoryName,
+                        invite_code: inviteCode,
+                        accept_terms: acceptTerms,
                     }),
                 });
                 if (!res.ok) {

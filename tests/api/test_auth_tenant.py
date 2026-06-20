@@ -110,6 +110,7 @@ def test_signup_accepts_first_branch_and_inventory_name(client_unauth):
             "password": "senha123",
             "branch_name": "Curitiba",
             "inventory_name": "piloto_curitiba",
+            "accept_terms": True,
         },
     )
     assert r.status_code == 200, r.text
@@ -118,6 +119,66 @@ def test_signup_accepts_first_branch_and_inventory_name(client_unauth):
     assert data["locadora_name"] == "Locadora Piloto"
     assert data["branches"][0]["branch_name"] == "Curitiba"
     assert data["branches"][0]["inventory_name"] == "piloto_curitiba"
+
+
+def test_signup_without_accepting_terms_rejected(client_unauth):
+    r = client_unauth.post(
+        "/api/v1/auth/signup",
+        json={
+            "name": "Owner Sem Termos",
+            "email": "owner.semtermos@example.com",
+            "company": "Locadora Sem Termos",
+            "password": "senha123",
+            "branch_name": "Sede",
+            "inventory_name": "sem_termos_unit",
+            # accept_terms ausente
+        },
+    )
+    assert r.status_code == 400
+    assert "termos" in r.json()["detail"].lower()
+
+
+def test_signup_requires_valid_invite_code_when_configured(client_unauth, monkeypatch):
+    monkeypatch.setenv("SIGNUP_INVITE_CODES", "BETA-2026, OUTRO")
+    # Sem código → 403
+    base = {
+        "name": "Owner Convite",
+        "email": "owner.convite@example.com",
+        "company": "Locadora Convite",
+        "password": "senha123",
+        "branch_name": "Sede",
+        "inventory_name": "convite_unit",
+        "accept_terms": True,
+    }
+    r = client_unauth.post("/api/v1/auth/signup", json=base)
+    assert r.status_code == 403, r.text
+    # Código errado → 403
+    r = client_unauth.post(
+        "/api/v1/auth/signup", json={**base, "invite_code": "ERRADO"},
+    )
+    assert r.status_code == 403
+    # Código correto → 200
+    r = client_unauth.post(
+        "/api/v1/auth/signup", json={**base, "invite_code": "BETA-2026"},
+    )
+    assert r.status_code == 200, r.text
+
+
+def test_signup_open_when_no_invite_codes_configured(client_unauth, monkeypatch):
+    monkeypatch.delenv("SIGNUP_INVITE_CODES", raising=False)
+    r = client_unauth.post(
+        "/api/v1/auth/signup",
+        json={
+            "name": "Owner Aberto",
+            "email": "owner.aberto@example.com",
+            "company": "Locadora Aberta",
+            "password": "senha123",
+            "branch_name": "Sede",
+            "inventory_name": "aberto_unit",
+            "accept_terms": True,
+        },
+    )
+    assert r.status_code == 200, r.text
 
 
 def test_signup_rejects_duplicate_inventory_name(client_unauth):
@@ -130,6 +191,7 @@ def test_signup_rejects_duplicate_inventory_name(client_unauth):
             "password": "senha123",
             "branch_name": "Sede",
             "inventory_name": "orguel_sjc",
+            "accept_terms": True,
         },
     )
     assert r.status_code == 400
