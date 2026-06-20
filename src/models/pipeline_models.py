@@ -68,3 +68,5 @@ class PipelineResult(BaseModel):
     calculation: Optional[Any] = Field(default=None, description="CalculationResult when engine stage runs")
     violations: List[Violation] = Field(default_factory=list, description="Rule violations detected by the rule registry")
     methodology: Optional[dict] = Field(default=None, description="Perfil de metodologia efetivo (§28.9) — rastreabilidade do output")
+    requires_review: bool = Field(default=False, description="True quando o sistema detectado esta fora de escopo / exige revisao de engenharia (manual §5.1)")
+    review_reasons: List[str] = Field(default_factory=list, description="Motivos pelos quais o resultado exige revisao antes do uso")

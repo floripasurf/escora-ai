@@ -2974,7 +2974,12 @@
                 }
 
                 if (job.status === 'done' && job.total_shores != null) {
-                    content = `
+                    content = '';
+                    if (job.requires_review) {
+                        const reasons = (job.review_reasons || []).map(r => esc(r)).join(' ');
+                        content += `<div style="margin:0 0 12px;padding:10px 12px;border:1px solid var(--err);border-radius:8px;background:rgba(220,53,69,0.08);color:var(--err);font-size:0.9rem">⚠ <b>Revisão de engenharia obrigatória.</b> ${reasons} Não utilize este resultado sem a aprovação de um engenheiro responsável (ART/RRT).</div>`;
+                    }
+                    content += `
                         <div class="metrics">
                             <div class="metric">
                                 <div class="metric-value">${job.beam_count || 0}</div>

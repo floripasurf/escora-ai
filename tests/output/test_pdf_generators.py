@@ -73,6 +73,25 @@ def sample_report_data():
     return build_report_data(calc, metadata)
 
 
+def test_disclaimer_and_art_block_content():
+    """The Orguel p.60 disclaimer and an unfilled ART block are mandated on
+    every delivered PDF (AGENTS.md 'Engineering Sign-off')."""
+    from src.output.pdf_generator import DISCLAIMER_ORGUEL_P60, ART_BLOCK_LINES
+    assert "SUGEST" in DISCLAIMER_ORGUEL_P60.upper()
+    assert "responsável" in DISCLAIMER_ORGUEL_P60.lower()
+    joined = " ".join(ART_BLOCK_LINES)
+    assert "ART" in joined          # ART/RRT reference
+    assert "CREA" in joined         # CREA registration
+    assert any("ssinatura" in line for line in ART_BLOCK_LINES)  # signature line
+
+
+def test_disclaimer_art_flowables_build():
+    from src.output.pdf_generator import _disclaimer_art_flowables, _styles
+    flowables = _disclaimer_art_flowables(_styles())
+    assert isinstance(flowables, list)
+    assert len(flowables) > 0
+
+
 def test_generate_pdf(sample_report_data):
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
         path = f.name

@@ -189,6 +189,8 @@ def process_dxf(
         "slab_count": len(calc.slab_results),
         "total_shores": total_beam_shores + total_slab_shores,
         "methodology": result.methodology,  # rastreabilidade §28.9
+        "requires_review": result.requires_review,  # §5.1 fora de escopo / caso especial
+        "review_reasons": result.review_reasons,
         "warnings": result.warnings[:60],  # Limit warnings (diagnostics first)
         "output_dxf_path": output_dxf,
         "dwg_path": dwg_path,

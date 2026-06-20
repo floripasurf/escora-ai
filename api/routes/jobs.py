@@ -258,6 +258,8 @@ async def get_status(
             "slab_count": results.get("slab_count"),
             "total_shores": results.get("total_shores"),
             "warnings": results.get("warnings"),
+            "requires_review": results.get("requires_review", False),
+            "review_reasons": results.get("review_reasons") or [],
             "has_dwg": job.get("dwg_path") is not None,
             "consumption_summary": results.get("consumption_summary"),
         })

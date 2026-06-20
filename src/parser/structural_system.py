@@ -48,6 +48,16 @@ class SystemRouting(str, Enum):
     BLOCKED = "blocked"            # fora de escopo — bloquear saida
 
 
+def routing_requires_review(routing: "SystemRouting") -> bool:
+    """True quando o roteamento exige revisao de engenharia antes do uso.
+
+    BLOCKED (fora de escopo) e SPECIAL_REVIEW (caso especial/UNKNOWN) nao
+    devem ser entregues como projeto executivo automatico — o resultado e
+    marcado como `requires_review` para a UI/API alertarem o parceiro.
+    """
+    return routing in (SystemRouting.BLOCKED, SystemRouting.SPECIAL_REVIEW)
+
+
 ROUTING_BY_SYSTEM = {
     StructuralSystem.CONCRETO_ARMADO: SystemRouting.FULL,
     StructuralSystem.PRE_MOLDADO: SystemRouting.PARTIAL,

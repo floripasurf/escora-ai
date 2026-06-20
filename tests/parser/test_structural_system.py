@@ -5,7 +5,18 @@ from src.parser.structural_system import (
     StructuralSystem,
     SystemRouting,
     detect_structural_system,
+    routing_requires_review,
 )
+
+
+class TestRoutingRequiresReview:
+    def test_blocked_and_special_require_review(self):
+        assert routing_requires_review(SystemRouting.BLOCKED) is True
+        assert routing_requires_review(SystemRouting.SPECIAL_REVIEW) is True
+
+    def test_full_and_partial_do_not_require_review(self):
+        assert routing_requires_review(SystemRouting.FULL) is False
+        assert routing_requires_review(SystemRouting.PARTIAL) is False
 
 
 class TestConcretoArmado:

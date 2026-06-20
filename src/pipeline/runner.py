@@ -22,7 +22,9 @@ from src.pipeline.stage_learn import learn_and_save
 from src.pipeline.learning_store import LearningStore
 from src.parser.region_filter import filter_main_plan
 from src.parser.construction_classifier import classify_construction, ConstructionType
-from src.parser.structural_system import detect_structural_system, SystemRouting
+from src.parser.structural_system import (
+    detect_structural_system, SystemRouting, routing_requires_review,
+)
 from src.models.pipeline_models import LevelGroup, PipelineResult
 from src.models.methodology import MethodologyProfile, load_methodology
 from src.utils.constants import ALTURA_DEFAULT
@@ -601,6 +603,24 @@ def run_pipeline(
         warnings=warnings,
         calculation=calculation,
     )
+
+    # Manual §5.1: sistemas fora de escopo (BLOCKED) ou casos especiais
+    # (SPECIAL_REVIEW/UNKNOWN) NAO devem ser tratados como projeto executivo
+    # automatico. Marca o resultado para a API/UI exigirem revisao de
+    # engenharia em vez de exibir um "concluido" comum.
+    if routing_requires_review(structural_system.routing):
+        result.requires_review = True
+        if structural_system.routing == SystemRouting.BLOCKED:
+            result.review_reasons.append(
+                f"Sistema fora de escopo do Escora.AI "
+                f"({structural_system.system.value}): o resultado e um RASCUNHO "
+                "e exige revisao de um engenheiro responsavel antes de qualquer uso."
+            )
+        else:
+            result.review_reasons.append(
+                f"Caso especial ({structural_system.system.value}): revisao de "
+                "engenharia obrigatoria antes do uso do resultado."
+            )
 
     # Rastreabilidade (§28.9): registra qual metodologia gerou este resultado.
     # Inclui o perfil cru + os parametros EFETIVOS aplicados no calculo e a
