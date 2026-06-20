@@ -1,0 +1,22 @@
+{
+  "locadora": "Supplier SJC",
+  "updated_at": "2026-04-07",
+  "telescopic_shores": {
+    "ESC310": 18663,
+    "ESC360": 3084,
+    "ESC450": 6284
+  },
+  "tower_modules": {
+    "TWR-TA100": 4200,
+    "TWR-TA150": 1850
+  },
+  "distribution_beams": {
+    "VD-VM130-410": 980,
+    "VD-VM130-360": 720,
+    "VD-VM130-310": 720,
+    "VD-VM130-255": 540,
+    "VD-VM130-205": 460,
+    "VD-VM130-155": 320,
+    "VD-VM80": 1100
+  }
+}
