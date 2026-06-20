@@ -77,6 +77,7 @@ class LoginResponse(BaseModel):
     token: str
     username: str
     name: str
+    role: str
     locadora_id: str
     locadora_name: str
     branches: list[BranchDTO]
@@ -101,6 +102,7 @@ async def login(body: LoginRequest):
         token=token,
         username=user.username,
         name=user.name,
+        role=user.role,
         locadora_id=locadora.id,
         locadora_name=locadora.name,
         branches=[_branch_dto(b, locadora.id) for b in locadora.branches],
@@ -132,6 +134,7 @@ async def signup(body: SignupRequest):
         token=token,
         username=user.username,
         name=user.name,
+        role=user.role,
         locadora_id=locadora.id if locadora else user.locadora_id,
         locadora_name=locadora.name if locadora else body.company,
         branches=[
@@ -196,6 +199,7 @@ async def me(
         raise HTTPException(status_code=404, detail="Locadora não encontrada")
 
     selected: Optional[Branch] = None
+    current_user = next((u for u in locadora.users if u.username == session["username"]), None)
     if x_branch_id:
         for b in locadora.branches:
             if b.id == x_branch_id:
@@ -215,6 +219,8 @@ async def me(
 
     return {
         "username": session["username"],
+        "name": current_user.name if current_user else session["username"],
+        "role": current_user.role if current_user else "operator",
         "locadora_id": locadora.id,
         "locadora_name": locadora.name,
         "branches": [_branch_payload(b) for b in locadora.branches],

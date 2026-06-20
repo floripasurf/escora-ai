@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import csv
+from datetime import datetime, timezone
 import io
 import json
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
@@ -62,6 +64,10 @@ def _raw_inventory_path(name: str) -> Path:
     return inventory_path(name)
 
 
+def _history_path(branch: Branch) -> Path:
+    return _raw_inventory_path(branch.inventory_name).parent / "history" / f"{branch.inventory_name}.jsonl"
+
+
 def _read_payload(branch: Branch) -> Dict[str, Any]:
     path = _raw_inventory_path(branch.inventory_name)
     source = path
@@ -85,6 +91,125 @@ def _normalize_payload(data: Dict[str, Any], branch: Branch) -> Dict[str, Any]:
         value = payload.get(section)
         payload[section] = value if isinstance(value, dict) else {}
     return payload
+
+
+def _section_counts(payload: Dict[str, Any]) -> Dict[str, int]:
+    return {section: len(payload.get(section, {}) or {}) for section in SECTIONS}
+
+
+def _qty_by_model(payload: Dict[str, Any]) -> Dict[str, int]:
+    out: Dict[str, int] = {}
+    for section in SECTIONS:
+        for model_id, item in (payload.get(section) or {}).items():
+            if isinstance(item, int):
+                out[model_id] = int(item)
+            elif isinstance(item, dict):
+                out[model_id] = int(item.get("qty", 0))
+            else:
+                out[model_id] = 0
+    return out
+
+
+def _diff_summary(before: Dict[str, Any], after: Dict[str, Any]) -> Dict[str, Any]:
+    before_qty = _qty_by_model(before)
+    after_qty = _qty_by_model(after)
+    models = sorted(set(before_qty) | set(after_qty))
+    changed = [
+        {"model_id": model, "before": before_qty.get(model, 0), "after": after_qty.get(model, 0)}
+        for model in models
+        if before_qty.get(model, 0) != after_qty.get(model, 0)
+    ]
+    return {
+        "before_counts": _section_counts(before),
+        "after_counts": _section_counts(after),
+        "changed_models": len(changed),
+        "changes": changed[:100],
+    }
+
+
+def _append_history(
+    branch: Branch,
+    *,
+    actor: str,
+    action: str,
+    before: Dict[str, Any],
+    after: Dict[str, Any],
+    filename: str = "",
+    mode: str = "",
+) -> Dict[str, Any]:
+    entry = {
+        "id": uuid.uuid4().hex,
+        "at": datetime.now(timezone.utc).isoformat(),
+        "actor": actor or "system",
+        "action": action,
+        "branch_id": branch.id,
+        "inventory_name": branch.inventory_name,
+        "filename": filename,
+        "mode": mode,
+        "diff": _diff_summary(before, after),
+        "before": before,
+        "after": after,
+    }
+    path = _history_path(branch)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    return entry
+
+
+def inventory_history(branch: Branch, limit: int = 20) -> Dict[str, Any]:
+    path = _history_path(branch)
+    entries = []
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            entries.append({
+                "id": entry.get("id"),
+                "at": entry.get("at"),
+                "actor": entry.get("actor"),
+                "action": entry.get("action"),
+                "filename": entry.get("filename", ""),
+                "mode": entry.get("mode", ""),
+                "diff": entry.get("diff", {}),
+            })
+    return {"items": list(reversed(entries))[: max(1, min(limit, 100))]}
+
+
+def restore_inventory_history(branch: Branch, entry_id: str, actor: str = "") -> Dict[str, Any]:
+    path = _history_path(branch)
+    if not path.exists():
+        raise KeyError(entry_id)
+    target = None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if entry.get("id") == entry_id:
+            target = entry
+    if target is None or not isinstance(target.get("before"), dict):
+        raise KeyError(entry_id)
+    before = _read_payload(branch)
+    restored = _normalize_payload(target["before"], branch)
+    save_inventory(branch.inventory_name, restored)
+    after = inventory_summary(branch)
+    _append_history(
+        branch,
+        actor=actor,
+        action="restore",
+        before=before,
+        after=_read_payload(branch),
+        filename=target.get("filename", ""),
+        mode=f"restore:{entry_id}",
+    )
+    return after
 
 
 def _item_payload_to_dict(section: str, model_id: str, payload: Any) -> Dict[str, Any]:
@@ -244,6 +369,7 @@ def upsert_inventory_item(
     branch: Branch,
     model_id: str,
     item: InventoryItemInput,
+    actor: str = "",
 ) -> Dict[str, Any]:
     model_id = model_id.strip()
     if not model_id:
@@ -261,11 +387,19 @@ def upsert_inventory_item(
         payload[item.section][model_id] = _serialize_item(item)
         return payload
 
+    before = _read_payload(branch)
     payload = update_inventory(branch.inventory_name, _mutate)
+    _append_history(
+        branch,
+        actor=actor,
+        action="upsert_item",
+        before=before,
+        after=_normalize_payload(payload, branch),
+    )
     return _summary_from_payload(branch, _normalize_payload(payload, branch))
 
 
-def delete_inventory_item(branch: Branch, model_id: str) -> Dict[str, Any]:
+def delete_inventory_item(branch: Branch, model_id: str, actor: str = "") -> Dict[str, Any]:
     def _mutate(raw: Dict[str, Any]) -> Dict[str, Any]:
         payload = _normalize_payload(raw, branch)
         section = _find_existing_section(payload, model_id)
@@ -274,34 +408,147 @@ def delete_inventory_item(branch: Branch, model_id: str) -> Dict[str, Any]:
         payload[section].pop(model_id, None)
         return payload
 
+    before = _read_payload(branch)
     payload = update_inventory(branch.inventory_name, _mutate)
+    _append_history(
+        branch,
+        actor=actor,
+        action="delete_item",
+        before=before,
+        after=_normalize_payload(payload, branch),
+    )
     return _summary_from_payload(branch, _normalize_payload(payload, branch))
 
 
-def replace_inventory(branch: Branch, payload: Dict[str, Any]) -> Dict[str, Any]:
+def replace_inventory(branch: Branch, payload: Dict[str, Any], actor: str = "") -> Dict[str, Any]:
+    before = _read_payload(branch)
     data = _validated_inventory_payload(payload, branch)
     save_inventory(branch.inventory_name, data)
+    _append_history(branch, actor=actor, action="replace", before=before, after=data, mode="replace")
     return inventory_summary(branch)
 
 
-def import_inventory_csv(branch: Branch, csv_text: str) -> Dict[str, Any]:
+def _catalog_model_ids() -> set[str]:
+    return {str(row[0]) for row in template_rows()}
+
+
+def _preview_from_payload(branch: Branch, payload: Dict[str, Any], filename: str = "") -> Dict[str, Any]:
+    payload = _normalize_payload(payload, branch)
+    known = _catalog_model_ids()
+    models = sorted(
+        model_id
+        for section in SECTIONS
+        for model_id in (payload.get(section) or {})
+    )
+    unknown = [model for model in models if model not in known]
+    return {
+        "filename": filename,
+        "inventory_name": branch.inventory_name,
+        "locadora": branch.display_name,
+        "counts": _section_counts(payload),
+        "total_models": len(models),
+        "unknown_models": unknown,
+        "unknown_count": len(unknown),
+        "replace_warning": "Substituir inventario apaga itens fora da planilha.",
+        "modes": [
+            {"id": "replace", "label": "Substituir inventario"},
+            {"id": "update_quantities", "label": "Atualizar apenas quantidades"},
+        ],
+    }
+
+
+def preview_inventory_csv(branch: Branch, csv_text: str, filename: str = "") -> Dict[str, Any]:
     payload = parse_inventory_csv(
         csv_text,
         tenant_id=branch.inventory_name,
         locadora=branch.display_name or branch.inventory_name,
     )
-    save_inventory(branch.inventory_name, payload)
-    return inventory_summary(branch)
+    return _preview_from_payload(branch, payload, filename=filename)
 
 
-def import_inventory_xlsx(branch: Branch, content: bytes) -> Dict[str, Any]:
+def preview_inventory_xlsx(branch: Branch, content: bytes, filename: str = "") -> Dict[str, Any]:
     payload = parse_inventory_xlsx(
         content,
         tenant_id=branch.inventory_name,
         locadora=branch.display_name or branch.inventory_name,
     )
-    save_inventory(branch.inventory_name, payload)
+    return _preview_from_payload(branch, payload, filename=filename)
+
+
+def _merge_quantities(existing: Dict[str, Any], incoming: Dict[str, Any], branch: Branch) -> Dict[str, Any]:
+    merged = _normalize_payload(existing, branch)
+    incoming = _normalize_payload(incoming, branch)
+    for section in SECTIONS:
+        target = merged.setdefault(section, {})
+        for model_id, item in incoming.get(section, {}).items():
+            qty = item if isinstance(item, int) else int((item or {}).get("qty", 0))
+            if model_id in target and isinstance(target[model_id], dict):
+                target[model_id]["qty"] = qty
+            elif model_id in target and isinstance(target[model_id], int):
+                target[model_id] = qty
+            else:
+                target[model_id] = item
+    return merged
+
+
+def apply_inventory_import(
+    branch: Branch,
+    payload: Dict[str, Any],
+    *,
+    actor: str = "",
+    filename: str = "",
+    mode: str = "replace",
+) -> Dict[str, Any]:
+    if mode not in {"replace", "update_quantities"}:
+        raise ValueError("Modo de importacao invalido")
+    before = _read_payload(branch)
+    if mode == "replace":
+        data = _validated_inventory_payload(payload, branch)
+    else:
+        data = _validated_inventory_payload(_merge_quantities(before, payload, branch), branch)
+    save_inventory(branch.inventory_name, data)
+    _append_history(
+        branch,
+        actor=actor,
+        action="import",
+        before=before,
+        after=data,
+        filename=filename,
+        mode=mode,
+    )
     return inventory_summary(branch)
+
+
+def import_inventory_csv(
+    branch: Branch,
+    csv_text: str,
+    *,
+    actor: str = "",
+    filename: str = "",
+    mode: str = "replace",
+) -> Dict[str, Any]:
+    payload = parse_inventory_csv(
+        csv_text,
+        tenant_id=branch.inventory_name,
+        locadora=branch.display_name or branch.inventory_name,
+    )
+    return apply_inventory_import(branch, payload, actor=actor, filename=filename, mode=mode)
+
+
+def import_inventory_xlsx(
+    branch: Branch,
+    content: bytes,
+    *,
+    actor: str = "",
+    filename: str = "",
+    mode: str = "replace",
+) -> Dict[str, Any]:
+    payload = parse_inventory_xlsx(
+        content,
+        tenant_id=branch.inventory_name,
+        locadora=branch.display_name or branch.inventory_name,
+    )
+    return apply_inventory_import(branch, payload, actor=actor, filename=filename, mode=mode)
 
 
 def _catalog_root() -> Path:

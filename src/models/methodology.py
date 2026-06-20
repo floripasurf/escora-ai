@@ -239,6 +239,16 @@ def load_methodology(
     depois no branch (que sobrescreve campo a campo). Qualquer falha de
     leitura/parse retorna os DEFAULTS em codigo — leitura sempre opcional.
     """
+    if path is None:
+        try:
+            from src.auth.registry import methodology_metadata
+
+            meta = methodology_metadata(locadora_id=locadora_id, branch_id=branch_id)
+            return profile_from_dict(meta) if meta else PROFILE_GRID_LEGACY
+        except Exception as exc:
+            logger.warning(f"Perfil de metodologia: falha lendo registry SQLite: {exc}")
+            return PROFILE_GRID_LEGACY
+
     file_path = _locadoras_path(path)
     if not file_path.exists():
         return PROFILE_GRID_LEGACY

@@ -1114,10 +1114,68 @@
             color: var(--err);
             background: rgba(248, 113, 113, 0.08);
         }
+        .inventory-import-preview,
+        .inventory-history {
+            background: var(--bg-1);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+        .inventory-import-preview h3,
+        .inventory-history h3,
+        .admin-panel h3 {
+            font-family: var(--display);
+            font-size: 1.08rem;
+            font-weight: 500;
+            margin-bottom: 0.8rem;
+        }
+        .preview-counts {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(110px, 1fr));
+            gap: 8px;
+            margin-bottom: 0.9rem;
+        }
+        .preview-count,
+        .history-item,
+        .admin-list-item {
+            border: 1px solid var(--line-soft);
+            border-radius: var(--radius-sm);
+            padding: 0.75rem;
+            background: var(--bg-2);
+        }
+        .preview-count strong {
+            display: block;
+            font-size: 1.2rem;
+            color: var(--fg);
+        }
+        .preview-count span,
+        .history-meta,
+        .admin-list-item small {
+            color: var(--fg-mute);
+            font-family: var(--mono);
+            font-size: 0.72rem;
+        }
+        .preview-actions,
+        .inventory-history-head,
+        .admin-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .history-item {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 8px;
+        }
 
         /* ========== NEW: Account Tab ========== */
         .account-section {
-            max-width: 520px;
+            max-width: 980px;
             opacity: 0;
             animation: fadeUp 0.5s ease-out forwards;
         }
@@ -1175,6 +1233,34 @@
         .account-logout-wrap {
             margin-top: 1.5rem;
         }
+        .admin-panel {
+            background: var(--bg-1);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        .admin-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 1rem;
+        }
+        .admin-grid h4 {
+            font-family: var(--mono);
+            color: var(--fg-dim);
+            font-size: 0.75rem;
+            font-weight: 500;
+            margin-bottom: 0.7rem;
+        }
+        .admin-list {
+            display: grid;
+            gap: 8px;
+            margin-bottom: 0.9rem;
+        }
+        .admin-form {
+            display: grid;
+            gap: 8px;
+        }
 
         /* ---------- Responsive ---------- */
         @media (max-width: 640px) {
@@ -1195,6 +1281,9 @@
             .inventory-editor-grid { grid-template-columns: 1fr; }
             .inventory-editor-actions { justify-content: stretch; }
             .inventory-editor-actions .btn { flex: 1; }
+            .preview-counts,
+            .admin-grid { grid-template-columns: 1fr; }
+            .history-item { grid-template-columns: 1fr; }
         }
         @media (min-width: 641px) and (max-width: 900px) {
             .landing-visuals { grid-template-columns: 1fr 1fr; }
@@ -1507,7 +1596,7 @@
                     </p>
                 </section>
 
-                <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+                <div class="upload-zone" id="uploadZone" onclick="openProjectUpload()">
                     <div class="icon">&uarr;</div>
                     <h2>Arraste ou selecione seu projeto estrutural</h2>
                     <p>.dxf &middot; .dwg &middot; ate 200 MB</p>
@@ -1531,14 +1620,15 @@
                         <div class="inventory-actions">
                             <button class="btn" onclick="downloadInventoryTemplateXlsx()">Baixar Excel</button>
                             <button class="btn" onclick="downloadInventoryTemplate()">Baixar CSV</button>
-                            <button class="btn" onclick="openInventoryCsv()">Importar Excel/CSV</button>
-                            <button class="btn btn-primary" onclick="openInventoryForm()">Adicionar Item</button>
+                            <button class="btn" data-manage-inventory onclick="openInventoryCsv()">Importar Excel/CSV</button>
+                            <button class="btn btn-primary" data-manage-inventory onclick="openInventoryForm()">Adicionar Item</button>
                         </div>
                     </div>
                     <div class="inventory-note">
                         <span id="inventoryMeta">Carregando inventário...</span>
                     </div>
                     <input type="file" id="inventoryCsvInput" accept=".csv,.xlsx" style="display:none;">
+                    <div id="inventoryImportPreview" class="inventory-import-preview" style="display:none;"></div>
                     <div id="inventoryEditor" class="inventory-editor">
                         <div class="inventory-editor-grid">
                             <input id="invModel" type="text" placeholder="Modelo">
@@ -1578,6 +1668,13 @@
                             </tbody>
                         </table>
                     </div>
+                    <div class="inventory-history" data-manage-inventory>
+                        <div class="inventory-history-head">
+                            <h3>Histórico do inventário</h3>
+                            <button class="btn" onclick="refreshInventoryHistory()">Atualizar</button>
+                        </div>
+                        <div id="inventoryHistory" class="inventory-history-list">Carregando histórico...</div>
+                    </div>
                 </div>
             </div>
 
@@ -1598,6 +1695,49 @@
                             <span class="account-row-label">Empresa</span>
                             <span class="account-row-value" id="acctCompany">&mdash;</span>
                         </div>
+                        <div class="account-row">
+                            <span class="account-row-label">Papel</span>
+                            <span class="account-row-value" id="acctRole">&mdash;</span>
+                        </div>
+                        <div class="account-row">
+                            <span class="account-row-label">Unidade</span>
+                            <span class="account-row-value" id="acctBranch">&mdash;</span>
+                        </div>
+                    </div>
+
+                    <div id="adminPanel" class="admin-panel" style="display:none;">
+                        <div class="admin-head">
+                            <h3>Administração</h3>
+                            <button class="btn" onclick="loadAdminPanel()">Atualizar</button>
+                        </div>
+                        <div class="admin-grid">
+                            <div>
+                                <h4>Unidades</h4>
+                                <div id="adminBranches" class="admin-list"></div>
+                                <div class="admin-form">
+                                    <input id="adminBranchName" type="text" placeholder="Nome da unidade">
+                                    <input id="adminInventoryName" type="text" placeholder="Inventário (opcional)">
+                                    <button class="btn btn-primary" onclick="createAdminBranch()">Criar unidade</button>
+                                </div>
+                            </div>
+                            <div>
+                                <h4>Usuários</h4>
+                                <div id="adminUsers" class="admin-list"></div>
+                                <div class="admin-form">
+                                    <input id="adminUserEmail" type="text" placeholder="email">
+                                    <input id="adminUserName" type="text" placeholder="nome">
+                                    <input id="adminUserPassword" type="password" placeholder="senha inicial">
+                                    <select id="adminUserRole">
+                                        <option value="operator">Operator</option>
+                                        <option value="admin">Admin</option>
+                                        <option value="viewer">Viewer</option>
+                                        <option value="owner">Owner</option>
+                                    </select>
+                                    <button class="btn btn-primary" onclick="createAdminUser()">Criar usuário</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="adminMsg" class="msg-line"></div>
                     </div>
 
                     <h3>Alterar senha</h3>
@@ -1645,6 +1785,21 @@
         const jobs = {};
         let INVENTORY = null;
         let EDITING_INVENTORY_MODEL = null;
+        let PENDING_INVENTORY_FILE = null;
+        let ADMIN_STATE = null;
+
+        const ROLE_LABELS = {
+            owner: 'Owner',
+            admin: 'Admin',
+            operator: 'Operator',
+            viewer: 'Viewer',
+        };
+        const SECTION_LABELS = {
+            telescopic_shores: 'Escoras',
+            tower_modules: 'Torres',
+            distribution_beams: 'Vigas',
+            accessories: 'Acessórios',
+        };
 
         // XSS-safe text escaping for all user-controlled strings
         function esc(s) {
@@ -1664,6 +1819,28 @@
         let TOKEN = localStorage.getItem('escora_token') || '';
         let BRANCH_ID = localStorage.getItem('escora_branch_id') || '';
         let SESSION = null;
+
+        function currentRole() {
+            return (SESSION && SESSION.role) || 'operator';
+        }
+
+        function canManageTenant() {
+            return ['owner', 'admin'].includes(currentRole());
+        }
+
+        function canManageInventory() {
+            return canManageTenant();
+        }
+
+        function canRunProjects() {
+            return ['owner', 'admin', 'operator'].includes(currentRole());
+        }
+
+        function currentBranch() {
+            return SESSION && SESSION.branches
+                ? SESSION.branches.find(b => b.id === BRANCH_ID)
+                : null;
+        }
 
         // Header clock
         function tickClock() {
@@ -1698,6 +1875,20 @@
             }
         }
 
+        function updateRoleUi() {
+            const canManage = canManageInventory();
+            document.querySelectorAll('[data-manage-inventory]').forEach(el => {
+                el.style.display = canManage ? '' : 'none';
+            });
+            const uploadZoneEl = document.getElementById('uploadZone');
+            if (uploadZoneEl) {
+                uploadZoneEl.style.opacity = canRunProjects() ? '1' : '0.55';
+                uploadZoneEl.style.cursor = canRunProjects() ? 'pointer' : 'not-allowed';
+            }
+            const adminPanel = document.getElementById('adminPanel');
+            if (adminPanel) adminPanel.style.display = canManageTenant() ? 'block' : 'none';
+        }
+
         /* Tab switching */
         function switchTab(tabId) {
             ['projectsTab', 'inventoryTab', 'accountTab'].forEach(t => {
@@ -1716,9 +1907,125 @@
             const nameEl = document.getElementById('acctName');
             const emailEl = document.getElementById('acctEmail');
             const companyEl = document.getElementById('acctCompany');
-            if (nameEl) nameEl.textContent = SESSION.username || SESSION.name || '\u2014';
-            if (emailEl) emailEl.textContent = SESSION.email || '\u2014';
+            const roleEl = document.getElementById('acctRole');
+            const branchEl = document.getElementById('acctBranch');
+            const branch = currentBranch();
+            if (nameEl) nameEl.textContent = SESSION.name || SESSION.username || '\u2014';
+            if (emailEl) emailEl.textContent = SESSION.username || '\u2014';
             if (companyEl) companyEl.textContent = SESSION.locadora_name || SESSION.company || '\u2014';
+            if (roleEl) roleEl.textContent = ROLE_LABELS[currentRole()] || currentRole();
+            if (branchEl) {
+                branchEl.textContent = branch
+                    ? `${branch.branch_name} · ${branch.inventory_name}`
+                    : '\u2014';
+            }
+            updateRoleUi();
+            if (canManageTenant()) loadAdminPanel();
+        }
+
+        async function refreshSession() {
+            const res = await fetch(`${API}/auth/me`, { headers: authHeaders() });
+            if (!res.ok) throw new Error(await safeErrorMessage(res));
+            SESSION = await res.json();
+            renderHeaderBadge();
+            updateAccountInfo();
+        }
+
+        function adminMsg(text, ok = false) {
+            const el = document.getElementById('adminMsg');
+            if (!el) return;
+            el.textContent = text || '';
+            el.classList.toggle('ok', ok);
+        }
+
+        async function loadAdminPanel() {
+            if (!canManageTenant()) return;
+            try {
+                const res = await fetch(`${API}/admin/locadora`, { headers: authHeaders() });
+                if (!res.ok) {
+                    adminMsg(await safeErrorMessage(res));
+                    return;
+                }
+                ADMIN_STATE = await res.json();
+                renderAdminPanel();
+                adminMsg('');
+            } catch (e) {
+                adminMsg('Erro de conexao: ' + e.message);
+            }
+        }
+
+        function renderAdminPanel() {
+            const branches = document.getElementById('adminBranches');
+            const users = document.getElementById('adminUsers');
+            if (!ADMIN_STATE || !branches || !users) return;
+            branches.innerHTML = (ADMIN_STATE.branches || []).map(b => `
+                <div class="admin-list-item">
+                    <strong>${esc(b.branch_name)}</strong>
+                    <small>${esc(b.id)} · estoque ${esc(b.inventory_name)}</small>
+                </div>
+            `).join('') || '<div class="history-meta">Nenhuma unidade cadastrada.</div>';
+            users.innerHTML = (ADMIN_STATE.users || []).map(u => `
+                <div class="admin-list-item">
+                    <strong>${esc(u.name || u.username)}</strong>
+                    <small>${esc(u.username)} · ${esc(ROLE_LABELS[u.role] || u.role)}</small>
+                </div>
+            `).join('') || '<div class="history-meta">Nenhum usuário cadastrado.</div>';
+        }
+
+        async function createAdminBranch() {
+            const branchName = document.getElementById('adminBranchName').value.trim();
+            const inventoryName = document.getElementById('adminInventoryName').value.trim();
+            if (!branchName) { adminMsg('Informe o nome da unidade.'); return; }
+            try {
+                const res = await fetch(`${API}/admin/branches`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                    body: JSON.stringify({
+                        branch_name: branchName,
+                        inventory_name: inventoryName || null,
+                    }),
+                });
+                if (!res.ok) {
+                    adminMsg(await safeErrorMessage(res));
+                    return;
+                }
+                document.getElementById('adminBranchName').value = '';
+                document.getElementById('adminInventoryName').value = '';
+                await refreshSession();
+                await loadAdminPanel();
+                adminMsg('Unidade criada.', true);
+            } catch (e) {
+                adminMsg('Erro de conexao: ' + e.message);
+            }
+        }
+
+        async function createAdminUser() {
+            const username = document.getElementById('adminUserEmail').value.trim();
+            const name = document.getElementById('adminUserName').value.trim();
+            const password = document.getElementById('adminUserPassword').value;
+            const role = document.getElementById('adminUserRole').value;
+            if (!username || !name || !password) {
+                adminMsg('Preencha email, nome e senha inicial.');
+                return;
+            }
+            try {
+                const res = await fetch(`${API}/admin/users`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                    body: JSON.stringify({ username, name, password, role }),
+                });
+                if (!res.ok) {
+                    adminMsg(await safeErrorMessage(res));
+                    return;
+                }
+                document.getElementById('adminUserEmail').value = '';
+                document.getElementById('adminUserName').value = '';
+                document.getElementById('adminUserPassword').value = '';
+                await loadAdminPanel();
+                adminMsg('Usuário criado.', true);
+            } catch (e) {
+                adminMsg('Erro de conexao: ' + e.message);
+            }
         }
 
         function openPwdModal() {
@@ -1868,7 +2175,7 @@
             branches.forEach(b => {
                 const btn = document.createElement('button');
                 btn.className = 'branch-btn';
-                btn.textContent = b.display_name;
+                btn.textContent = `${b.display_name} · ${b.inventory_name}`;
                 btn.onclick = () => selectBranch(b.id);
                 list.appendChild(btn);
             });
@@ -1880,6 +2187,7 @@
             INVENTORY = null;
             show('appCard');
             renderHeaderBadge();
+            updateRoleUi();
             refreshJobsList();
         }
 
@@ -1893,6 +2201,8 @@
             Object.keys(jobs).forEach(k => delete jobs[k]);
             INVENTORY = null;
             EDITING_INVENTORY_MODEL = null;
+            PENDING_INVENTORY_FILE = null;
+            ADMIN_STATE = null;
             show('landingPage');
             const el = document.getElementById('sessionBadge');
             if (el) el.remove();
@@ -1912,10 +2222,11 @@
                 document.getElementById('sbPwd').onclick = openPwdModal;
                 document.getElementById('sbOut').onclick = logout;
             }
-            const branch = SESSION && SESSION.branches.find(b => b.id === BRANCH_ID);
-            const label = branch ? `${SESSION.locadora_name} \u00B7 ${branch.branch_name}` : 'logado';
+            const branch = currentBranch();
+            const label = branch ? `${SESSION.locadora_name} \u00B7 ${branch.branch_name} \u00B7 ${branch.inventory_name}` : 'logado';
             document.getElementById('sbLabel').textContent = label;
             renderMethodologyBadge(branch);
+            updateRoleUi();
         }
 
         function renderMethodologyBadge(branch) {
@@ -2011,6 +2322,7 @@
                 }
                 INVENTORY = await res.json();
                 renderInventory();
+                if (canManageInventory()) refreshInventoryHistory();
             } catch (e) {
                 if (meta) meta.textContent = 'Erro de conexao: ' + e.message;
             }
@@ -2022,16 +2334,18 @@
             if (!body || !INVENTORY) return;
 
             const items = INVENTORY.items || [];
-            const branch = SESSION && SESSION.branches.find(b => b.id === BRANCH_ID);
+            const branch = currentBranch();
             const unit = branch ? branch.branch_name : INVENTORY.inventory_name;
+            const invName = branch ? branch.inventory_name : INVENTORY.inventory_name;
             const updated = INVENTORY.updated_at ? ` · atualizado em ${INVENTORY.updated_at}` : '';
-            if (meta) meta.textContent = `${unit} · ${items.length} modelos${updated}`;
+            if (meta) meta.textContent = `${SESSION.locadora_name || INVENTORY.locadora || 'Locadora'} · ${unit} · estoque ${invName} · ${items.length} modelos${updated}`;
 
             if (!items.length) {
                 body.innerHTML = '<tr><td colspan="7" class="inv-empty">Nenhum item cadastrado</td></tr>';
                 return;
             }
 
+            const canEdit = canManageInventory();
             body.innerHTML = items.map(item => {
                 const cap = item.capacity_kn == null ? '<span class="inv-muted">&mdash;</span>' : fmtInv(item.capacity_kn, 2);
                 const hMin = item.height_min_m == null ? '' : fmtInv(item.height_min_m, 2);
@@ -2049,8 +2363,8 @@
                         <td><span class="inv-status ${statusClass}">${esc(item.status_label)}</span></td>
                         <td>
                             <div class="inv-actions-cell">
-                                <button class="btn" onclick="openInventoryForm('${modelArg}')">Editar</button>
-                                <button class="btn btn-danger" onclick="deleteInventoryItem('${modelArg}')">Remover</button>
+                                ${canEdit ? `<button class="btn" onclick="openInventoryForm('${modelArg}')">Editar</button>` : ''}
+                                ${canEdit ? `<button class="btn btn-danger" onclick="deleteInventoryItem('${modelArg}')">Remover</button>` : ''}
                             </div>
                         </td>
                     </tr>
@@ -2078,6 +2392,7 @@
         }
 
         function openInventoryForm(modelId = '') {
+            if (!canManageInventory()) { inventoryMsg('Seu papel permite apenas consultar o inventario.'); return; }
             const item = modelId ? currentInventoryItem(modelId) : null;
             EDITING_INVENTORY_MODEL = item ? item.model_id : null;
             const editor = document.getElementById('inventoryEditor');
@@ -2110,6 +2425,7 @@
         }
 
         async function saveInventoryItem() {
+            if (!canManageInventory()) { inventoryMsg('Seu papel permite apenas consultar o inventario.'); return; }
             const model = (EDITING_INVENTORY_MODEL || document.getElementById('invModel').value).trim();
             const qty = formNumber('invQty');
             if (!model) { inventoryMsg('Informe o modelo'); return; }
@@ -2145,6 +2461,7 @@
         }
 
         async function deleteInventoryItem(model) {
+            if (!canManageInventory()) { inventoryMsg('Seu papel permite apenas consultar o inventario.'); return; }
             if (!confirm(`Remover ${model} do inventario desta unidade?`)) return;
             try {
                 const res = await fetch(`${API}/inventory/items/${encodeURIComponent(model)}`, {
@@ -2164,15 +2481,75 @@
         }
 
         function openInventoryCsv() {
-            if (!confirm('Importar CSV/XLSX substitui o inventario inteiro desta unidade. Continuar?')) return;
+            if (!canManageInventory()) { inventoryMsg('Seu papel permite apenas consultar o inventario.'); return; }
             document.getElementById('inventoryCsvInput').click();
         }
 
         async function uploadInventoryCsv(file) {
+            if (!canManageInventory()) { inventoryMsg('Seu papel permite apenas consultar o inventario.'); return; }
+            PENDING_INVENTORY_FILE = file;
             const formData = new FormData();
             formData.append('file', file);
             try {
-                const res = await fetch(`${API}/inventory/import-csv`, {
+                const res = await fetch(`${API}/inventory/import-preview`, {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: formData,
+                });
+                if (!res.ok) {
+                    inventoryMsg(await safeErrorMessage(res));
+                    return;
+                }
+                renderInventoryImportPreview(await res.json());
+            } catch (e) {
+                inventoryMsg('Erro de conexao: ' + e.message);
+            }
+        }
+
+        function renderInventoryImportPreview(preview) {
+            const box = document.getElementById('inventoryImportPreview');
+            if (!box) return;
+            const counts = preview.counts || {};
+            const unknown = preview.unknown_models || [];
+            const countHtml = Object.keys(SECTION_LABELS).map(section => `
+                <div class="preview-count">
+                    <strong>${counts[section] || 0}</strong>
+                    <span>${SECTION_LABELS[section]}</span>
+                </div>
+            `).join('');
+            box.innerHTML = `
+                <h3>Prévia da importação</h3>
+                <div class="history-meta">${esc(preview.filename || 'arquivo')} · ${preview.total_models || 0} modelos · estoque ${esc(preview.inventory_name || '')}</div>
+                <div class="preview-counts">${countHtml}</div>
+                ${unknown.length ? `<div class="msg-line">Modelos desconhecidos: ${unknown.map(esc).join(', ')}</div>` : '<div class="msg-line ok">Nenhum modelo desconhecido.</div>'}
+                <div class="preview-actions" style="margin-top:12px">
+                    <button class="btn" onclick="cancelInventoryImport()">Cancelar</button>
+                    <div>
+                        <button class="btn" onclick="confirmInventoryImport('update_quantities')">Atualizar quantidades</button>
+                        <button class="btn btn-primary" onclick="confirmInventoryImport('replace')">Substituir tudo</button>
+                    </div>
+                </div>
+                <div class="history-meta" style="margin-top:8px">${esc(preview.replace_warning || '')}</div>
+            `;
+            box.style.display = 'block';
+            inventoryMsg('');
+        }
+
+        function cancelInventoryImport() {
+            PENDING_INVENTORY_FILE = null;
+            const box = document.getElementById('inventoryImportPreview');
+            if (box) {
+                box.style.display = 'none';
+                box.innerHTML = '';
+            }
+        }
+
+        async function confirmInventoryImport(mode) {
+            if (!PENDING_INVENTORY_FILE) { inventoryMsg('Selecione uma planilha antes de importar.'); return; }
+            const formData = new FormData();
+            formData.append('file', PENDING_INVENTORY_FILE);
+            try {
+                const res = await fetch(`${API}/inventory/import-csv?mode=${encodeURIComponent(mode)}`, {
                     method: 'POST',
                     headers: authHeaders(),
                     body: formData,
@@ -2183,7 +2560,70 @@
                 }
                 INVENTORY = await res.json();
                 renderInventory();
+                refreshInventoryHistory();
+                cancelInventoryImport();
                 closeInventoryForm();
+                inventoryMsg('Inventario importado com sucesso.', true);
+            } catch (e) {
+                inventoryMsg('Erro de conexao: ' + e.message);
+            }
+        }
+
+        async function refreshInventoryHistory() {
+            if (!canManageInventory()) return;
+            const target = document.getElementById('inventoryHistory');
+            if (!target) return;
+            try {
+                const res = await fetch(`${API}/inventory/history`, { headers: authHeaders() });
+                if (!res.ok) {
+                    target.textContent = await safeErrorMessage(res);
+                    return;
+                }
+                renderInventoryHistory((await res.json()).items || []);
+            } catch (e) {
+                target.textContent = 'Erro de conexao: ' + e.message;
+            }
+        }
+
+        function renderInventoryHistory(items) {
+            const target = document.getElementById('inventoryHistory');
+            if (!target) return;
+            if (!items.length) {
+                target.innerHTML = '<div class="history-meta">Nenhuma alteração registrada ainda.</div>';
+                return;
+            }
+            target.innerHTML = items.map(item => {
+                const changed = item.diff && item.diff.changed_models != null ? item.diff.changed_models : 0;
+                const when = item.at ? new Date(item.at).toLocaleString('pt-BR') : '';
+                const mode = item.mode ? ` · ${esc(item.mode)}` : '';
+                return `
+                    <div class="history-item">
+                        <div>
+                            <strong>${esc(item.action || 'alteracao')}</strong>
+                            <div class="history-meta">${when} · ${esc(item.actor || 'sistema')}${mode} · ${changed} modelos alterados</div>
+                            ${item.filename ? `<div class="history-meta">${esc(item.filename)}</div>` : ''}
+                        </div>
+                        <button class="btn" onclick="restoreInventoryHistory('${esc(jsArg(item.id))}')">Restaurar</button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function restoreInventoryHistory(entryId) {
+            if (!confirm('Restaurar o inventario para o estado anterior desta alteração?')) return;
+            try {
+                const res = await fetch(`${API}/inventory/history/${encodeURIComponent(entryId)}/restore`, {
+                    method: 'POST',
+                    headers: authHeaders(),
+                });
+                if (!res.ok) {
+                    inventoryMsg(await safeErrorMessage(res));
+                    return;
+                }
+                INVENTORY = await res.json();
+                renderInventory();
+                refreshInventoryHistory();
+                inventoryMsg('Inventario restaurado.', true);
             } catch (e) {
                 inventoryMsg('Erro de conexao: ' + e.message);
             }
@@ -2229,8 +2669,17 @@
             });
         }
 
+        function openProjectUpload() {
+            if (!canRunProjects()) {
+                alert('Seu papel permite apenas visualizar resultados.');
+                return;
+            }
+            document.getElementById('fileInput').click();
+        }
+
         async function uploadFile(file) {
             if (!TOKEN || !BRANCH_ID) { show('loginCard'); return; }
+            if (!canRunProjects()) { alert('Seu papel permite apenas visualizar resultados.'); return; }
             const formData = new FormData();
             formData.append('file', file);
 
@@ -2287,6 +2736,7 @@
         }
 
         async function uploadRevision(jobId) {
+            if (!canRunProjects()) { alert('Seu papel permite apenas visualizar resultados.'); return; }
             const input = document.getElementById(`rev-${jobId}`);
             input.click();
             input.onchange = async () => {
@@ -2315,6 +2765,7 @@
         }
 
         async function deleteJob(jobId) {
+            if (!canRunProjects()) { alert('Seu papel permite apenas visualizar resultados.'); return; }
             if (!confirm('Remover este projeto?')) return;
             try {
                 const res = await fetch(`${API}/jobs/${jobId}`, { method: 'DELETE', headers: authHeaders() });
@@ -2339,11 +2790,14 @@
             if (countEl) countEl.textContent = String(jobList.length).padStart(2, '0');
 
             if (jobList.length === 0) {
-                container.innerHTML = '<div class="empty-state">Nenhum projeto ainda. Envie o primeiro DXF acima para comecar.</div>';
+                container.innerHTML = canRunProjects()
+                    ? '<div class="empty-state">Nenhum projeto ainda. Envie o primeiro DXF acima para comecar.</div>'
+                    : '<div class="empty-state">Nenhum projeto disponivel para visualizacao.</div>';
                 return;
             }
 
             container.innerHTML = jobList.map((job, idx) => {
+                const canOperate = canRunProjects();
                 const statusClass = job.status;
                 const statusLabel = {
                     pending: 'Na fila',
@@ -2362,7 +2816,7 @@
                     content = `
                         <div style="margin-top:0.8rem;font-size:0.86rem;color:var(--err)">${esc(job.error_message || 'Erro desconhecido')}</div>
                         <div class="actions">
-                            <button class="btn btn-danger" onclick="deleteJob('${esc(job.id)}')">Remover</button>
+                            ${canOperate ? `<button class="btn btn-danger" onclick="deleteJob('${esc(job.id)}')">Remover</button>` : ''}
                         </div>
                     `;
                 }
@@ -2390,6 +2844,10 @@
                     `;
 
                     const stem = stemOf(job.filename);
+                    const branch = currentBranch();
+                    const stockUnit = branch ? branch.branch_name : 'unidade atual';
+                    const stockName = job.inventory_name || (branch && branch.inventory_name) || '';
+                    content += `<div class="history-meta" style="margin-top:10px">Calculado com estoque da unidade ${esc(stockUnit)}${stockName ? ` · ${esc(stockName)}` : ''}</div>`;
                     content += `
                         <div class="actions">
                             <a href="#" onclick="downloadFile('/jobs/${job.id}/download','${stem}_escoras.dxf');return false" class="btn btn-primary">\u2193 DXF</a>
@@ -2400,9 +2858,9 @@
                             ${job.has_memoria_calculo ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/pdf/memoria_calculo','${stem}_memoria_calculo.pdf');return false" class="btn btn-pdf">\u2193 Memória</a>` : ''}
                             ${job.has_orcamento ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/pdf/orcamento','${stem}_orcamento.pdf');return false" class="btn btn-pdf">\u2193 Orçamento</a>` : ''}
                             ${job.has_ifc ? `<a href="#" onclick="downloadFile('/jobs/${job.id}/download/ifc','${stem}.ifc');return false" class="btn btn-accent">\u2193 IFC</a>` : ''}
-                            <button class="btn btn-green" onclick="uploadRevision('${job.id}')">\u2191 Revisão</button>
-                            <input type="file" class="revision-input" id="rev-${job.id}" accept=".dxf">
-                            <button class="btn btn-danger" onclick="deleteJob('${job.id}')">\u2715</button>
+                            ${canOperate ? `<button class="btn btn-green" onclick="uploadRevision('${job.id}')">\u2191 Revisão</button>` : ''}
+                            ${canOperate ? `<input type="file" class="revision-input" id="rev-${job.id}" accept=".dxf">` : ''}
+                            ${canOperate ? `<button class="btn btn-danger" onclick="deleteJob('${job.id}')">\u2715</button>` : ''}
                         </div>
                     `;
 

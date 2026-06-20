@@ -93,12 +93,14 @@ def test_put_inventory_replaces_full_table(client):
             "telescopic_shores": {"ESC100": {"qty": 10, "capacity_kn": 12}},
             "tower_modules": {},
             "distribution_beams": {"VD-VM50": 4},
+            "accessories": {"CRZ-TORRE": 2},
         },
     )
     assert r.status_code == 200
     models = {i["model_id"]: i for i in r.json()["items"]}
-    assert set(models) == {"ESC100", "VD-VM50"}
+    assert set(models) == {"ESC100", "VD-VM50", "CRZ-TORRE"}
     assert models["VD-VM50"]["qty"] == 4
+    assert models["CRZ-TORRE"]["section"] == "accessories"
 
 
 def test_put_inventory_rejects_invalid_full_table(client):
@@ -149,6 +151,86 @@ def test_import_csv_replaces_only_selected_branch_inventory(client, client_b):
     other = client_b.get("/api/v1/inventory")
     assert other.status_code == 200
     assert all(i["model_id"] != "ESC310" for i in other.json()["items"])
+
+
+def test_import_preview_reports_counts_and_unknown_models(client):
+    csv_text = (
+        "Modelo,Tipo,Quantidade,Capacidade (kN),Altura minima (m),Altura maxima (m)\n"
+        "ESC310,Escora metalica,100,15,1.8,3.1\n"
+        "CUSTOM-X,Escora metalica,2,20,2,4\n"
+        "CRZ-TORRE,Acessorio,6,,,\n"
+    )
+
+    r = client.post(
+        "/api/v1/inventory/import-preview",
+        files={"file": ("inventario.csv", csv_text, "text/csv")},
+    )
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["counts"]["telescopic_shores"] == 2
+    assert data["counts"]["accessories"] == 1
+    assert data["unknown_models"] == ["CUSTOM-X"]
+    assert {m["id"] for m in data["modes"]} == {"replace", "update_quantities"}
+
+
+def test_import_update_quantities_preserves_existing_items(client):
+    _inventory_file("orguel_sjc").write_text(
+        json.dumps(
+            {
+                "tenant_id": "orguel_sjc",
+                "locadora": "Teste A",
+                "telescopic_shores": {
+                    "ESCKEEP": {"qty": 9, "capacity_kn": 17, "notes": "manual"},
+                    "ESC310": {"qty": 1, "capacity_kn": 15},
+                },
+                "tower_modules": {},
+                "distribution_beams": {},
+                "accessories": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    csv_text = (
+        "Modelo,Tipo,Quantidade,Capacidade (kN),Altura minima (m),Altura maxima (m)\n"
+        "ESC310,Escora metalica,100,15,1.8,3.1\n"
+    )
+
+    r = client.post(
+        "/api/v1/inventory/import-csv?mode=update_quantities",
+        files={"file": ("inventario.csv", csv_text, "text/csv")},
+    )
+
+    assert r.status_code == 200
+    models = {i["model_id"]: i for i in r.json()["items"]}
+    assert models["ESC310"]["qty"] == 100
+    assert models["ESCKEEP"]["qty"] == 9
+    assert models["ESCKEEP"]["notes"] == "manual"
+
+
+def test_inventory_history_and_restore(client):
+    r1 = client.put(
+        "/api/v1/inventory/items/ESC-HIST",
+        json={"section": "telescopic_shores", "qty": 7},
+    )
+    assert r1.status_code == 200
+    r2 = client.put(
+        "/api/v1/inventory/items/ESC-HIST",
+        json={"section": "telescopic_shores", "qty": 2},
+    )
+    assert r2.status_code == 200
+
+    hist = client.get("/api/v1/inventory/history")
+    assert hist.status_code == 200
+    latest = hist.json()["items"][0]
+    assert latest["action"] == "upsert_item"
+    assert latest["actor"] == "eng_a"
+    assert latest["diff"]["changed_models"] >= 1
+
+    restored = client.post(f"/api/v1/inventory/history/{latest['id']}/restore")
+    assert restored.status_code == 200
+    item = next(i for i in restored.json()["items"] if i["model_id"] == "ESC-HIST")
+    assert item["qty"] == 7
 
 
 def test_template_csv_lists_catalog_models_zeroed(client):

@@ -21,8 +21,8 @@ from api.services import pipeline_service
 from api.services.pipeline_service import process_dxf
 from api.services.revision_service import analyze_revision
 from api.models.schemas import JobCreateResponse, JobStatusResponse
-from api.deps import get_current_branch
-from src.auth.branches import Branch
+from api.deps import get_current_branch, require_operator_or_admin
+from src.auth.branches import Branch, User
 from src.pipeline.learning_store import LearningStore
 
 logger = logging.getLogger(__name__)
@@ -165,6 +165,7 @@ async def upload_dxf(
     office_name: Optional[str] = Form(None),
     optimization_mode: Optional[str] = Form("price"),
     branch: Branch = Depends(get_current_branch),
+    _: User = Depends(require_operator_or_admin),
 ):
     """Upload a DXF file and start processing.
 
@@ -436,6 +437,7 @@ async def get_diagrams(
 async def delete_job(
     job_id: str,
     branch: Branch = Depends(get_current_branch),
+    _: User = Depends(require_operator_or_admin),
 ):
     """Delete a job and its files."""
     job = job_service.get_job(job_id, branch_id=branch.id)
@@ -586,6 +588,7 @@ async def upload_revision(
     job_id: str,
     file: UploadFile = File(...),
     branch: Branch = Depends(get_current_branch),
+    _: User = Depends(require_operator_or_admin),
 ):
     """Upload the engineer's revised DXF for learning.
 

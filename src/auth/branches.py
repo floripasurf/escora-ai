@@ -9,18 +9,16 @@ Data model:
                 they are currently working on. The chosen branch determines
                 inventory and the learning partition used by the pipeline.
 
-Storage: a single JSON file (default: data/locadoras.json). Human-editable;
-swap for a real DB later without touching the rest of the codebase.
+Storage: SQLite registry seeded from the legacy locadoras JSON on first use.
 
 Passwords are stored with PBKDF2-HMAC-SHA256 (Python stdlib only — no new
-dependency). Sessions are opaque tokens kept in process memory for MVP.
+dependency). Sessions are opaque tokens stored in a small SQLite database.
 """
 
 from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 import logging
 import os
 import secrets
@@ -31,6 +29,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
+
+from src.auth import registry as registry_store
 
 logger = logging.getLogger(__name__)
 
@@ -52,21 +52,24 @@ def _sessions_db_path() -> Path:
 
 
 _session_conn_cache: Optional[sqlite3.Connection] = None
+_session_conn_cache_path: Optional[Path] = None
 
 
 def _session_conn() -> sqlite3.Connection:
-    global _session_conn_cache
-    if _session_conn_cache is not None:
+    global _session_conn_cache, _session_conn_cache_path
+    path = _sessions_db_path()
+    if _session_conn_cache is not None and _session_conn_cache_path == path:
         try:
             _session_conn_cache.execute("SELECT 1")
             return _session_conn_cache
         except Exception:
             _session_conn_cache = None
-    path = _sessions_db_path()
+            _session_conn_cache_path = None
     conn = sqlite3.connect(str(path), isolation_level=None, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     _session_conn_cache = conn
+    _session_conn_cache_path = path
     return conn
 
 
@@ -106,7 +109,7 @@ class User:
     name: str
     password_hash: str
     locadora_id: str
-    role: str = "engineer"
+    role: str = registry_store.ROLE_OPERATOR
 
 
 @dataclass
@@ -120,16 +123,11 @@ class Locadora:
 # ---------- Loader ----------
 
 def _locadoras_path() -> Path:
-    override = os.environ.get("ESCORA_LOCADORAS_FILE")
-    return Path(override) if override else DEFAULT_LOCADORAS_PATH
+    return registry_store.locadoras_json_path()
 
 
 def load_registry() -> Dict[str, Locadora]:
-    path = _locadoras_path()
-    if not path.exists():
-        logger.warning(f"Locadoras file not found: {path}")
-        return {}
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = registry_store.registry_payload()
     out: Dict[str, Locadora] = {}
     for entry in data.get("locadoras", []):
         loc = Locadora(id=entry["id"], name=entry["name"])
@@ -147,7 +145,7 @@ def load_registry() -> Dict[str, Locadora]:
                 name=u.get("name", u["username"]),
                 password_hash=u["password_hash"],
                 locadora_id=loc.id,
-                role=u.get("role", "engineer"),
+                role=registry_store.normalize_role(u.get("role"), default=registry_store.ROLE_OWNER),
             ))
         out[loc.id] = loc
     return out
@@ -269,8 +267,6 @@ def clear_sessions() -> None:
 
 
 import re
-import fcntl
-
 _EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
 _create_user_lock = threading.Lock()
 
@@ -285,8 +281,7 @@ def create_user(
     """Register a new user with their own locadora + default branch.
 
     Returns the User on success, None if the email is already taken.
-    Writes to the same locadoras JSON file used by the rest of the system.
-    Thread-safe: uses both a threading lock and file-level locking.
+    Persists to the SQLite registry seeded from the legacy locadoras JSON.
     """
     if not password or len(password) < 6:
         return None
@@ -295,63 +290,22 @@ def create_user(
         return None
 
     with _create_user_lock:
-        path = _locadoras_path()
-        if not path.exists():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            data = {"version": 1, "locadoras": []}
-        else:
-            data = json.loads(path.read_text(encoding="utf-8"))
-
-        # Check uniqueness (email = username)
-        for entry in data.get("locadoras", []):
-            for u in entry.get("users", []):
-                if u["username"] == email:
-                    return None
-
-        # Slugify for IDs
-        slug = re.sub(r"[^a-z0-9-]", "-", email.split("@")[0].lower())
-        loc_id = f"loc-{slug}"
-        branch_id = f"{loc_id}-default"
-        inventory_name = branch_id
-
-        new_locadora = {
-            "id": loc_id,
-            "name": company or name,
-            "branches": [
-                {
-                    "id": branch_id,
-                    "branch_name": "Sede",
-                    "inventory_name": inventory_name,
-                }
-            ],
-            "users": [
-                {
-                    "username": email,
-                    "name": name,
-                    "password_hash": hash_password(password),
-                    "phone": phone,
-                    "role": "owner",
-                }
-            ],
-        }
-        data["locadoras"].append(new_locadora)
-
-        # Atomic write with file lock to prevent race conditions
-        tmp_path = path.with_suffix(".tmp")
-        content = json.dumps(data, indent=2, ensure_ascii=False)
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            f.write(content)
-            f.flush()
-            os.fsync(f.fileno())
-        tmp_path.replace(path)
+        created = registry_store.create_locadora_with_owner(
+            name=company or name,
+            owner_name=name,
+            owner_email=email,
+            owner_phone=phone,
+            password_hash=hash_password(password),
+        )
+        if created is None:
+            return None
 
     return User(
         username=email,
         name=name,
         password_hash="",
-        locadora_id=loc_id,
-        role="owner",
+        locadora_id=created["locadora_id"],
+        role=registry_store.ROLE_OWNER,
     )
 
 
@@ -360,37 +314,15 @@ def repair_default_inventory_names() -> int:
 
     Older signups used inventory_name="default", which can make unrelated
     locadoras share the same stock file. This migration is intentionally small
-    and JSON-backed so current deployments can repair themselves at startup.
+    so current deployments can repair themselves at startup.
     """
-    path = _locadoras_path()
-    if not path.exists():
-        return 0
-    data = json.loads(path.read_text(encoding="utf-8"))
-    changed = 0
-    for entry in data.get("locadoras", []):
-        for branch in entry.get("branches", []):
-            if branch.get("inventory_name") != "default":
-                continue
-            new_name = branch.get("id")
-            if not new_name:
-                continue
-            branch["inventory_name"] = new_name
-            changed += 1
-            _copy_default_inventory_if_needed(new_name)
-
+    changed = registry_store.repair_default_inventory_names()
     if not changed:
         return 0
-
-    tmp_path = path.with_suffix(".tmp")
-    content = json.dumps(data, indent=2, ensure_ascii=False)
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        import fcntl
-
-        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-        f.write(content)
-        f.flush()
-        os.fsync(f.fileno())
-    tmp_path.replace(path)
+    for loc in load_registry().values():
+        for branch in loc.branches:
+            if branch.inventory_name == branch.id:
+                _copy_default_inventory_if_needed(branch.id)
     logger.info(f"Repaired {changed} shared default inventory name(s)")
     return changed
 
@@ -415,28 +347,14 @@ def _copy_default_inventory_if_needed(new_name: str) -> None:
 
 
 def change_password(username: str, old_password: str, new_password: str) -> bool:
-    """Verify old password and replace it in the locadoras JSON on disk.
+    """Verify old password and replace it in the SQLite registry.
 
     Returns True on success, False if the old password didn't match or the
-    user isn't in the registry. Writes to whatever path `_locadoras_path()`
-    resolves to (respecting `ESCORA_LOCADORAS_FILE`).
+    user isn't in the registry.
     """
     if not new_password or len(new_password) < 6:
         return False
-    path = _locadoras_path()
-    if not path.exists():
+    user = authenticate_user(username, old_password)
+    if user is None:
         return False
-    data = json.loads(path.read_text(encoding="utf-8"))
-    updated = False
-    for entry in data.get("locadoras", []):
-        for u in entry.get("users", []):
-            if u["username"] == username and verify_password(old_password, u["password_hash"]):
-                u["password_hash"] = hash_password(new_password)
-                updated = True
-                break
-        if updated:
-            break
-    if not updated:
-        return False
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-    return True
+    return registry_store.update_password(username, hash_password(new_password))
