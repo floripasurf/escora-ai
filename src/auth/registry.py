@@ -388,6 +388,44 @@ def create_branch(locadora_id: str, branch_name: str, inventory_name: Optional[s
     return {"id": branch_id, "branch_name": name, "inventory_name": inv}
 
 
+def update_branch(locadora_id: str, branch_id: str, branch_name: str) -> Optional[Dict[str, str]]:
+    init_registry_db()
+    name = branch_name.strip()
+    if not name:
+        raise ValueError("Nome da unidade e obrigatorio")
+    with _lock:
+        conn = _connect()
+        row = conn.execute(
+            "SELECT id, inventory_name FROM branches WHERE locadora_id = ? AND id = ?",
+            (locadora_id, branch_id.strip()),
+        ).fetchone()
+        if row is None:
+            return None
+        conn.execute(
+            "UPDATE branches SET branch_name = ? WHERE locadora_id = ? AND id = ?",
+            (name, locadora_id, branch_id.strip()),
+        )
+    return {"id": branch_id.strip(), "branch_name": name, "inventory_name": row["inventory_name"]}
+
+
+def delete_branch(locadora_id: str, branch_id: str) -> bool:
+    init_registry_db()
+    branch = branch_id.strip()
+    with _lock:
+        conn = _connect()
+        count = conn.execute(
+            "SELECT COUNT(*) FROM branches WHERE locadora_id = ?",
+            (locadora_id,),
+        ).fetchone()[0]
+        if count <= 1:
+            raise ValueError("Nao e possivel remover a ultima unidade")
+        cur = conn.execute(
+            "DELETE FROM branches WHERE locadora_id = ? AND id = ?",
+            (locadora_id, branch),
+        )
+        return cur.rowcount > 0
+
+
 def create_user(
     locadora_id: str,
     *,
@@ -416,6 +454,31 @@ def create_user(
             (user, locadora_id, name or user, password_hash, role_norm, phone or "", time.time()),
         )
     return {"username": user, "name": name or user, "role": role_norm, "phone": phone or ""}
+
+
+def delete_user(locadora_id: str, username: str) -> bool:
+    init_registry_db()
+    user = username.strip().lower()
+    with _lock:
+        conn = _connect()
+        row = conn.execute(
+            "SELECT role FROM users WHERE locadora_id = ? AND username = ?",
+            (locadora_id, user),
+        ).fetchone()
+        if row is None:
+            return False
+        if normalize_role(row["role"]) == ROLE_OWNER:
+            owners = conn.execute(
+                "SELECT COUNT(*) FROM users WHERE locadora_id = ? AND role = ?",
+                (locadora_id, ROLE_OWNER),
+            ).fetchone()[0]
+            if owners <= 1:
+                raise ValueError("Nao e possivel remover o ultimo owner")
+        cur = conn.execute(
+            "DELETE FROM users WHERE locadora_id = ? AND username = ?",
+            (locadora_id, user),
+        )
+        return cur.rowcount > 0
 
 
 def update_user_role(locadora_id: str, username: str, role: str) -> bool:

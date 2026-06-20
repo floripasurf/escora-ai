@@ -49,6 +49,81 @@ def test_owner_can_manage_locadora_branches_and_users(client):
     assert any(b["branch_name"] == "Filial Norte" for b in me.json()["branches"])
 
 
+def test_owner_can_rename_and_delete_extra_branch(client):
+    branch = client.post(
+        "/api/v1/admin/branches",
+        json={"branch_name": "Filial Sul", "inventory_name": "filial_sul"},
+    )
+    assert branch.status_code == 200
+    branch_id = branch.json()["id"]
+
+    renamed = client.patch(
+        f"/api/v1/admin/branches/{branch_id}",
+        json={"branch_name": "Filial Sul Renomeada"},
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["branch_name"] == "Filial Sul Renomeada"
+    me = client.get("/api/v1/auth/me")
+    assert any(b["branch_name"] == "Filial Sul Renomeada" for b in me.json()["branches"])
+
+    deleted = client.delete(f"/api/v1/admin/branches/{branch_id}")
+    assert deleted.status_code == 200
+    me = client.get("/api/v1/auth/me")
+    assert all(b["id"] != branch_id for b in me.json()["branches"])
+
+
+def test_owner_cannot_delete_last_branch(client):
+    r = client.delete("/api/v1/admin/branches/test-a")
+    assert r.status_code == 400
+    assert "ultima unidade" in r.json()["detail"]
+
+
+def test_owner_can_delete_user_but_not_self_or_last_owner(client):
+    created = client.post(
+        "/api/v1/admin/users",
+        json={
+            "username": "temp_user",
+            "name": "Usuario Temporario",
+            "password": "senha123",
+            "role": "viewer",
+        },
+    )
+    assert created.status_code == 200
+    deleted = client.delete("/api/v1/admin/users/temp_user")
+    assert deleted.status_code == 200
+
+    self_delete = client.delete("/api/v1/admin/users/eng_a")
+    assert self_delete.status_code == 400
+    assert "proprio usuario" in self_delete.json()["detail"]
+
+    admin_user = client.post(
+        "/api/v1/admin/users",
+        json={
+            "username": "admin_a",
+            "name": "Admin A",
+            "password": "senha123",
+            "role": "admin",
+        },
+    )
+    assert admin_user.status_code == 200
+    admin = _login("admin_a", "senha123", "test-a")
+    last_owner = admin.delete("/api/v1/admin/users/eng_a")
+    assert last_owner.status_code == 400
+    assert "ultimo owner" in last_owner.json()["detail"]
+
+    second_owner = client.post(
+        "/api/v1/admin/users",
+        json={
+            "username": "owner2",
+            "name": "Owner Dois",
+            "password": "senha123",
+            "role": "owner",
+        },
+    )
+    assert second_owner.status_code == 200
+    assert client.delete("/api/v1/admin/users/owner2").status_code == 200
+
+
 def test_operator_can_view_inventory_but_cannot_admin_or_edit_inventory(client):
     r = client.post(
         "/api/v1/admin/users",

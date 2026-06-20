@@ -16,7 +16,10 @@ from src.auth.registry import (
     ROLE_VIEWER,
     create_branch,
     create_user,
+    delete_branch,
+    delete_user,
     public_locadora,
+    update_branch,
     update_user_role,
 )
 
@@ -28,6 +31,10 @@ ROLES = {ROLE_OWNER, ROLE_ADMIN, ROLE_OPERATOR, ROLE_VIEWER}
 class BranchCreateRequest(BaseModel):
     branch_name: str = Field(min_length=1)
     inventory_name: Optional[str] = None
+
+
+class BranchUpdateRequest(BaseModel):
+    branch_name: str = Field(min_length=1)
 
 
 class UserCreateRequest(BaseModel):
@@ -74,6 +81,35 @@ async def create_branch_endpoint(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+@router.patch("/branches/{branch_id}")
+async def update_branch_endpoint(
+    branch_id: str,
+    body: BranchUpdateRequest,
+    user: User = Depends(require_owner_or_admin),
+):
+    try:
+        updated = update_branch(user.locadora_id, branch_id, branch_name=body.branch_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Unidade nao encontrada")
+    return updated
+
+
+@router.delete("/branches/{branch_id}")
+async def delete_branch_endpoint(
+    branch_id: str,
+    user: User = Depends(require_owner_or_admin),
+):
+    try:
+        deleted = delete_branch(user.locadora_id, branch_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Unidade nao encontrada")
+    return {"message": "Unidade removida", "id": branch_id}
+
+
 @router.post("/users")
 async def create_user_endpoint(
     body: UserCreateRequest,
@@ -109,6 +145,23 @@ async def update_user_role_endpoint(
     return {"username": username.strip().lower(), "role": role}
 
 
+@router.delete("/users/{username}")
+async def delete_user_endpoint(
+    username: str,
+    user: User = Depends(require_owner_or_admin),
+):
+    target = username.strip().lower()
+    if target == user.username:
+        raise HTTPException(status_code=400, detail="Voce nao pode remover seu proprio usuario")
+    try:
+        deleted = delete_user(user.locadora_id, target)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
+    return {"message": "Usuario removido", "username": target}
+
+
 @router.get("/roles")
 async def list_roles(_: User = Depends(get_current_user)):
     return {
@@ -119,4 +172,3 @@ async def list_roles(_: User = Depends(get_current_user)):
             {"id": ROLE_VIEWER, "label": "Viewer"},
         ]
     }
-

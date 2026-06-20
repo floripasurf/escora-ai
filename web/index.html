@@ -1172,6 +1172,18 @@
             align-items: center;
             margin-bottom: 8px;
         }
+        .admin-list-item {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 8px;
+            align-items: center;
+        }
+        .admin-item-actions {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
 
         /* ========== NEW: Account Tab ========== */
         .account-section {
@@ -1283,7 +1295,9 @@
             .inventory-editor-actions .btn { flex: 1; }
             .preview-counts,
             .admin-grid { grid-template-columns: 1fr; }
-            .history-item { grid-template-columns: 1fr; }
+            .history-item,
+            .admin-list-item { grid-template-columns: 1fr; }
+            .admin-item-actions { justify-content: stretch; }
         }
         @media (min-width: 641px) and (max-width: 900px) {
             .landing-visuals { grid-template-columns: 1fr 1fr; }
@@ -1974,14 +1988,25 @@
             if (!ADMIN_STATE || !branches || !users) return;
             branches.innerHTML = (ADMIN_STATE.branches || []).map(b => `
                 <div class="admin-list-item">
-                    <strong>${esc(b.branch_name)}</strong>
-                    <small>${esc(b.id)} · estoque ${esc(b.inventory_name)}</small>
+                    <div>
+                        <strong>${esc(b.branch_name)}</strong>
+                        <small>${esc(b.id)} · estoque ${esc(b.inventory_name)}</small>
+                    </div>
+                    <div class="admin-item-actions">
+                        <button class="btn" onclick="renameAdminBranch('${esc(jsArg(b.id))}', '${esc(jsArg(b.branch_name))}')">Renomear</button>
+                        <button class="btn btn-danger" onclick="deleteAdminBranch('${esc(jsArg(b.id))}')">Remover</button>
+                    </div>
                 </div>
             `).join('') || '<div class="history-meta">Nenhuma unidade cadastrada.</div>';
             users.innerHTML = (ADMIN_STATE.users || []).map(u => `
                 <div class="admin-list-item">
-                    <strong>${esc(u.name || u.username)}</strong>
-                    <small>${esc(u.username)} · ${esc(ROLE_LABELS[u.role] || u.role)}</small>
+                    <div>
+                        <strong>${esc(u.name || u.username)}</strong>
+                        <small>${esc(u.username)} · ${esc(ROLE_LABELS[u.role] || u.role)}</small>
+                    </div>
+                    <div class="admin-item-actions">
+                        <button class="btn btn-danger" onclick="deleteAdminUser('${esc(jsArg(u.username))}')">Remover</button>
+                    </div>
                 </div>
             `).join('') || '<div class="history-meta">Nenhum usuário cadastrado.</div>';
         }
@@ -2013,6 +2038,51 @@
             }
         }
 
+        async function renameAdminBranch(branchId, currentName) {
+            const nextName = prompt('Novo nome da unidade', currentName || '');
+            if (nextName == null) return;
+            const branchName = nextName.trim();
+            if (!branchName) { adminMsg('Informe o nome da unidade.'); return; }
+            try {
+                const res = await fetch(`${API}/admin/branches/${encodeURIComponent(branchId)}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                    body: JSON.stringify({ branch_name: branchName }),
+                });
+                if (!res.ok) {
+                    adminMsg(await safeErrorMessage(res));
+                    return;
+                }
+                await refreshSession();
+                await loadAdminPanel();
+                adminMsg('Unidade renomeada.', true);
+            } catch (e) {
+                adminMsg('Erro de conexao: ' + e.message);
+            }
+        }
+
+        async function deleteAdminBranch(branchId) {
+            if (!confirm('Remover esta unidade? O arquivo de inventario nao sera apagado.')) return;
+            try {
+                const res = await fetch(`${API}/admin/branches/${encodeURIComponent(branchId)}`, {
+                    method: 'DELETE',
+                    headers: authHeaders(),
+                });
+                if (!res.ok) {
+                    adminMsg(await safeErrorMessage(res));
+                    return;
+                }
+                await refreshSession();
+                if (!SESSION.branches.some(b => b.id === BRANCH_ID) && SESSION.branches[0]) {
+                    selectBranch(SESSION.branches[0].id);
+                }
+                await loadAdminPanel();
+                adminMsg('Unidade removida.', true);
+            } catch (e) {
+                adminMsg('Erro de conexao: ' + e.message);
+            }
+        }
+
         async function createAdminUser() {
             const username = document.getElementById('adminUserEmail').value.trim();
             const name = document.getElementById('adminUserName').value.trim();
@@ -2037,6 +2107,24 @@
                 document.getElementById('adminUserPassword').value = '';
                 await loadAdminPanel();
                 adminMsg('Usuário criado.', true);
+            } catch (e) {
+                adminMsg('Erro de conexao: ' + e.message);
+            }
+        }
+
+        async function deleteAdminUser(username) {
+            if (!confirm(`Remover o usuario ${username}?`)) return;
+            try {
+                const res = await fetch(`${API}/admin/users/${encodeURIComponent(username)}`, {
+                    method: 'DELETE',
+                    headers: authHeaders(),
+                });
+                if (!res.ok) {
+                    adminMsg(await safeErrorMessage(res));
+                    return;
+                }
+                await loadAdminPanel();
+                adminMsg('Usuario removido.', true);
             } catch (e) {
                 adminMsg('Erro de conexao: ' + e.message);
             }
