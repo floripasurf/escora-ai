@@ -87,6 +87,23 @@ def _calc_result(beam_results=None, slab_results=None, warnings=None,
     )
 
 
+def test_consumption_rate_warnings_not_injected_into_report():
+    # Taxa ~1.8 kg/m³ (abaixo de [8,20]) — antes injetava aviso de consumo no
+    # relatório. kg/m³ agora é diagnóstico (banda não casa com a base do motor);
+    # não deve poluir os avisos do parceiro com falso "fora do esperado".
+    from src.models.calculation_models import VolumeBreakdownEntry
+    calc = _calc_result(slab_results=[_slab_result()])
+    calc.volume_breakdown = [VolumeBreakdownEntry(
+        category="laje", label="Laje L1", area_m2=20.0, pe_direito_m=2.8,
+        volume_m3=56.0, centroid_x=0.0, centroid_y=0.0, shores_weight_kg=99.0,
+    )]
+    report = build_report_data(calc, _metadata())
+    assert not any(
+        ("fora do esperado" in w) or ("fora da faixa usual" in w)
+        for w in report.warnings
+    )
+
+
 class TestBuildReportData:
     def test_returns_report_data(self):
         calc = _calc_result(beam_results=[_beam_result()])

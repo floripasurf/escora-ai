@@ -399,10 +399,21 @@ This is the **canonical legal framing** for our entire output paradigm: every Me
 |---|---|---|
 | Tower fraction in beams (mixed mode) | 29–44% | 35% |
 | Tower fraction in slabs (mixed mode) | 13–22% | 15–18% |
-| kg/m³ envelope (BOM mass / concrete volume) | 12–16 kg/m³ | — |
+| kg/m³ envelope (base a reconciliar — ver nota) | 12–16 kg/m³ | — |
 | Tower utilization (light structures) | 60–80% | — |
 
-The kg/m³ envelope is the single most important validation gate. Projects outside [12, 16] kg/m³ are flagged for review before output.
+> **⚠️ kg/m³ envelope — base inconsistente, atualmente DIAGNÓSTICO (não gate).**
+> A faixa [12,16] foi calibrada numa base que NÃO é a que o motor computa hoje.
+> O motor mede **peso vertical das escoras ÷ volume escorado (área×pé-direito)**;
+> nessa base até projetos normais ficam ~3–7 kg/m³ (CFL=6.7, CVS=5.1, e os reais
+> 105475=6.1, 35412=3.5, 59428=6.7 no BOM parcial). Logo, qualquer corte em
+> [12,16]/[8,20] falso-positiva. Por isso o kg/m³ foi **removido como gate** de
+> `requires_review` (runner), dos avisos do relatório (report_data) e da regra
+> ENV-001 (desabilitada) — virou diagnóstico (`runner.consumption_diagnostics`).
+> **Follow-up:** reconciliar a referência Orguel — a faixa [12,16] veio de qual
+> peso (só escoras? BOM total alugado incl. madeira/compensado?) e qual volume
+> (escorado ou de concreto)? Só re-ligar como gate após confirmar a base.
+> O que continua gate de revisão: BLOCKED/SPECIAL_REVIEW e resultado vazio.
 
 ---
 

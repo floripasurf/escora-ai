@@ -22,7 +22,7 @@ _ENV_001 = Rule(
         ref="Engineer Q&A #8",
         calibration="Orguel 2026-04-07 (n=12)",
     ),
-    description_pt="kg/m³ total no envelope [12, 16]",
+    description_pt="[DESABILITADA até recalibração Orguel] kg/m³ no envelope [12,16]",
     severity="warning",
 )
 
@@ -31,31 +31,15 @@ KG_M3_MAX = 16.0
 
 
 def _verify_kg_m3_envelope(project: "RuleProject") -> list[Violation]:
-    if project.total_volume_m3 <= 0:
-        return []
-    kg_m3 = project.total_shores_weight_kg / project.total_volume_m3
-    if kg_m3 < KG_M3_MIN - 0.1:
-        return [Violation(
-            rule_id="ENV-001",
-            severity="warning",
-            message=(
-                f"kg/m³ = {kg_m3:.1f}, abaixo do envelope mínimo "
-                f"de {KG_M3_MIN} (possível subdimensionamento)"
-            ),
-            actual_value=round(kg_m3, 1),
-            limit_value=f"[{KG_M3_MIN}, {KG_M3_MAX}]",
-        )]
-    elif kg_m3 > KG_M3_MAX + 0.1:
-        return [Violation(
-            rule_id="ENV-001",
-            severity="warning",
-            message=(
-                f"kg/m³ = {kg_m3:.1f}, acima do envelope máximo "
-                f"de {KG_M3_MAX} (possível superdimensionamento)"
-            ),
-            actual_value=round(kg_m3, 1),
-            limit_value=f"[{KG_M3_MIN}, {KG_M3_MAX}]",
-        )]
+    """DESABILITADO (não emite violação) — banda [12,16] miscalibrada p/ a base.
+
+    A banda foi calibrada noutra base (BOM total Orguel / volume de concreto),
+    mas aqui kg/m³ usa peso vertical das escoras sobre volume escorado. Nessa
+    base até projetos normais ficam ~3-7 kg/m³ (CFL=6.7, CVS=5.1), então a regra
+    falso-positivava. kg/m³ vira diagnóstico (runner.consumption_diagnostics) e a
+    recalibração da banda contra a referência Orguel é follow-up. Sem severidade
+    "info" no rule engine (só error/warning), a regra fica como no-op até lá.
+    """
     return []
 
 

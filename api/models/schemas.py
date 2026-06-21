@@ -53,5 +53,6 @@ class JobStatusResponse(BaseModel):
     methodology: Optional[dict] = None
     requires_review: bool = False
     review_reasons: Optional[List[str]] = None
+    diagnostics: Optional[dict] = None
     consumption_summary: Optional[List[ConsumptionSummaryRow]] = None
 

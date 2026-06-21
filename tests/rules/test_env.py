@@ -13,24 +13,22 @@ class TestEnv001KgM3:
         )
         assert _verify_kg_m3_envelope(project) == []
 
-    def test_below_envelope(self):
+    def test_below_envelope_no_violation_disabled(self):
+        # ENV-001 desabilitado: a banda [12,16] não casa com a base do motor
+        # (vertical / volume escorado) — falso-positivava até projeto normal
+        # (CFL=6.7, CVS=5.1). Recalibração c/ referência Orguel = follow-up.
         project = make_project(
             total_volume_m3=100.0,
-            total_shores_weight_kg=800.0,  # 8 kg/m³
+            total_shores_weight_kg=800.0,  # 8 kg/m³ (antes: violava)
         )
-        violations = _verify_kg_m3_envelope(project)
-        assert len(violations) == 1
-        assert violations[0].rule_id == "ENV-001"
-        assert "abaixo" in violations[0].message
+        assert _verify_kg_m3_envelope(project) == []
 
-    def test_above_envelope(self):
+    def test_above_envelope_no_violation_disabled(self):
         project = make_project(
             total_volume_m3=100.0,
-            total_shores_weight_kg=2000.0,  # 20 kg/m³
+            total_shores_weight_kg=2000.0,  # 20 kg/m³ (antes: violava)
         )
-        violations = _verify_kg_m3_envelope(project)
-        assert len(violations) == 1
-        assert "acima" in violations[0].message
+        assert _verify_kg_m3_envelope(project) == []
 
     def test_zero_volume_no_violation(self):
         project = make_project(total_volume_m3=0.0, total_shores_weight_kg=0.0)
