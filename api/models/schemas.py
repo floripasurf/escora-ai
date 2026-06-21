@@ -1,6 +1,6 @@
 """Pydantic request/response schemas."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 
@@ -30,7 +30,12 @@ class DiagnosticsData(BaseModel):
     aprovação: a banda [12,16] não casa com estas bases (recalibração = follow-up).
     Vertical = peso das escoras; bom_partial = escoras + acessórios. Bases de
     volume diferentes (líquido vs bruto) explícitas nos campos *_volume_basis.
+
+    extra="forbid": chave nova no payload sem campo aqui → erro (não some
+    silenciosamente). Ao adicionar métrica, adicionar o campo correspondente.
     """
+    model_config = ConfigDict(extra="forbid")
+
     # Vertical (runner.consumption_diagnostics)
     vertical_kg_m3: Optional[float] = None
     vertical_kg_per_slab_m2: Optional[float] = None

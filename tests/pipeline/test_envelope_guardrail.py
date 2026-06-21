@@ -44,6 +44,14 @@ def test_consumption_diagnostics_values_and_basis():
     assert d["vertical_volume_basis"] == "net_shored_volume"
 
 
+def test_degenerate_none_weight_model_flags():
+    # #1 codex: weight_kg None/ausente também é BOM não calculável (não só <=0).
+    calc = _calc(100.0, slabs=[_result(n_shores=5, weight=100.0, model_weight=None)])
+    reason = degenerate_result_review_reason(calc)
+    assert reason is not None
+    assert "peso" in reason.lower()
+
+
 def test_degenerate_mixed_zero_weight_model_flags():
     # #1 codex: total > 0 mas há modelo de escora com peso 0 no catálogo →
     # BOM subestimado, deve sinalizar (antes só pegava total == 0).

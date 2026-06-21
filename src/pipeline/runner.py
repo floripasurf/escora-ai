@@ -338,19 +338,23 @@ def degenerate_result_review_reason(calculation) -> Optional[str]:
             "Peso/BOM não calculável: há escoras posicionadas mas peso total = 0 "
             "(catálogo/inventário sem peso). Revisao de engenharia obrigatoria."
         )
-    # Mix: total > 0 mas algum MODELO de escora tem peso 0 no catálogo → BOM
-    # subestimado (gap #1 do code review). Conta escoras cujo modelo tem peso<=0.
+    # Mix: total > 0 mas algum MODELO de escora tem peso ausente/None/<=0 no
+    # catálogo → BOM subestimado/não calculável (gap #1 do code review).
+    def _model_weight_missing(s) -> bool:
+        shore = getattr(s, "shore", None)
+        w = getattr(shore, "weight_kg", None) if shore is not None else None
+        return w is None or w <= 0
+
     zero_wt = sum(
         1
         for r in results
         for s in (getattr(r, "shores", []) or [])
-        if getattr(getattr(s, "shore", None), "weight_kg", None) is not None
-        and getattr(s.shore, "weight_kg") <= 0
+        if _model_weight_missing(s)
     )
     if zero_wt > 0:
         return (
             f"Modelo(s) de escora sem peso no catálogo ({zero_wt} escora(s)): BOM "
-            "subestimado. Revisao de engenharia obrigatoria."
+            "subestimado/não calculável. Revisao de engenharia obrigatoria."
         )
     return None
 

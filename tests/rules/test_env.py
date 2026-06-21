@@ -33,3 +33,9 @@ class TestEnv001KgM3:
     def test_zero_volume_no_violation(self):
         project = make_project(total_volume_m3=0.0, total_shores_weight_kg=0.0)
         assert _verify_kg_m3_envelope(project) == []
+
+    def test_env001_not_registered(self):
+        # #3 codex: a regra está desabilitada → não deve aparecer no registry
+        # (recalibração Orguel = follow-up antes de re-registrar).
+        from src.rules.schema import REGISTRY
+        assert "ENV-001" not in {r.id for r in REGISTRY.all()}

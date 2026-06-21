@@ -36,6 +36,17 @@ def test_build_diagnostics_includes_bom_partial_contract():
         assert k in d, k
     assert d["bom_partial_kg_m3"] == 5.1
     assert d["vertical_kg_m3"] == 6.0
+    # #2/#4: o dict cabe no schema tipado (sem chave extra → forbid não quebra)
+    from api.models.schemas import DiagnosticsData
+    DiagnosticsData(**d)  # não deve levantar
+
+
+def test_diagnostics_data_forbids_extra_keys():
+    # #2 codex: contrato não deve aceitar chave desconhecida silenciosamente.
+    import pytest
+    from api.models.schemas import DiagnosticsData
+    with pytest.raises(Exception):
+        DiagnosticsData(chave_desconhecida=1)
 
 
 def test_dwg_conversion_timeout_is_non_fatal(monkeypatch, tmp_path: Path):
