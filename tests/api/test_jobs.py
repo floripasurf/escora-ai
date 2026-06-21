@@ -7,6 +7,24 @@ def test_health(client):
     assert r.status_code == 200
 
 
+def test_sanitize_diagnostics_drops_legacy_and_unknown_keys():
+    # Compat (codex): jobs antigos têm chaves legadas (ex.: vertical_kg_m2 antes
+    # da renomeação). Com extra='forbid' no schema, passá-las quebraria o status.
+    # O sanitizador dropa o que não é campo conhecido → endpoint não quebra.
+    from api.routes.jobs import _sanitize_diagnostics
+    from api.models.schemas import DiagnosticsData
+    raw = {"vertical_kg_m3": 4.0, "vertical_kg_m2": 9.0, "legacy_x": 1}
+    out = _sanitize_diagnostics(raw)
+    assert out["vertical_kg_m3"] == 4.0
+    assert "vertical_kg_m2" not in out and "legacy_x" not in out
+    DiagnosticsData(**out)  # não levanta (forbid satisfeito)
+
+
+def test_sanitize_diagnostics_none_safe():
+    from api.routes.jobs import _sanitize_diagnostics
+    assert _sanitize_diagnostics(None) == {}
+
+
 def test_upload_dxf(client, tmp_path):
     doc = ezdxf.new("R2010")
     doc.modelspace().add_line((0, 0), (10, 0))
