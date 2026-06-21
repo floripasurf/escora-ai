@@ -1,68 +1,63 @@
 # Runbook — engine do estrutura.app no Mac Mini
 
-Topologia atual (pós-cutover do Fly, PR #2):
+> ⚠️ Valores abaixo refletem o setup conhecido (memória de ops); **confirme no
+> Mac Mini** antes de agir — podem ter mudado.
 
-- **Web**: estático no Vercel (`web/`), projeto `escora-ai`.
-- **Engine**: FastAPI (`uvicorn api.main:app`) no **Mac Mini**, exposto por
-  **Cloudflare Tunnel** em `https://escora.blackcube.dev`.
-- O frontend chama o tunnel direto (`web/index.html` → `BACKEND`), evitando o
-  limite de ~4.5 MB do edge da Vercel em uploads grandes.
+Topologia (pós-cutover do Fly, PR #2):
 
-> O `fly-deploy.yml` foi desativado (movido para `Quarantine/`): o Fly não é
-> mais o alvo de produção. Deploy do engine é manual no Mac Mini (abaixo).
+- **Web**: estático no Vercel (`web/`), projeto `escora-ai` → estrutura.app.
+- **Engine**: FastAPI (`uvicorn api.main:app`) no **Mac Mini** (`raphaels-mac-mini`,
+  Tailscale `100.77.76.64`), em `~/escora-ai`, porta **8020**, dados em
+  `~/escora-data` (`ESCORA_DATA_DIR`).
+- **Exposição**: Cloudflare Tunnel `escora-ai` → `https://escora.blackcube.dev`.
+  O front bate direto nesse host (fura o rewrite da Vercel pelo cap de 4.5 MB).
+- **Fly.io**: app `escora-ai` PARADO (rollback). `fly-deploy.yml` foi desativado
+  (movido p/ `Quarantine/`) — não há mais deploy automático.
 
-## 1. Variável crítica: `ESCORA_DATA_DIR`
+## Já existente em produção (NÃO recriar — só verificar)
 
-Todo o estado durável (jobs.db, sessions.db, registry.db, `inventory/`,
-`learning/`, `uploads/`, `output/`) vive sob `ESCORA_DATA_DIR`. O default é
-`./data` **relativo ao CWD** — se o serviço subir de outro diretório sem a
-variável, ele cria um `./data` vazio e re-seeda do `data/locadoras.json`,
-"perdendo" tenants/jobs reais.
+- **launchd** mantém o engine e o túnel vivos (auto-restart no boot/crash):
+  `com.escora.engine` e `com.escora.tunnel`.
+  ```bash
+  launchctl list | grep escora
+  ```
+- `ESCORA_DATA_DIR=~/escora-data` já configurado no unit.
 
-**Sempre** aponte para um caminho absoluto estável, ex:
-`/Users/SEU_USER/estrutura-data`. O launchd unit abaixo fixa isso.
+> O template `scripts/ops/com.escora.engine.plist` é só **referência** do unit
+> existente — use para conferir/recriar em caso de perda, ajustando os caminhos.
 
-## 2. Auto-restart (launchd) — resolve o SPOF "processo sem supervisor"
+## Deploy de nova versão (após merge do PR para `main`)
 
 ```bash
-cp scripts/ops/com.estrutura.engine.plist ~/Library/LaunchAgents/
-# edite e troque __REPO_DIR__ / __VENV_BIN__ / __DATA_DIR__ pelos caminhos reais
-mkdir -p "$ESCORA_DATA_DIR/logs"
-launchctl load -w ~/Library/LaunchAgents/com.estrutura.engine.plist
-launchctl list | grep estrutura
+ssh raphaels-mac-mini   # ou via Tailscale 100.77.76.64
+cd ~/escora-ai && git pull
+./.venv/bin/pip install -r requirements.txt        # se mudou deps
+launchctl kickstart -k gui/$(id -u)/com.escora.engine   # reinicia o uvicorn
+curl -s https://escora.blackcube.dev/api/v1/health      # smoke
 ```
 
-`KeepAlive=true` reinicia o uvicorn se ele cair (crash/OOM); `RunAtLoad=true`
-sobe no boot do Mac Mini.
+> O uvicorn segura código/estado em memória — **só reinicia via launchd**
+> (`kickstart`), não basta `git pull` (incidente 2026-06-11).
 
-## 3. Backups — resolve "perda de disco = perda total"
+## Gap real a fechar: BACKUPS (não existem hoje)
 
-Agende o backup diário (launchd ou `cron`):
+`data/*.db` (jobs/sessions/registry) + `inventory/ learning/ uploads/ output/`
+vivem só no disco do Mac Mini. Agendar o backup diário:
 
 ```bash
-ESCORA_DATA_DIR=/Users/SEU_USER/estrutura-data \
-BACKUP_DEST=/Users/SEU_USER/estrutura-backups \
+ESCORA_DATA_DIR=~/escora-data \
+BACKUP_DEST=~/escora-backups \
 bash scripts/ops/backup_data.sh
 ```
 
-Faz `.backup` consistente dos SQLite (seguro com WAL) + tar de
-`inventory/ learning/ uploads/ output/`, mantendo os últimos 14. Idealmente
-sincronize `BACKUP_DEST` para fora da máquina (rsync/iCloud/S3).
+Faz `.backup` consistente dos SQLite (WAL-safe) + tar dos diretórios JSON,
+retenção 14. Sincronize `~/escora-backups` para fora da máquina (rsync/iCloud).
 
-## 4. Deploy de nova versão
+## Checklist antes de convidar parceiros
 
-```bash
-cd __REPO_DIR__ && git pull
-__VENV_BIN__/pip install -r requirements.txt   # se mudou deps
-launchctl kickstart -k gui/$(id -u)/com.estrutura.engine   # reinicia o engine
-curl -s https://escora.blackcube.dev/api/v1/health         # smoke
-```
-
-## 5. Checklist antes de convidar parceiros
-
-- [ ] `ESCORA_DATA_DIR` absoluto e setado no launchd unit
-- [ ] launchd unit carregado (`launchctl list | grep estrutura`)
-- [ ] backup diário agendado e testado (restauração validada uma vez)
-- [ ] `cloudflared` rodando como serviço (auto-restart próprio) e tunnel ativo
-- [ ] health responde via `https://escora.blackcube.dev/api/v1/health`
-- [ ] CORS allowlist + rate-limit no login aplicados (PR #1 — ver P0-3/P0-4)
+- [ ] BACKUP diário agendado e restauração testada uma vez (gap aberto)
+- [ ] `git pull` em `~/escora-ai` + `kickstart com.escora.engine` + smoke no /health
+- [ ] `SIGNUP_INVITE_CODES` setado no ambiente do engine + códigos gerados p/ pilotos
+- [ ] **Rotacionar** os hashes em `data/locadoras.json` (admin `devsalt2026` + conta pessoal) e **limpar** o `registry.db` de produção se contiver dados de teste
+- [ ] `launchctl list | grep escora` mostra engine + tunnel ativos
+- [ ] CORS allowlist + rate-limit de login (PR #1) aplicados
