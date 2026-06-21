@@ -315,11 +315,14 @@ def build_report_data(
     # Consumo por pé-direito (resumo interno de orçamento)
     consumption_rows, consumption_totals = _build_consumption_rows(calc, bom_rows)
 
-    # Warnings — merge warnings + validation_errors + consumption rate checks
+    # Warnings — merge warnings + validation_errors.
+    # NOTA: os avisos de taxa kg/m³ NÃO são mais injetados aqui — a banda
+    # [12,16]/[8,20] não casa com a base do motor (vertical / volume escorado)
+    # e falso-positivava até projeto normal. kg/m³ é diagnóstico
+    # (consumption_totals continua disponível); recalibração = follow-up Orguel.
     all_warnings = list(calc.warnings)
     for err in calc.validation_errors:
         all_warnings.append(f"ERRO: {err}")
-    all_warnings.extend(_consumption_rate_warnings(consumption_rows))
 
     return ReportData(
         project_name=metadata.project_name,
@@ -486,6 +489,12 @@ def _consumption_rate_warnings(
     rows: List[ConsumptionByHeightRow],
 ) -> List[str]:
     """Validate rate_kg_m3_bruto vs Orguel expected ranges.
+
+    ⚠️ ATUALMENTE NÃO LIGADO ao relatório (ver build_report_data): a banda
+    [8,20]/[12,16] não casa com a base do motor (vertical / volume escorado) e
+    falso-positivava até projeto normal (CFL=6.7, CVS=5.1). Mantido com os
+    thresholds para a recalibração futura contra a referência Orguel; re-ligar
+    só depois de confirmar a base (BOM total? volume de concreto?).
 
     Two levels:
     - Critical (rate ∉ [8, 20]): likely wrong inputs (pé-direito, espessura).

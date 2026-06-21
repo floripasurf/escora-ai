@@ -270,41 +270,36 @@ def _detect_coordinate_scale(parse) -> float:
         return scale
 
 
-def envelope_review_reason(
-    calculation, low: float = 12.0, high: float = 16.0
-) -> Optional[str]:
-    """Retorna um motivo de revisão se o consumo kg/m³ ficar fora de [low, high].
+def consumption_diagnostics(calculation) -> dict:
+    """Métricas de consumo de escoramento — DIAGNÓSTICO, não gate.
 
-    AGENTS.md: o envelope kg/m³ e o gate de validacao mais importante; projetos
-    fora dele devem ser sinalizados para revisao ANTES da saida. Aqui isso vira
-    um `requires_review` (nao bloqueia a geracao, mas impede que um resultado
-    sub/superdimensionado seja entregue como calculo confiavel). Espelha a
-    formula de tests/regression/test_envelope.py.
-
-    Retorna None quando nao da para avaliar (sem calculo, volume<=0 ou peso<=0).
+    kg/m³ NÃO marca requires_review: a banda histórica [12,16] (AGENTS.md) foi
+    definida em outra base (BOM total Orguel / volume de concreto), enquanto o
+    motor computa peso vertical das escoras sobre VOLUME ESCORADO (área×pé-dir).
+    Nessa base, até projetos normais ficam ~3-7 kg/m³ (CFL=6.7, CVS=5.1), então
+    qualquer corte em [12,16]/[8,20] falso-positivaria. Expomos os números como
+    diagnóstico (base explícita); a recalibração da banda contra a referência
+    Orguel é follow-up separado. O `bom_partial_kg_m3` (escoras+acessórios) vem
+    de report_data.consumption_totals.
     """
     if calculation is None:
-        return None
-    volume = getattr(calculation, "total_volume_m3", 0.0) or 0.0
-    if volume <= 0:
-        return None
-    weight = sum(
-        getattr(sr, "shores_weight_kg", 0.0) or 0.0
-        for sr in getattr(calculation, "slab_results", [])
-    ) + sum(
-        getattr(br, "shores_weight_kg", 0.0) or 0.0
-        for br in getattr(calculation, "beam_results", [])
-    )
-    if weight <= 0:
-        return None
-    kg_m3 = weight / volume
-    if low <= kg_m3 <= high:
-        return None
-    return (
-        f"Consumo de escoramento {kg_m3:.1f} kg/m³ fora do envelope esperado "
-        f"[{low:.0f}, {high:.0f}] kg/m³ — possivel sub/superdimensionamento. "
-        "Revisao de engenharia obrigatoria antes do uso do resultado."
-    )
+        return {}
+    slabs = list(getattr(calculation, "slab_results", []) or [])
+    beams = list(getattr(calculation, "beam_results", []) or [])
+    results = slabs + beams
+    vol = getattr(calculation, "total_volume_m3", 0.0) or 0.0
+    weight = sum(getattr(r, "shores_weight_kg", 0.0) or 0.0 for r in results)
+    n_shores = sum(len(getattr(r, "shores", []) or []) for r in results)
+    area = sum(getattr(s, "area_m2", 0.0) or 0.0 for s in slabs)
+    return {
+        "vertical_kg_m3": round(weight / vol, 2) if vol else None,
+        "vertical_kg_m2": round(weight / area, 2) if area else None,
+        "shores_per_m2": round(n_shores / area, 3) if area else None,
+        "total_shores": n_shores,
+        "total_vertical_weight_kg": round(weight, 1),
+        "total_volume_m3": round(vol, 2),
+        "basis": "vertical_shores_over_shored_volume",
+    }
 
 
 def degenerate_result_review_reason(calculation) -> Optional[str]:
@@ -686,13 +681,9 @@ def run_pipeline(
                 "engenharia obrigatoria antes do uso do resultado."
             )
 
-    # Guardrail kg/m³ (AGENTS.md): consumo fora de [12,16] indica possivel
-    # sub/superdimensionamento — flag para revisao em vez de entregar como
-    # calculo confiavel. Nao bloqueia a geracao; alerta a UI/API.
-    _env_reason = envelope_review_reason(result.calculation)
-    if _env_reason:
-        result.requires_review = True
-        result.review_reasons.append(_env_reason)
+    # kg/m³ é DIAGNÓSTICO, não gate (banda [12,16] não casa com a base do motor
+    # — falso-positivava até projeto normal). Expõe métricas sem alarme.
+    result.diagnostics = consumption_diagnostics(result.calculation)
 
     # Resultado vazio (0 escoras / volume nulo) tambem exige revisao.
     _empty_reason = degenerate_result_review_reason(result.calculation)

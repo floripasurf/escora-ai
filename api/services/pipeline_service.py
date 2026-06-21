@@ -191,6 +191,7 @@ def process_dxf(
         "methodology": result.methodology,  # rastreabilidade §28.9
         "requires_review": result.requires_review,  # §5.1 fora de escopo / caso especial
         "review_reasons": result.review_reasons,
+        "diagnostics": result.diagnostics,  # kg/m³ vertical, escoras/m² etc. (sem alarme)
         "warnings": result.warnings[:60],  # Limit warnings (diagnostics first)
         "output_dxf_path": output_dxf,
         "dwg_path": dwg_path,

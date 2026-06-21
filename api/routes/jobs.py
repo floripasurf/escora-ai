@@ -260,6 +260,7 @@ async def get_status(
             "warnings": results.get("warnings"),
             "requires_review": results.get("requires_review", False),
             "review_reasons": results.get("review_reasons") or [],
+            "diagnostics": results.get("diagnostics") or {},
             "has_dwg": job.get("dwg_path") is not None,
             "consumption_summary": results.get("consumption_summary"),
         })

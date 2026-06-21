@@ -70,3 +70,4 @@ class PipelineResult(BaseModel):
     methodology: Optional[dict] = Field(default=None, description="Perfil de metodologia efetivo (§28.9) — rastreabilidade do output")
     requires_review: bool = Field(default=False, description="True quando o sistema detectado esta fora de escopo / exige revisao de engenharia (manual §5.1)")
     review_reasons: List[str] = Field(default_factory=list, description="Motivos pelos quais o resultado exige revisao antes do uso")
+    diagnostics: dict = Field(default_factory=dict, description="Métricas de diagnóstico (kg/m³ vertical, escoras/m², base) — NÃO são gate de revisão")
