@@ -43,4 +43,8 @@ def _verify_kg_m3_envelope(project: "RuleProject") -> list[Violation]:
     return []
 
 
-REGISTRY.register(_ENV_001, _verify_kg_m3_envelope)
+# ENV-001 NÃO é registrada (desabilitada até recalibração da banda com a
+# referência Orguel — ver docstring de _verify_kg_m3_envelope e AGENTS.md).
+# Mantida a definição como documentação; re-registrar só após confirmar a base.
+# REGISTRY.register(_ENV_001, _verify_kg_m3_envelope)
+_ = (_ENV_001, _verify_kg_m3_envelope)  # referenciados p/ evitar "unused"

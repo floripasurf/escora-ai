@@ -1,6 +1,6 @@
 """Pydantic request/response schemas."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 
@@ -21,6 +21,38 @@ class ConsumptionSummaryRow(BaseModel):
     volume_bruto_m3: float
     total_kg: float
     category_label: str = "Laje"
+
+
+class DiagnosticsData(BaseModel):
+    """Métricas de consumo de escoramento — DIAGNÓSTICO (não gate de revisão).
+
+    Contrato tipado p/ não quebrar silenciosamente. kg/m³ NÃO é critério de
+    aprovação: a banda [12,16] não casa com estas bases (recalibração = follow-up).
+    Vertical = peso das escoras; bom_partial = escoras + acessórios. Bases de
+    volume diferentes (líquido vs bruto) explícitas nos campos *_volume_basis.
+
+    extra="forbid": chave nova no payload sem campo aqui → erro (não some
+    silenciosamente). Ao adicionar métrica, adicionar o campo correspondente.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    # Vertical (runner.consumption_diagnostics)
+    vertical_kg_m3: Optional[float] = None
+    vertical_kg_per_slab_m2: Optional[float] = None
+    shores_per_slab_m2: Optional[float] = None
+    total_shores: Optional[int] = None
+    total_vertical_weight_kg: Optional[float] = None
+    total_volume_m3: Optional[float] = None
+    basis: Optional[str] = None
+    vertical_volume_basis: Optional[str] = None
+    # BOM parcial (report_data: escoras + acessórios / volume bruto)
+    bom_partial_kg_m3: Optional[float] = None
+    bom_partial_kg_m2: Optional[float] = None
+    bom_partial_total_kg: Optional[float] = None
+    bom_partial_basis: Optional[str] = None
+    bom_partial_volume_basis: Optional[str] = None
+    total_liquid_volume_m3: Optional[float] = None
+    total_gross_volume_m3: Optional[float] = None
 
 
 class JobStatusResponse(BaseModel):
@@ -53,6 +85,6 @@ class JobStatusResponse(BaseModel):
     methodology: Optional[dict] = None
     requires_review: bool = False
     review_reasons: Optional[List[str]] = None
-    diagnostics: Optional[dict] = None
+    diagnostics: Optional[DiagnosticsData] = None
     consumption_summary: Optional[List[ConsumptionSummaryRow]] = None
 

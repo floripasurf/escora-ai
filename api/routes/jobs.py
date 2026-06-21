@@ -20,7 +20,20 @@ from api.services import job_service, storage
 from api.services import pipeline_service
 from api.services.pipeline_service import process_dxf
 from api.services.revision_service import analyze_revision
-from api.models.schemas import JobCreateResponse, JobStatusResponse
+from api.models.schemas import JobCreateResponse, JobStatusResponse, DiagnosticsData
+
+
+def _sanitize_diagnostics(raw: Optional[dict]) -> dict:
+    """Filtra diagnostics para os campos conhecidos de DiagnosticsData.
+
+    Compat: jobs persistidos antes da renomeação de chaves (ex.: vertical_kg_m2)
+    têm chaves legadas; como o schema usa extra='forbid', passá-las cruas
+    quebraria o endpoint de status (500). Aqui dropamos chaves desconhecidas —
+    o drift de código novo continua pego pelo teste de contrato em CI.
+    """
+    raw = raw or {}
+    allowed = set(DiagnosticsData.model_fields)
+    return {k: v for k, v in raw.items() if k in allowed}
 from api.deps import get_current_branch, require_operator_or_admin
 from src.auth.branches import Branch, User
 from src.pipeline.learning_store import LearningStore
@@ -260,7 +273,7 @@ async def get_status(
             "warnings": results.get("warnings"),
             "requires_review": results.get("requires_review", False),
             "review_reasons": results.get("review_reasons") or [],
-            "diagnostics": results.get("diagnostics") or {},
+            "diagnostics": _sanitize_diagnostics(results.get("diagnostics")),
             "has_dwg": job.get("dwg_path") is not None,
             "consumption_summary": results.get("consumption_summary"),
         })

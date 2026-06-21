@@ -300,6 +300,9 @@ def consumption_diagnostics(calculation) -> dict:
         "total_vertical_weight_kg": round(weight, 1),
         "total_volume_m3": round(vol, 2),
         "basis": "vertical_shores_over_shored_volume",
+        # base de volume explícita: total_volume_m3 é o volume LÍQUIDO escorado
+        # (área×pé-dir − deduções). O bom_partial (pipeline_service) usa BRUTO.
+        "vertical_volume_basis": "net_shored_volume",
     }
 
 
@@ -334,6 +337,24 @@ def degenerate_result_review_reason(calculation) -> Optional[str]:
         return (
             "Peso/BOM não calculável: há escoras posicionadas mas peso total = 0 "
             "(catálogo/inventário sem peso). Revisao de engenharia obrigatoria."
+        )
+    # Mix: total > 0 mas algum MODELO de escora tem peso ausente/None/<=0 no
+    # catálogo → BOM subestimado/não calculável (gap #1 do code review).
+    def _model_weight_missing(s) -> bool:
+        shore = getattr(s, "shore", None)
+        w = getattr(shore, "weight_kg", None) if shore is not None else None
+        return w is None or w <= 0
+
+    zero_wt = sum(
+        1
+        for r in results
+        for s in (getattr(r, "shores", []) or [])
+        if _model_weight_missing(s)
+    )
+    if zero_wt > 0:
+        return (
+            f"Modelo(s) de escora sem peso no catálogo ({zero_wt} escora(s)): BOM "
+            "subestimado/não calculável. Revisao de engenharia obrigatoria."
         )
     return None
 
