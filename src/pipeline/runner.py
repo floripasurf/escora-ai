@@ -11,7 +11,8 @@ Stage 6: Learning
 """
 
 import logging
-from typing import List, Optional
+import re
+from typing import Dict, List, Optional
 from src.pipeline.stage_parse import parse_dxf
 from src.pipeline.stage_segment import segment_by_level
 from src.pipeline.stage_classify import classify_elements
@@ -21,13 +22,91 @@ from src.pipeline.stage_learn import learn_and_save
 from src.pipeline.learning_store import LearningStore
 from src.parser.region_filter import filter_main_plan
 from src.parser.construction_classifier import classify_construction, ConstructionType
+from src.parser.structural_system import (
+    detect_structural_system, SystemRouting, routing_requires_review,
+)
 from src.models.pipeline_models import LevelGroup, PipelineResult
+from src.models.methodology import MethodologyProfile, load_methodology
 from src.utils.constants import ALTURA_DEFAULT
 
 logger = logging.getLogger(__name__)
 
 
 DEFAULT_SCALE = 0.02  # 1:50 fallback
+
+# Token "COB" isolado (COB, COB., COB-2) sem capturar COBOGO etc.
+_COB_TOKEN_RE = re.compile(r"(?<![A-ZÇÀ-Ü0-9])COB(?![A-ZÇÀ-Ü0-9])")
+
+
+def _is_cobertura_level(level_name: Optional[str]) -> bool:
+    """True quando o nome do nivel identifica uma COBERTURA.
+
+    O pipeline nomeia niveis via LEVEL_PATTERN (stage_segment): COBERTURA,
+    COBERTA, TIPO n, PAVT n, NIVEL +x... — alem do fallback "DEFAULT".
+    Aceita tambem o token abreviado "COB" (pranchas reais: CVS-COB-...).
+    """
+    if not level_name:
+        return False
+    up = level_name.upper()
+    if "COBERTURA" in up or "COBERTA" in up:
+        return True
+    return bool(_COB_TOKEN_RE.search(up))
+
+
+def derive_methodology_params(
+    profile: MethodologyProfile,
+    slab_layout_mode: Optional[str],
+    level_names: List[str],
+    warnings: List[str],
+) -> Dict:
+    """Deriva os parametros de calculo do perfil de metodologia (§28.9).
+
+    Regra 1/2 do manual §28.9: o perfil define os DEFAULTS; a flag
+    explicita (`slab_layout_mode` informado pelo chamador) sempre vence.
+    O `passo_sob_viga_m` do perfil so e aplicado quando o perfil
+    line_first esta efetivamente ativo (compatibilidade: o modo grid
+    legado mantem 0.80/1.00 do DOCX). Cobertura torre-first exige
+    cobertura="torre_first" no perfil E nivel detectado como cobertura;
+    deteccao ambigua (nivel "DEFAULT"/sem nome) mantem o comportamento
+    atual com warning (conservador).
+    """
+    effective_mode = slab_layout_mode or profile.slab_layout_mode
+    params: Dict = {
+        "slab_layout_mode": effective_mode,
+        "eixo_guias": profile.eixo_guias,
+        "escoras_equidistantes": profile.escoras_equidistantes,
+        "tripes_fracao": profile.tripes_fracao,
+        "min_dist_escoras_m": profile.min_dist_escoras_m,
+        "passo_sob_viga_m": None,
+        "cobertura_torre_first": False,
+    }
+    if slab_layout_mode is None and profile.slab_layout_mode != "grid":
+        warnings.append(
+            f"Perfil de metodologia (§28.9): slab_layout_mode="
+            f"{effective_mode} derivado do perfil da locadora/branch"
+        )
+
+    if (
+        profile.laje_layout == "line_first"
+        and effective_mode == "line_first"
+    ):
+        params["passo_sob_viga_m"] = profile.passo_sob_viga_m
+
+    if profile.cobertura == "torre_first":
+        named = [n for n in level_names if n and n.upper() != "DEFAULT"]
+        if any(_is_cobertura_level(n) for n in named):
+            params["cobertura_torre_first"] = True
+            warnings.append(
+                "Perfil §28.9: cobertura torre-first aplicado — nivel "
+                f"identificado como cobertura ({', '.join(named)})"
+            )
+        elif not named:
+            warnings.append(
+                "Perfil §28.9: cobertura=torre_first NAO aplicado — nivel "
+                "sem nome de pavimento detectavel (deteccao ambigua); "
+                "mantendo comportamento padrao"
+            )
+    return params
 
 # $INSUNITS value → meters multiplier
 _INSUNITS_TO_METERS = {
@@ -191,13 +270,94 @@ def _detect_coordinate_scale(parse) -> float:
         return scale
 
 
+def envelope_review_reason(
+    calculation, low: float = 12.0, high: float = 16.0
+) -> Optional[str]:
+    """Retorna um motivo de revisão se o consumo kg/m³ ficar fora de [low, high].
+
+    AGENTS.md: o envelope kg/m³ e o gate de validacao mais importante; projetos
+    fora dele devem ser sinalizados para revisao ANTES da saida. Aqui isso vira
+    um `requires_review` (nao bloqueia a geracao, mas impede que um resultado
+    sub/superdimensionado seja entregue como calculo confiavel). Espelha a
+    formula de tests/regression/test_envelope.py.
+
+    Retorna None quando nao da para avaliar (sem calculo, volume<=0 ou peso<=0).
+    """
+    if calculation is None:
+        return None
+    volume = getattr(calculation, "total_volume_m3", 0.0) or 0.0
+    if volume <= 0:
+        return None
+    weight = sum(
+        getattr(sr, "shores_weight_kg", 0.0) or 0.0
+        for sr in getattr(calculation, "slab_results", [])
+    ) + sum(
+        getattr(br, "shores_weight_kg", 0.0) or 0.0
+        for br in getattr(calculation, "beam_results", [])
+    )
+    if weight <= 0:
+        return None
+    kg_m3 = weight / volume
+    if low <= kg_m3 <= high:
+        return None
+    return (
+        f"Consumo de escoramento {kg_m3:.1f} kg/m³ fora do envelope esperado "
+        f"[{low:.0f}, {high:.0f}] kg/m³ — possivel sub/superdimensionamento. "
+        "Revisao de engenharia obrigatoria antes do uso do resultado."
+    )
+
+
+def degenerate_result_review_reason(calculation) -> Optional[str]:
+    """Retorna motivo de revisao quando o calculo rodou mas o resultado e vazio.
+
+    Ex.: projeto 110749 conclui com 0 lajes/0 vigas/0 volume — sairia como job
+    'concluido' com 0 escoras e requires_review=False. Aqui marcamos para
+    revisao em vez de entregar um resultado vazio como se fosse valido.
+
+    Retorna None para calculo ausente (esse caminho ja vira erro de job).
+    """
+    if calculation is None:
+        return None
+    volume = getattr(calculation, "total_volume_m3", 0.0) or 0.0
+    results = list(getattr(calculation, "slab_results", []) or []) + list(
+        getattr(calculation, "beam_results", []) or []
+    )
+    # len(shores) é o sinal confiável (lista sempre presente); shore_count pode
+    # vir 0 mesmo com escoras reais (falso-positivo visto no 105475).
+    total_shores = sum(len(getattr(r, "shores", []) or []) for r in results)
+    if volume <= 0 or total_shores <= 0:
+        return (
+            "Resultado vazio: nenhum escoramento dimensionado (0 escoras ou "
+            "volume nulo) — possivel falha de deteccao do projeto. Revisao de "
+            "engenharia obrigatoria."
+        )
+    return None
+
+
 def run_pipeline(
     filepath: str,
     scale_override: Optional[float] = None,
     mode: str = "price",
     inventory_name: Optional[str] = None,
     branch_id: Optional[str] = None,
+    slab_layout_mode: Optional[str] = None,
+    methodology: Optional[MethodologyProfile] = None,
 ) -> PipelineResult:
+    """Run the full pipeline (Stages 0-7).
+
+    slab_layout_mode: None (default) deriva do perfil de metodologia da
+    locadora/branch (§28.9); "grid" ou "line_first" explicitos sempre
+    vencem o perfil. `methodology` permite injetar um perfil explicito
+    (caso contrario e carregado de data/locadoras.json /
+    ESCORA_LOCADORAS_FILE via branch_id).
+    """
+    # Perfil de metodologia da locadora/branch (manual §28.9): define os
+    # DEFAULTS de layout/passos; flags explicitas sempre vencem.
+    profile = (
+        methodology
+        if methodology is not None
+        else load_methodology(branch_id=branch_id)
+    )
     # Stage 0: Load learning store for accumulated knowledge (per-branch when
     # branch_id is provided, so each locadora unit keeps its own corrections).
     store = LearningStore(branch_id=branch_id)
@@ -265,6 +425,19 @@ def run_pipeline(
         f"({classification.slab_confidence:.0%})"
     )
 
+    # Stage 1.7: Sistema estrutural — passo zero da cadeia (manual §5.1,
+    # pendencia 28). Deteccao textual aqui; contagens geometricas chegam
+    # depois da classificacao de elementos (refinamento futuro).
+    structural_system = detect_structural_system(
+        texts=[t.content for t in parse.texts],
+        construction_type=classification.construction_type,
+    )
+    logger.info(
+        f"Sistema estrutural: {structural_system.system.value} "
+        f"({structural_system.confidence:.0%}) -> "
+        f"roteamento {structural_system.routing.value}"
+    )
+
     # Stage 2: Segment by level
     level_segments = segment_by_level(parse)
 
@@ -285,6 +458,22 @@ def run_pipeline(
         )
     warnings.extend(classification.signals)
     warnings.extend(region_warnings)
+
+    # Sistema estrutural no relatorio (manual §5.1: registrar sistema,
+    # fonte da deteccao e score; pendencias viram avisos rastreaveis).
+    warnings.append(
+        f"Sistema estrutural: {structural_system.system.value} "
+        f"({structural_system.confidence:.0%}) — "
+        f"roteamento: {structural_system.routing.value}"
+    )
+    warnings.extend(structural_system.signals)
+    warnings.extend(structural_system.pendencias)
+    if structural_system.routing == SystemRouting.BLOCKED:
+        warnings.append(
+            "BLOQUEIO (manual §5.1): sistema fora de escopo do Escora.AI — "
+            "saida automatica nao deve ser emitida como projeto executivo; "
+            "encaminhar para revisao de engenharia."
+        )
 
     for seg in level_segments:
         elements = classify_elements(
@@ -316,6 +505,16 @@ def run_pipeline(
         )
         levels.append(level)
         all_elements.extend(elements)
+
+    # Perfil §28.9: derivar slab_layout_mode e demais parametros do perfil
+    # da locadora/branch (flag explicita vence; cobertura torre-first
+    # depende do nome do nivel ja segmentado).
+    methodology_params = derive_methodology_params(
+        profile,
+        slab_layout_mode,
+        [lv.level_name for lv in levels],
+        warnings,
+    )
 
     # Stage 5: Calculation
     calculation = None
@@ -421,6 +620,7 @@ def run_pipeline(
                 mode=mode,
                 inventory=inventory,
                 text_entities=all_texts,
+                **methodology_params,
             )
             # A1: Resumo agregado por categoria para diagnóstico rápido.
             # Em projetos TQS com layers numéricos a classificação por keyword
@@ -467,6 +667,57 @@ def run_pipeline(
         warnings=warnings,
         calculation=calculation,
     )
+
+    # Manual §5.1: sistemas fora de escopo (BLOCKED) ou casos especiais
+    # (SPECIAL_REVIEW/UNKNOWN) NAO devem ser tratados como projeto executivo
+    # automatico. Marca o resultado para a API/UI exigirem revisao de
+    # engenharia em vez de exibir um "concluido" comum.
+    if routing_requires_review(structural_system.routing):
+        result.requires_review = True
+        if structural_system.routing == SystemRouting.BLOCKED:
+            result.review_reasons.append(
+                f"Sistema fora de escopo do Escora.AI "
+                f"({structural_system.system.value}): o resultado e um RASCUNHO "
+                "e exige revisao de um engenheiro responsavel antes de qualquer uso."
+            )
+        else:
+            result.review_reasons.append(
+                f"Caso especial ({structural_system.system.value}): revisao de "
+                "engenharia obrigatoria antes do uso do resultado."
+            )
+
+    # Guardrail kg/m³ (AGENTS.md): consumo fora de [12,16] indica possivel
+    # sub/superdimensionamento — flag para revisao em vez de entregar como
+    # calculo confiavel. Nao bloqueia a geracao; alerta a UI/API.
+    _env_reason = envelope_review_reason(result.calculation)
+    if _env_reason:
+        result.requires_review = True
+        result.review_reasons.append(_env_reason)
+
+    # Resultado vazio (0 escoras / volume nulo) tambem exige revisao.
+    _empty_reason = degenerate_result_review_reason(result.calculation)
+    if _empty_reason:
+        result.requires_review = True
+        result.review_reasons.append(_empty_reason)
+
+    # Rastreabilidade (§28.9): registra qual metodologia gerou este resultado.
+    # Inclui o perfil cru + os parametros EFETIVOS aplicados no calculo e a
+    # origem (perfil da locadora vs override explicito do chamador).
+    result.methodology = {
+        **profile.to_dict(),
+        "efetivo": {
+            "slab_layout_mode": methodology_params["slab_layout_mode"],
+            "passo_sob_viga_m": methodology_params["passo_sob_viga_m"],
+            "cobertura_torre_first": methodology_params["cobertura_torre_first"],
+        },
+        # Override = qualquer entrada explicita do chamador (flag de layout OU
+        # perfil injetado), que vence o perfil da locadora (§28.9 regra 1).
+        "origem": (
+            "override"
+            if (slab_layout_mode is not None or methodology is not None)
+            else "perfil_locadora"
+        ),
+    }
 
     # Stage 6: Rule verification (feature flag: ESCORA_RUN_RULES, default on)
     import os

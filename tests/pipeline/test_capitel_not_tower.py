@@ -66,9 +66,13 @@ class TestCapitelNeverBecomesTower:
     def test_tower_shores_not_in_capitel_ring(self):
         """No TOWER shore may lie within 1.50m of any pillar."""
         elements, pillar_xy = _large_slab_elements()
-        # Manual §8 (2026-05-28): pe=3.80m + laje 25cm + 180m² area
-        # forca MIXED com tower swap real no pipeline.
-        result = run_calculation(elements, pe_direito_m=3.80,
+        # Manual §8 + §13.6 (pendencia 16, 2026-06-12): a altura da escora
+        # desconta h_pilha (0.228 m com compensado 18 mm). Com pe=4.10m e
+        # laje 25cm -> altura 4.10-0.25-0.228 = 3.62m > 3.50m, mantendo o
+        # gatilho MIXED (rule-4) que o teste exige. (O valor antigo 3.80m
+        # caia para 3.32m com h_pilha -> 100% telescopica, e o teste
+        # deixava de exercitar o bug.)
+        result = run_calculation(elements, pe_direito_m=4.10,
                                  slab_thickness_m=0.25)
 
         # Only MIXED slabs exercise the bug; at least one must be MIXED
@@ -99,9 +103,13 @@ class TestCapitelNeverBecomesTower:
     def test_capitel_densification_produces_telescopic_shores(self):
         """Shores in capitel ring (0.70-1.50m) exist and are telescopic."""
         elements, pillar_xy = _large_slab_elements()
-        # Manual §8 (2026-05-28): pe=3.80m + laje 25cm + 180m² area
-        # forca MIXED com tower swap real no pipeline.
-        result = run_calculation(elements, pe_direito_m=3.80,
+        # Manual §8 + §13.6 (pendencia 16, 2026-06-12): a altura da escora
+        # desconta h_pilha (0.228 m com compensado 18 mm). Com pe=4.10m e
+        # laje 25cm -> altura 4.10-0.25-0.228 = 3.62m > 3.50m, mantendo o
+        # gatilho MIXED (rule-4) que o teste exige. (O valor antigo 3.80m
+        # caia para 3.32m com h_pilha -> 100% telescopica, e o teste
+        # deixava de exercitar o bug.)
+        result = run_calculation(elements, pe_direito_m=4.10,
                                  slab_thickness_m=0.25)
 
         capitel_shores = 0

@@ -22,6 +22,7 @@ def _distribute_linear(
     total_load_kn: float,
     max_spacing: float,
     exclusions: Optional[List['PillarExclusion']] = None,
+    global_origin: Optional[Tuple[float, float]] = None,
 ) -> Tuple[List[PositionedShore], int, int, float, float]:
     """Linear distribution for narrow corridors.
 
@@ -67,17 +68,46 @@ def _distribute_linear(
     else:
         n_points = max(2, math.ceil(effective_length / max_spacing) + 1)
 
-    shores: List[PositionedShore] = []
-    for i in range(n_points):
-        if n_points == 1:
-            t = 0.5
-            x = (start[0] + end[0]) / 2
-            y = (start[1] + end[1]) / 2
-        else:
-            t = i / (n_points - 1)
-            x = effective_start[0] + t * (effective_end[0] - effective_start[0])
-            y = effective_start[1] + t * (effective_end[1] - effective_start[1])
+    # Snap ao grid GLOBAL (inspecao visual 2026-06-12): corredores
+    # ortogonais devem usar as MESMAS linhas de grid dos paineis vizinhos
+    # — escoras sempre em pontos de intersecao de grid regular, nunca em
+    # posicoes "esticadas" proprias do corredor.
+    axis_positions: Optional[List[float]] = None
+    axis_is_x = abs(dx) > 0.999  # corredor ao longo de X
+    axis_is_y = abs(dy) > 0.999  # corredor ao longo de Y
+    if global_origin is not None and (axis_is_x or axis_is_y):
+        STANDARD_SPACINGS = [0.80, 1.00, 1.20]
+        candidates = [s for s in STANDARD_SPACINGS if s <= max_spacing + 0.05]
+        snap_step = max(candidates) if candidates else STANDARD_SPACINGS[0]
+        origin_c = global_origin[0] if axis_is_x else global_origin[1]
+        lo = min(effective_start[0], effective_end[0]) if axis_is_x else min(effective_start[1], effective_end[1])
+        hi = max(effective_start[0], effective_end[0]) if axis_is_x else max(effective_start[1], effective_end[1])
+        first_n = math.ceil((lo - origin_c) / snap_step)
+        last_n = math.floor((hi - origin_c) / snap_step)
+        if last_n >= first_n:
+            axis_positions = [origin_c + n * snap_step for n in range(first_n, last_n + 1)]
 
+    shores: List[PositionedShore] = []
+    if axis_positions:
+        n_points = len(axis_positions)
+        coords = []
+        mid_y = (effective_start[1] + effective_end[1]) / 2
+        mid_x = (effective_start[0] + effective_end[0]) / 2
+        for c in axis_positions:
+            coords.append((c, mid_y) if axis_is_x else (mid_x, c))
+    else:
+        coords = []
+        for i in range(n_points):
+            if n_points == 1:
+                coords.append(((start[0] + end[0]) / 2, (start[1] + end[1]) / 2))
+            else:
+                t = i / (n_points - 1)
+                coords.append((
+                    effective_start[0] + t * (effective_end[0] - effective_start[0]),
+                    effective_start[1] + t * (effective_end[1] - effective_start[1]),
+                ))
+
+    for x, y in coords:
         point = Point(x, y)
         if not polygon.contains(point):
             continue
@@ -110,7 +140,12 @@ def _distribute_linear(
     # Recalculate loads
     if shores:
         load_per_shore = total_load_kn / len(shores)
-        utilization = load_per_shore / shore.load_capacity_kn
+        # Guarda: escora com capacidade 0 (entrada sintetica/custom) nao deve
+        # causar ZeroDivisionError; usa o default 0.0 da propria funcao.
+        utilization = (
+            load_per_shore / shore.load_capacity_kn
+            if shore.load_capacity_kn else 0.0
+        )
         for s in shores:
             s.load_applied_kn = round(load_per_shore, 2)
             s.utilization_ratio = round(utilization, 4)
@@ -215,7 +250,10 @@ def distribute_shores(
 
     # Narrow corridor detection: use linear distribution instead of grid
     if _is_narrow_corridor(slab, effective_spacing):
-        return _distribute_linear(slab, shore, total_load_kn, effective_spacing, exclusions)
+        return _distribute_linear(
+            slab, shore, total_load_kn, effective_spacing, exclusions,
+            global_origin=global_origin,
+        )
 
     # Reset effective_spacing for the normal grid path below
     effective_spacing = max_spacing
@@ -314,13 +352,23 @@ def distribute_shores(
             )
 
     # Guarantee at least 1 shore at the polygon centroid if the grid
-    # produced no points (very small or irregular slabs).
+    # produced no points (very small or irregular slabs). Quando ha
+    # origem global, snapar o centroide a intersecao de grid mais
+    # proxima que continue dentro do poligono (2026-06-12: escoras
+    # sempre em pontos de grid regular).
     if not shores:
         centroid = slab.polygon.centroid
+        cx, cy = centroid.x, centroid.y
+        if global_origin is not None and spacing_x > 0 and spacing_y > 0:
+            ox, oy = global_origin
+            sx = ox + round((cx - ox) / spacing_x) * spacing_x
+            sy = oy + round((cy - oy) / spacing_y) * spacing_y
+            if slab.polygon.buffer(0.05).contains(Point(sx, sy)):
+                cx, cy = sx, sy
         shores.append(
             PositionedShore(
-                x=round(centroid.x, 4),
-                y=round(centroid.y, 4),
+                x=round(cx, 4),
+                y=round(cy, 4),
                 shore=shore,
                 load_applied_kn=0.0,
                 utilization_ratio=0.0,
@@ -330,7 +378,12 @@ def distribute_shores(
     # Recalcular carga com número efetivo de escoras
     if shores:
         load_per_shore = total_load_kn / len(shores)
-        utilization = load_per_shore / shore.load_capacity_kn
+        # Guarda: escora com capacidade 0 (entrada sintetica/custom) nao deve
+        # causar ZeroDivisionError; usa o default 0.0 da propria funcao.
+        utilization = (
+            load_per_shore / shore.load_capacity_kn
+            if shore.load_capacity_kn else 0.0
+        )
         for s in shores:
             s.load_applied_kn = round(load_per_shore, 2)
             s.utilization_ratio = round(utilization, 4)

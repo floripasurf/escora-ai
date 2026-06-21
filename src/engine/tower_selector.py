@@ -68,6 +68,11 @@ SLAB_TOWER_FRACTION_LARGE = 0.18
 # Tower grid spacing for mixed mode (m) — Orguel measured: 2.55m consistent
 MIXED_TOWER_GRID_SPACING = 2.55
 
+# Cobertura torre-first (gold standard §28.8 item 10, projetos 35412/97661):
+# vigas de cobertura apoiadas em TORRES a 1.25-1.65 m centro-a-centro, com
+# VM130-360 entre torres; escoras telescopicas apenas complementares.
+COBERTURA_TOWER_SPACING_RANGE_M = (1.25, 1.65)
+
 # NBR 15696 safety factor for shore load combinations
 SHORE_SAFETY_FACTOR = 1.4
 
@@ -391,6 +396,7 @@ def select_tower(
     required_capacity_kn: float,
     mode: Literal["price", "inventory"] = "price",
     inventory: Optional[InventoryAvailability] = None,
+    warnings: Optional[List[str]] = None,
 ) -> Optional[TowerCatalogEntry]:
     """Select the most economical tower that meets height and load requirements.
 
@@ -423,6 +429,11 @@ def select_tower(
             compatible, key=lambda t: t.total_price_brl(required_height_m),
         )
         logger.warning(f"Sem estoque {inventory.locadora}: usando torre {chosen.id}")
+        if warnings is not None:
+            warnings.append(
+                f"Estoque insuficiente em {inventory.locadora}: torre '{chosen.id}' "
+                "usada sem confirmacao de estoque (verifique disponibilidade)."
+            )
         return chosen
 
     return min(compatible, key=lambda t: t.total_price_brl(required_height_m))
@@ -475,6 +486,7 @@ def select_distribution_beam(
     mode: Literal["price", "inventory"] = "price",
     inventory: Optional[InventoryAvailability] = None,
     n_supports: int = 2,
+    warnings: Optional[List[str]] = None,
 ) -> Optional[DistributionBeamEntry]:
     """Select distribution beam that can span between towers/shores.
 
@@ -521,6 +533,11 @@ def select_distribution_beam(
             return min(in_stock_items, key=lambda b: b.price_per_m_brl)
         chosen = min(compatible, key=lambda b: b.price_per_m_brl)
         logger.warning(f"Sem estoque {inventory.locadora}: usando viga {chosen.id}")
+        if warnings is not None:
+            warnings.append(
+                f"Estoque insuficiente em {inventory.locadora}: viga '{chosen.id}' "
+                "usada sem confirmacao de estoque (verifique disponibilidade)."
+            )
         return chosen
 
     return min(compatible, key=lambda b: b.price_per_m_brl)
@@ -583,15 +600,23 @@ CRUZETAS_PER_TOWER_FACE = 1
 TOWER_FACES = 4
 
 
-def count_cruzetas_viga(beam_results) -> Dict[str, int]:
-    """Cruzetas for beams: 1 per CRUZETA_VIGA_SPACING_M of beam length.
+def count_cruzetas_viga(
+    beam_results,
+    spacing_m: Optional[float] = None,
+) -> Dict[str, int]:
+    """Cruzetas for beams: 1 per `spacing_m` of beam length.
 
     Locadora rule (Q5): "Em vigas, o conjunto escora+cruzeta é distribuído
     a cada 80 cm sob a viga" — so for a 6m beam we need ceil(6/0.80) = 8
     cruzetas, NOT the 0.25 ratio (which applies only to lajes).
 
+    `spacing_m` defaults to CRUZETA_VIGA_SPACING_M (0.80, DOCX §10.3); o
+    perfil de metodologia da locadora (§28.9, `passo_sob_viga_m`) pode
+    informar outro passo — gold standard Orguel 0.50-0.65 (§28.8 item 7).
+
     Tower-supported beams are excluded — towers already carry 4 cruzetas/tower.
     """
+    step = spacing_m if spacing_m and spacing_m > 0 else CRUZETA_VIGA_SPACING_M
     out: Dict[str, int] = {}
     for br in beam_results:
         selected = getattr(br, "selected_shore", None)
@@ -603,7 +628,7 @@ def count_cruzetas_viga(beam_results) -> Dict[str, int]:
         length_m = getattr(getattr(br, "beam", None), "length_m", 0.0) or 0.0
         if length_m <= 0:
             continue
-        out[sid] = out.get(sid, 0) + math.ceil(length_m / CRUZETA_VIGA_SPACING_M)
+        out[sid] = out.get(sid, 0) + math.ceil(length_m / step)
     return out
 
 

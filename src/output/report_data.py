@@ -42,6 +42,7 @@ class ReportMetadata:
     date: str
     scale: float
     dxf_filename: str
+    methodology: Optional[dict] = None
 
 
 @dataclass
@@ -139,6 +140,7 @@ class ReportData:
     volume_totals: Dict[str, float] = field(default_factory=dict)
     consumption_rows: List[ConsumptionByHeightRow] = field(default_factory=list)
     consumption_totals: Dict[str, float] = field(default_factory=dict)
+    methodology: Optional[dict] = None
 
 
 def _format_section(width_m: Optional[float], height_m: Optional[float]) -> str:
@@ -259,7 +261,10 @@ def build_report_data(
             c for sid, (_s, c) in shore_counts.items()
             if sid.startswith("TWR-")
         )
-        beam_cruzetas = count_cruzetas_viga(calc.beam_results)
+        beam_cruzetas = count_cruzetas_viga(
+            calc.beam_results,
+            spacing_m=getattr(calc, "passo_sob_viga_m", None),
+        )
         slab_cruzetas = count_cruzetas_laje(slab_telescopic_counts)
         for acc, qty in compute_cruzeta_bom(
             accessories, beam_cruzetas, slab_cruzetas, tower_count,
@@ -328,6 +333,7 @@ def build_report_data(
         volume_totals=volume_totals,
         consumption_rows=consumption_rows,
         consumption_totals=consumption_totals,
+        methodology=metadata.methodology,
     )
 
 

@@ -23,9 +23,28 @@ from src.auth.branches import (
     resolve_session,
     revoke_session,
 )
+from src.models.methodology import load_methodology
 from api.deps import get_current_branch
+from api.services.methodology_view import serialize_profile
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
+
+
+def _branch_dto(b: Branch, locadora_id: str) -> "BranchDTO":
+    """Monta o BranchDTO com a metodologia resolvida da locadora/branch.
+
+    A metodologia e um atributo da locadora (§28.9): load_methodology faz o
+    merge locadora -> branch e cai nos defaults em codigo na ausencia do campo.
+    """
+    return BranchDTO(
+        id=b.id,
+        branch_name=b.branch_name,
+        inventory_name=b.inventory_name,
+        display_name=b.display_name,
+        metodologia=serialize_profile(
+            load_methodology(branch_id=b.id, locadora_id=locadora_id)
+        ),
+    )
 
 
 class LoginRequest(BaseModel):
@@ -39,6 +58,21 @@ class SignupRequest(BaseModel):
     company: str = ""
     phone: str = ""
     password: str
+    branch_name: str = "Sede"
+    inventory_name: str = ""
+    invite_code: Optional[str] = None
+    accept_terms: bool = False
+
+
+def _signup_invite_codes() -> set:
+    """Conjunto de códigos de convite válidos (env SIGNUP_INVITE_CODES).
+
+    Lido de os.environ a cada chamada (espelha data_root) para o beta ser
+    controlado sem redeploy. Vazio/ausente = signup aberto (dev/local).
+    """
+    import os
+    raw = os.environ.get("SIGNUP_INVITE_CODES", "")
+    return {c.strip() for c in raw.split(",") if c.strip()}
 
 
 class ChangePasswordRequest(BaseModel):
@@ -51,12 +85,14 @@ class BranchDTO(BaseModel):
     branch_name: str
     inventory_name: str
     display_name: str
+    metodologia: Optional[dict] = None
 
 
 class LoginResponse(BaseModel):
     token: str
     username: str
     name: str
+    role: str
     locadora_id: str
     locadora_name: str
     branches: list[BranchDTO]
@@ -81,17 +117,10 @@ async def login(body: LoginRequest):
         token=token,
         username=user.username,
         name=user.name,
+        role=user.role,
         locadora_id=locadora.id,
         locadora_name=locadora.name,
-        branches=[
-            BranchDTO(
-                id=b.id,
-                branch_name=b.branch_name,
-                inventory_name=b.inventory_name,
-                display_name=b.display_name,
-            )
-            for b in locadora.branches
-        ],
+        branches=[_branch_dto(b, locadora.id) for b in locadora.branches],
     )
 
 
@@ -99,18 +128,35 @@ async def login(body: LoginRequest):
 async def signup(body: SignupRequest):
     if not body.name or not body.email or not body.password:
         raise HTTPException(status_code=400, detail="Nome, email e senha são obrigatórios")
+    if not body.accept_terms:
+        raise HTTPException(
+            status_code=400,
+            detail="É necessário aceitar os termos de uso e o aviso de validação técnica",
+        )
+    # Beta controlado: quando há códigos configurados, signup exige um válido.
+    valid_codes = _signup_invite_codes()
+    if valid_codes and (not body.invite_code or body.invite_code.strip() not in valid_codes):
+        raise HTTPException(
+            status_code=403,
+            detail="Código de convite inválido ou ausente (cadastro em beta restrito)",
+        )
     if len(body.password) < 6:
         raise HTTPException(status_code=400, detail="A senha precisa ter ao menos 6 caracteres")
     import re
     if not re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", body.email.strip()):
         raise HTTPException(status_code=400, detail="Email inválido")
-    user = create_user(
-        name=body.name,
-        email=body.email,
-        company=body.company,
-        phone=body.phone,
-        password=body.password,
-    )
+    try:
+        user = create_user(
+            name=body.name,
+            email=body.email,
+            company=body.company,
+            phone=body.phone,
+            password=body.password,
+            branch_name=body.branch_name,
+            inventory_name=body.inventory_name,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     if user is None:
         raise HTTPException(status_code=409, detail="Este email já está cadastrado")
     # Auto-login after signup
@@ -120,15 +166,11 @@ async def signup(body: SignupRequest):
         token=token,
         username=user.username,
         name=user.name,
+        role=user.role,
         locadora_id=locadora.id if locadora else user.locadora_id,
         locadora_name=locadora.name if locadora else body.company,
         branches=[
-            BranchDTO(
-                id=b.id,
-                branch_name=b.branch_name,
-                inventory_name=b.inventory_name,
-                display_name=b.display_name,
-            )
+            _branch_dto(b, locadora.id)
             for b in (locadora.branches if locadora else [])
         ],
     )
@@ -189,31 +231,32 @@ async def me(
         raise HTTPException(status_code=404, detail="Locadora não encontrada")
 
     selected: Optional[Branch] = None
+    current_user = next((u for u in locadora.users if u.username == session["username"]), None)
     if x_branch_id:
         for b in locadora.branches:
             if b.id == x_branch_id:
                 selected = b
                 break
 
+    def _branch_payload(b: Branch) -> dict:
+        return {
+            "id": b.id,
+            "branch_name": b.branch_name,
+            "inventory_name": b.inventory_name,
+            "display_name": b.display_name,
+            "metodologia": serialize_profile(
+                load_methodology(branch_id=b.id, locadora_id=locadora.id)
+            ),
+        }
+
     return {
         "username": session["username"],
+        "name": current_user.name if current_user else session["username"],
+        "role": current_user.role if current_user else "operator",
         "locadora_id": locadora.id,
         "locadora_name": locadora.name,
-        "branches": [
-            {
-                "id": b.id,
-                "branch_name": b.branch_name,
-                "inventory_name": b.inventory_name,
-                "display_name": b.display_name,
-            }
-            for b in locadora.branches
-        ],
-        "selected_branch": {
-            "id": selected.id,
-            "branch_name": selected.branch_name,
-            "inventory_name": selected.inventory_name,
-            "display_name": selected.display_name,
-        } if selected else None,
+        "branches": [_branch_payload(b) for b in locadora.branches],
+        "selected_branch": _branch_payload(selected) if selected else None,
     }
 
 

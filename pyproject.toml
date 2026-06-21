@@ -23,6 +23,7 @@ dependencies = [
     "python-multipart>=0.0.6",
     "jinja2>=3.1",
     "reportlab>=4.0",
+    "openpyxl>=3.1",
     "ifcopenshell>=0.8",
 ]
 
@@ -30,6 +31,8 @@ dependencies = [
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    "pytest-timeout>=2.0",
+    "httpx>=0.27",
 ]
 
 [project.scripts]
@@ -38,6 +41,17 @@ escora-ai = "src.cli:app"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# Testes "slow" (regressao com DXFs reais grandes, ex: 104004 ~24 min)
+# ficam fora da suite default; rodar explicitamente com: pytest -m slow
+addopts = "-m 'not slow'"
+# Backstop contra travas (ex.: region_filter em 104004): falha o teste apos
+# 45 min em vez de segurar a suite. Folgado p/ o 104004 (~24 min); requer
+# pytest-timeout (dev dep). Metodo 'thread' funciona com TestClient/pipelines.
+timeout = 2700
+timeout_method = "thread"
+markers = [
+    "slow: testes de regressao lentos com DXFs reais (rodar com -m slow)",
+]
 
 [tool.setuptools.packages.find]
 include = ["src*"]

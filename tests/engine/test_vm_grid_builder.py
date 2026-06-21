@@ -285,10 +285,13 @@ class TestGlobalOriginAlignment:
             shores_b, polygon_bbox=(4, 5.130, 9, 8.630), plywood=plywood,
             global_origin=(0.0, 0.0),
         )
+        # Barrotes EXTRA de emenda (pendencia 18, Orguel p.115) ficam
+        # deliberadamente colados a linha de emenda (transpasse lado a
+        # lado) — excluir do calculo de alinhamento do grid regular.
         ys_global = sorted({
             round(s.start[1], 4)
             for s in g_a.secundarias() + g_b.secundarias()
-            if s.axis == "x"
+            if s.axis == "x" and "emenda" not in (s.notes or "")
         })
 
         def min_gap(positions):
@@ -296,17 +299,21 @@ class TestGlobalOriginAlignment:
             return min(gaps) if gaps else 999.0
 
         gap_global = min_gap(ys_global)
-        # Com snap global, gaps minimos devem ser ~seam_m (0.244m)
+        # Com snap global, gaps minimos do grid regular devem ser ~seam_m
         assert gap_global >= 0.20, (
             f"global_origin gap minimo={gap_global:.3f}m, esperado >=0.20m"
         )
 
 
-class TestUTFPRProject2Reference:
-    """Verifica geometria proxima ao Projeto 2 UTFPR (p.52-53).
+class TestUTFPRProject1Reference:
+    """Verifica geometria proxima ao PROJETO 1 do TCC UTFPR (p.45-50).
 
-    Painel ~217m² (laje protensao 20cm). Espacamento entre escoras citado:
-    245mm e 450mm (espacamento secundaria), 1.52m (espacamento torre).
+    Corrigido 2026-06-11 (manual §28.4, pendencia 25): o painel de
+    217.15 m² (laje 20 cm) e o Projeto 1 do TCC Bedenaroski, nao o
+    Projeto 2 (que tem 948.41 m²). Os antigos "245/450 mm" citados aqui
+    eram COMPRIMENTOS de vigas Doka H20 Eco (2.45/4.50 m) lidos como
+    espacamento por engano; o espacamento de secundarias executado era
+    48.8 cm ("C/48,8") e 1.52 x 1.00 m e a dimensao do conjunto de torre.
     """
 
     def test_dense_grid_produces_proportional_segments(self):

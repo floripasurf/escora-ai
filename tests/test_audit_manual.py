@@ -44,18 +44,21 @@ from src.utils.constants import ESPACAMENTO_SECUNDARIAS_MANUAL, GAMMA_F
 
 
 class TestRegionFilterGapThreshold:
-    def test_smaller_gaps_detected(self):
-        """3% threshold: 6000cm range → 180cm threshold, catches 300cm gap."""
+    def test_small_gaps_kept_together(self):
+        """Limiar conservador 10%/5m (decisao 2026-04-09, mantida no
+        codigo): gap de 300 em range 6000 NAO divide — plantas com
+        patios/shafts/vaos internos longos devem permanecer uma regiao
+        unica (caso CFL-SUB). Teste antigo esperava limiar de 3%, que
+        contradiz a decisao documentada em _find_gap_splits."""
         values = list(range(0, 3000, 10)) + list(range(3300, 6000, 10))
         splits = _find_gap_splits(values, 6000.0)
-        assert len(splits) >= 1, "Should detect gap of 300 in 6000 range"
+        assert len(splits) == 0, "Gap de 300 < 10% de 6000 nao deve dividir"
 
-    def test_old_threshold_would_miss(self):
-        """Old 10% threshold on 6000 range = 600, misses a 300 gap."""
-        # Our new 3% = 180 threshold catches it
-        values = list(range(0, 3000, 10)) + list(range(3300, 6000, 10))
-        threshold_new = max(3.0, 0.03 * 6000)
-        assert threshold_new < 300, "New threshold should be below gap size"
+    def test_large_gap_splits(self):
+        """Gap acima de 10% do range divide regioes."""
+        values = list(range(0, 2000, 10)) + list(range(3000, 6000, 10))
+        splits = _find_gap_splits(values, 6000.0)
+        assert len(splits) >= 1, "Gap de 1000 > 10% de 6000 deve dividir"
 
     def test_no_false_splits_on_continuous(self):
         """Continuous data with small gaps should NOT split."""
@@ -376,24 +379,74 @@ class TestCruzetaSeparation:
         assert counts["ESC310"] == 25
 
 
-# ─── T3.1: Secondary spacing table ─────────────────────────────────────
+# ─── T3.1: Secondary spacing table (canonical Orguel p.89 / manual §12.2) ──
 
 class TestSecondarySpacingTable:
-    def test_table_has_entries(self):
-        assert len(ESPACAMENTO_SECUNDARIAS_MANUAL) > 0
+    def test_table_complete(self):
+        """21 lajes × 7 compensados × 2 n_apoios = 294 entradas."""
+        assert len(ESPACAMENTO_SECUNDARIAS_MANUAL) == 21 * 7 * 2
 
-    def test_laje_12cm_compensado_18mm_2apoios(self):
-        """Manual example: laje 12cm, compensado 18mm, 2 apoios → 0.54m."""
-        assert ESPACAMENTO_SECUNDARIAS_MANUAL[(12, 18, 2)] == 0.54
+    def test_all_lajes_present(self):
+        lajes = {k[0] for k in ESPACAMENTO_SECUNDARIAS_MANUAL}
+        assert lajes == {
+            8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20,
+            22, 25, 28, 30, 35, 40, 50, 60, 80, 100,
+        }
+
+    def test_all_compensados_present(self):
+        comps = {k[1] for k in ESPACAMENTO_SECUNDARIAS_MANUAL}
+        assert comps == {12, 14, 15, 17, 18, 20, 21}
+
+    def test_laje_12cm_compensado_18mm(self):
+        """Tabela canônica §12.2: laje 12 / 18mm = 57/67 cm (era 0.54 — errado)."""
+        assert ESPACAMENTO_SECUNDARIAS_MANUAL[(12, 18, 2)] == 0.57
+        assert ESPACAMENTO_SECUNDARIAS_MANUAL[(12, 18, 4)] == 0.67
+
+    def test_canonical_corner_cells(self):
+        """Cantos da tabela canônica §12.2 (verificada célula a célula)."""
+        assert ESPACAMENTO_SECUNDARIAS_MANUAL[(8, 12, 2)] == 0.42
+        assert ESPACAMENTO_SECUNDARIAS_MANUAL[(8, 21, 4)] == 0.84
+        assert ESPACAMENTO_SECUNDARIAS_MANUAL[(100, 12, 2)] == 0.22
+        assert ESPACAMENTO_SECUNDARIAS_MANUAL[(100, 21, 4)] == 0.47
+
+    def test_canonical_sample_cells(self):
+        """Amostra de células do miolo da tabela §12.2."""
+        assert ESPACAMENTO_SECUNDARIAS_MANUAL[(10, 14, 2)] == 0.47
+        assert ESPACAMENTO_SECUNDARIAS_MANUAL[(15, 18, 2)] == 0.54
+        assert ESPACAMENTO_SECUNDARIAS_MANUAL[(15, 18, 4)] == 0.63
+        assert ESPACAMENTO_SECUNDARIAS_MANUAL[(20, 17, 2)] == 0.49
+        assert ESPACAMENTO_SECUNDARIAS_MANUAL[(25, 18, 2)] == 0.49
+        assert ESPACAMENTO_SECUNDARIAS_MANUAL[(30, 20, 4)] == 0.62
+        assert ESPACAMENTO_SECUNDARIAS_MANUAL[(50, 15, 4)] == 0.41
 
     def test_thicker_slab_smaller_spacing(self):
-        """Thicker slab → smaller spacing."""
-        s12 = ESPACAMENTO_SECUNDARIAS_MANUAL[(12, 18, 2)]
-        s25 = ESPACAMENTO_SECUNDARIAS_MANUAL[(25, 18, 2)]
-        assert s25 < s12
+        """Thicker slab → smaller (or equal) spacing, every column/apoios."""
+        lajes = sorted({k[0] for k in ESPACAMENTO_SECUNDARIAS_MANUAL})
+        for mm in (12, 14, 15, 17, 18, 20, 21):
+            for n in (2, 4):
+                vals = [ESPACAMENTO_SECUNDARIAS_MANUAL[(c, mm, n)] for c in lajes]
+                assert vals == sorted(vals, reverse=True), (mm, n)
 
-    def test_4_apoios_larger_than_2(self):
-        """4+ apoios → larger spacing than 2 apoios."""
-        s2 = ESPACAMENTO_SECUNDARIAS_MANUAL[(15, 18, 2)]
-        s4 = ESPACAMENTO_SECUNDARIAS_MANUAL[(15, 18, 4)]
-        assert s4 > s2
+    def test_4_apoios_never_smaller_than_2(self):
+        """4 apoios (3 vãos) → vão >= 2 apoios em todas as células."""
+        for (laje, mm, n), v in ESPACAMENTO_SECUNDARIAS_MANUAL.items():
+            if n == 2:
+                assert ESPACAMENTO_SECUNDARIAS_MANUAL[(laje, mm, 4)] >= v
+
+
+# ─── Pendência 27: coeficientes gamma ──────────────────────────────────
+
+class TestGammaCoefficients:
+    def test_gamma_m_escoras_torres_value(self):
+        """gamma_m = 1.5 minora a resistência (NBR 15696 §4.3.1.2)."""
+        from src.utils.constants import GAMMA_M_ESCORAS_TORRES
+        assert GAMMA_M_ESCORAS_TORRES == 1.5
+
+    def test_deprecated_alias_kept(self):
+        """Alias antigo GAMMA_F_FLAMBAGEM não deve quebrar imports."""
+        from src.utils.constants import GAMMA_F_FLAMBAGEM, GAMMA_M_ESCORAS_TORRES
+        assert GAMMA_F_FLAMBAGEM is GAMMA_M_ESCORAS_TORRES
+
+    def test_gamma_f_unchanged(self):
+        """gamma_Q = 1.4 segue majorando ações (simultâneo, não alternativo)."""
+        assert GAMMA_F == 1.4

@@ -162,6 +162,96 @@ class TestInventoryMode:
         assert shore is not None
         assert any("Sem estoque" in rec.message for rec in caplog.records)
 
+    def test_select_shore_inventory_matches_legacy_alias(
+        self, catalog, inv_only_esc310, caplog,
+    ):
+        with caplog.at_level("WARNING"):
+            shore = select_shore(
+                catalog,
+                required_height_m=2.8,
+                required_capacity_kn=8.0,
+                mode="inventory",
+                inventory=inv_only_esc310,
+            )
+        assert shore is not None
+        assert shore.id == "ESC2000-3100"
+        assert not any("Sem estoque" in rec.message for rec in caplog.records)
+
+    def test_select_shore_inventory_fallback_records_substitution_in_collector(
+        self, catalog, inv_only_esc310,
+    ):
+        # Only ESC310 in stock, but height 4.0m needs a taller model → the engine
+        # substitutes an out-of-stock model. That substitution must be visible to
+        # the partner (collected into a warnings list), not buried in logs only.
+        collected: list[str] = []
+        shore = select_shore(
+            catalog,
+            required_height_m=4.0,
+            required_capacity_kn=10.0,
+            mode="inventory",
+            inventory=inv_only_esc310,
+            warnings=collected,
+        )
+        assert shore is not None
+        assert any("estoque" in w.lower() for w in collected), collected
+        assert any(shore.id in w for w in collected), collected
+
+    def test_select_shore_inventory_in_stock_records_no_substitution(
+        self, catalog, inv_only_esc310,
+    ):
+        collected: list[str] = []
+        shore = select_shore(
+            catalog,
+            required_height_m=2.8,
+            required_capacity_kn=8.0,
+            mode="inventory",
+            inventory=inv_only_esc310,
+            warnings=collected,
+        )
+        assert shore is not None
+        assert collected == []
+
+    def test_select_tower_inventory_fallback_records_substitution(
+        self, inv_no_towers,
+    ):
+        from src.engine.tower_selector import load_tower_catalog, select_tower
+        towers, _beams, _acc = load_tower_catalog()
+        if not towers:
+            pytest.skip("no towers in catalog")
+        collected: list[str] = []
+        tower = select_tower(
+            towers,
+            required_height_m=3.0,
+            required_capacity_kn=10.0,
+            mode="inventory",
+            inventory=inv_no_towers,
+            warnings=collected,
+        )
+        assert tower is not None
+        assert any("estoque" in w.lower() for w in collected), collected
+        assert any(tower.id in w for w in collected), collected
+
+    def test_select_distribution_beam_inventory_fallback_records_substitution(
+        self, inv_no_towers,
+    ):
+        from src.engine.tower_selector import (
+            load_tower_catalog, select_distribution_beam,
+        )
+        _towers, beams, _acc = load_tower_catalog()
+        if not beams:
+            pytest.skip("no beams in catalog")
+        collected: list[str] = []
+        beam = select_distribution_beam(
+            beams,
+            span_m=2.0,
+            load_kn_m=5.0,
+            mode="inventory",
+            inventory=inv_no_towers,
+            warnings=collected,
+        )
+        assert beam is not None
+        assert any("estoque" in w.lower() for w in collected), collected
+
     def test_decide_support_type_inventory_no_towers_falls_back_to_shores(
         self, catalog, inv_no_towers,
     ):

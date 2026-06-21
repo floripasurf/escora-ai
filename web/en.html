@@ -2,6 +2,13 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <!--
+      FENCE (beta): esta variante em inglês está desatualizada (sem admin,
+      sem inventário, sem role-gating) e quebraria para parceiros. Até ser
+      portada, redirecionamos para o app PT funcional. Ver docs/ops + P0-4.
+    -->
+    <script>window.location.replace('/index.html');</script>
+    <meta http-equiv="refresh" content="0; url=/index.html">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>estrutura.app — AI-Powered Shoring Design</title>
     <meta name="description" content="Shoring design in seconds with AI. Upload DXF/DWG structural plans, receive shoring layouts — DXF, DWG, BIM/IFC, BOM, cost estimate, and technical report.">
@@ -651,6 +658,26 @@
             color: var(--accent);
             transform: translateX(3px);
         }
+
+        /* ---------- Methodology badge (read-only, projects tab) ---------- */
+        .methodology-badge {
+            display: flex;
+            align-items: baseline;
+            flex-wrap: wrap;
+            gap: 6px 10px;
+            padding: 11px 16px;
+            margin: 0 0 18px;
+            background: var(--accent-soft);
+            border: 1px solid var(--line);
+            border-left: 3px solid var(--accent);
+            border-radius: var(--radius-sm);
+            font-family: var(--sans);
+            font-size: 0.86rem;
+        }
+        .methodology-badge .mb-key { color: var(--fg-mute); }
+        .methodology-badge .mb-val { color: var(--fg); font-weight: 600; }
+        .methodology-badge .mb-sep { color: var(--fg-mute); }
+        .methodology-badge .mb-barrote { color: var(--fg-mute); }
 
         /* ---------- Session badge (floating top-right) ---------- */
         #sessionBadge {
@@ -1465,6 +1492,8 @@
                     <input type="file" id="fileInput" accept=".dxf,.dwg">
                 </div>
 
+                <div class="methodology-badge" id="methodologyBadge" style="display:none;"></div>
+
                 <div class="section-head">
                     <span class="section-title">Projects</span>
                     <span class="section-count" id="jobCount">00</span>
@@ -1605,13 +1634,13 @@
     </footer>
 
     <script>
-        // API goes straight to the Fly backend. We intentionally bypass the
-        // Vercel rewrite here because Vercel edge rewrites cap request bodies
-        // at ~4.5 MB, which would break our 200 MB DXF upload feature.
-        // CORS is enabled server-side (allow_origins=*).
+        // API goes straight to the Mac Mini backend (via Cloudflare Tunnel).
+        // We intentionally bypass the Vercel rewrite here because Vercel edge
+        // rewrites cap request bodies at ~4.5 MB, which would break large DXF
+        // uploads. CORS is enabled server-side (allow_origins=*).
         const BACKEND = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
             ? ''  // dev: same origin
-            : 'https://escora-ai.fly.dev';
+            : 'https://escora.blackcube.dev';
         const API = `${BACKEND}/api/v1`;
         const jobs = {};
 
@@ -1872,6 +1901,22 @@
             const branch = SESSION && SESSION.branches.find(b => b.id === BRANCH_ID);
             const label = branch ? `${SESSION.locadora_name} \u00B7 ${branch.branch_name}` : 'logado';
             document.getElementById('sbLabel').textContent = label;
+            renderMethodologyBadge(branch);
+        }
+
+        function renderMethodologyBadge(branch) {
+            const el = document.getElementById('methodologyBadge');
+            if (!el) return;
+            const m = branch && branch.metodologia;
+            if (!m) { el.style.display = 'none'; el.innerHTML = ''; return; }
+            const layout = (m.labels && m.labels.laje_layout && m.labels.laje_layout.en) || m.laje_layout || '\u2014';
+            const barrote = (m.barrote_resumo && m.barrote_resumo.labels && m.barrote_resumo.labels.en) || '';
+            el.innerHTML = `
+                <span class="mb-key">Methodology:</span>
+                <span class="mb-val">${layout}</span>
+                ${barrote ? `<span class="mb-sep">\u00B7</span><span class="mb-barrote">${barrote}</span>` : ''}
+            `;
+            el.style.display = 'flex';
         }
 
         async function bootstrap() {

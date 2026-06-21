@@ -353,7 +353,10 @@ def generate_ifc(
                     tower_count += 1
                 else:
                     slab_telescopic[s.shore.id] = slab_telescopic.get(s.shore.id, 0) + 1
-        beam_cruzetas = count_cruzetas_viga(calc.beam_results)
+        beam_cruzetas = count_cruzetas_viga(
+            calc.beam_results,
+            spacing_m=getattr(calc, "passo_sob_viga_m", None),
+        )
         slab_cruzetas = count_cruzetas_laje(slab_telescopic)
         cruzeta_pairs = compute_cruzeta_bom(
             accessories, beam_cruzetas, slab_cruzetas, tower_count,

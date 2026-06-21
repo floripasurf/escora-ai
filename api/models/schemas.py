@@ -50,5 +50,8 @@ class JobStatusResponse(BaseModel):
     has_diagrams: bool = False
     optimization_mode: Optional[str] = None
     inventory_name: Optional[str] = None
+    methodology: Optional[dict] = None
+    requires_review: bool = False
+    review_reasons: Optional[List[str]] = None
     consumption_summary: Optional[List[ConsumptionSummaryRow]] = None
 

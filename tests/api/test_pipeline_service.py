@@ -445,7 +445,8 @@ def test_process_dxf_propagates_category_label_and_drops_beams_slabs():
         ConsumptionByHeightRow, ReportData, SummaryData,
     )
 
-    def fake_run_pipeline(input_path, mode=None, inventory_name=None, branch_id=None):
+    def fake_run_pipeline(input_path, mode=None, inventory_name=None, branch_id=None,
+                          slab_layout_mode=None, methodology=None):
         calc = CalculationResult(
             beam_results=[], slab_results=[],
             total_shores=0, total_load_kn=0.0,

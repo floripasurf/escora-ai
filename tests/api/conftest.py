@@ -23,6 +23,7 @@ SEED_LOCADORAS = {
         {
             "id": "loc-a",
             "name": "Locadora A",
+            "metodologia": {"laje_layout": "line_first"},
             "branches": [
                 {
                     "id": "test-a",
@@ -45,7 +46,7 @@ SEED_LOCADORAS = {
                 {
                     "id": "test-b",
                     "branch_name": "Unit B",
-                    "inventory_name": "orguel_sjc",
+                    "inventory_name": "loc_b_unit",
                 }
             ],
             "users": [

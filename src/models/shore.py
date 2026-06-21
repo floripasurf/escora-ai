@@ -170,6 +170,19 @@ class DistributionBeamEntry(BaseModel):
         default=None,
         description="Flexural rigidity EI in kNm² for deflection check",
     )
+    # Cortante admissível do FABRICANTE (kN) — NBR 15696 Anexo B / item 4.4
+    # (pendência 17, manual §13.3). None = valor não publicado em ficha
+    # técnica: a verificação de cortante é PULADA (mesmo padrão backward-
+    # compat do EI_knm2). NUNCA inventar valor. Rastreáveis (Manual JAU
+    # p.20/33): ALU14/VA140 = 20.6 kN (2100 kgf); VA165 = 3350 kgf;
+    # TJ3 = 3160 kgf; PT2 = 1978 kgf. VM80/VM130 sem cortante publicado.
+    shear_capacity_kn: Optional[float] = Field(
+        default=None,
+        description=(
+            "Cortante admissível do fabricante em kN (NBR 15696 Anexo B/4.4). "
+            "None = não publicado — verificação pulada"
+        ),
+    )
 
 
 class AccessoryCatalogEntry(BaseModel):

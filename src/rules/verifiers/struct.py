@@ -331,3 +331,59 @@ def _verify_vm_grid_deflection(project: "RuleProject") -> list[Violation]:
 
 
 REGISTRY.register(_STRUCT_005, _verify_vm_grid_deflection)
+
+
+_STRUCT_006 = Rule(
+    id="STRUCT-006",
+    category="STRUCT",
+    source=Source(
+        type="norm",
+        ref="NBR 15696 Anexo B / item 4.4 + Manual §13.3 (STRUCT-VM-003)",
+    ),
+    description_pt=(
+        "Cada segmento de VM deve ter cortante aplicado <= cortante "
+        "admissivel do fabricante (NBR 15696 Anexo B / 4.4). Verificacao "
+        "pulada quando o catalogo nao publica o valor (shear_adm_kn=0) — "
+        "pendencia 17, mesmo padrao backward-compat do EI."
+    ),
+    severity="error",
+)
+
+
+def _verify_vm_grid_shear(project: "RuleProject") -> list[Violation]:
+    """Verifica cortante de cada VMSegment contra o admissivel do fabricante.
+
+    Segmentos sem valor de catalogo (``shear_adm_kn <= 0``) tem
+    ``passes_shear=True`` por construcao (verificacao pulada no builder).
+    """
+    violations: list[Violation] = []
+    for slab in project.slab_panels:
+        grid = getattr(slab, "vm_grid", None)
+        if grid is None:
+            continue
+        segments = getattr(grid, "segments", [])
+        for seg in segments:
+            if getattr(seg, "passes_shear", True):
+                continue
+            label = slab.label or "?"
+            violations.append(Violation(
+                rule_id="STRUCT-006",
+                severity="error",
+                message=(
+                    f"Laje '{label}': VM {seg.role} {seg.model} L={seg.length_mm}mm "
+                    f"vao={seg.span_m:.2f}m com V={seg.shear_kn:.2f} kN > "
+                    f"V_adm={seg.shear_adm_kn:.2f} kN (utilizacao "
+                    f"{seg.utilization*100:.0f}%)"
+                ),
+                element_id=label,
+                location=(
+                    (seg.start[0] + seg.end[0]) / 2,
+                    (seg.start[1] + seg.end[1]) / 2,
+                ),
+                actual_value=round(seg.shear_kn, 3),
+                limit_value=round(seg.shear_adm_kn, 3),
+            ))
+    return violations
+
+
+REGISTRY.register(_STRUCT_006, _verify_vm_grid_shear)

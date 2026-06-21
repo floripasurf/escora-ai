@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  REFERÊNCIA do launchd unit do engine no Mac Mini (raphaels-mac-mini).
+  Este unit JÁ EXISTE em produção (com.escora.engine) — este arquivo serve para
+  conferir/recriar em caso de perda. Confirme os caminhos reais na máquina.
+
+  KeepAlive + RunAtLoad = auto-restart no crash/boot. ESCORA_DATA_DIR absoluto
+  evita cair no ./data relativo ao CWD. Há um unit irmão com.escora.tunnel
+  (cloudflared) para o Cloudflare Tunnel.
+
+    cp scripts/ops/com.escora.engine.plist ~/Library/LaunchAgents/
+    launchctl load -w ~/Library/LaunchAgents/com.escora.engine.plist
+    launchctl list | grep escora
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.escora.engine</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/USER/escora-ai</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/USER/escora-ai/.venv/bin/uvicorn</string>
+        <string>api.main:app</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
+        <string>--port</string>
+        <string>8020</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>ESCORA_DATA_DIR</key>
+        <string>/Users/USER/escora-data</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/USER/escora-data/logs/engine.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/USER/escora-data/logs/engine.err.log</string>
+</dict>
+</plist>

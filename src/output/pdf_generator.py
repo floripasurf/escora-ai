@@ -15,6 +15,7 @@ from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable,
     PageBreak, KeepTogether,
 )
+from src.models.methodology import describe_methodology
 from src.output.report_data import ReportData
 from src.utils.constants import (
     GAMMA_CONCRETO, GAMMA_F, Q_SOBRECARGA_DEFAULT, Q_FORMA_DEFAULT,
@@ -37,6 +38,42 @@ ACCENT_BG = colors.HexColor("#EBF5FB")
 OK_COLOR = colors.HexColor("#27AE60")
 WARN_COLOR = colors.HexColor("#F39C12")
 FAIL_COLOR = colors.HexColor("#E74C3C")
+
+
+# Disclaimer obrigatorio (Orguel p.60) — AGENTS.md "Engineering Sign-off".
+# Nao remover/ocultar: a saida e um RASCUNHO AUDITAVEL, nao um projeto final.
+DISCLAIMER_ORGUEL_P60 = (
+    "Este projeto é uma SUGESTÃO da Engenharia de Aplicação. A "
+    "responsabilidade quanto à sua utilização fica a cargo do engenheiro "
+    "responsável pela obra ou engenheiro calculista da estrutura. Este "
+    "documento é um rascunho auditável gerado automaticamente e NÃO substitui "
+    "a aprovação de um engenheiro registrado no CREA (ART/RRT)."
+)
+
+# Bloco ART em branco, preenchido pelo engenheiro responsavel na obra.
+ART_BLOCK_LINES = [
+    "RESPONSABILIDADE TÉCNICA (preencher)",
+    "Engenheiro responsável: ______________________________________",
+    "CREA nº: ____________________   ART/RRT nº: ____________________",
+    "Data: ____/____/______    Assinatura: ________________________",
+]
+
+
+def _disclaimer_art_flowables(styles):
+    """Flowables com o disclaimer Orguel p.60 + bloco ART em branco.
+
+    Anexado ao final de TODO PDF entregue (relatorio e memoria de calculo).
+    """
+    flow = [
+        Spacer(1, 10 * mm),
+        HRFlowable(width="100%", thickness=0.6, color=colors.grey),
+        Paragraph("AVISO E RESPONSABILIDADE TÉCNICA", styles["SectionTitle"]),
+        Paragraph(f"<i>{DISCLAIMER_ORGUEL_P60}</i>", styles["Normal"]),
+        Spacer(1, 4 * mm),
+    ]
+    for line in ART_BLOCK_LINES:
+        flow.append(Paragraph(line, styles["Normal"]))
+    return flow
 
 
 def _styles():
@@ -116,6 +153,7 @@ def generate_pdf(report: ReportData, output_path: str) -> str:
         f"Projeto: {report.project_name} &nbsp;&nbsp;|&nbsp;&nbsp; Data: {report.date}",
         styles["Normal"],
     ))
+    elements.append(Paragraph(describe_methodology(report.methodology), styles["Normal"]))
     elements.append(Spacer(1, 8 * mm))
 
     # === SUMMARY ===
@@ -197,6 +235,9 @@ def generate_pdf(report: ReportData, output_path: str) -> str:
             else:
                 elements.append(Paragraph(f"• {w}", styles["WarningText"]))
 
+    # Disclaimer Orguel p.60 + bloco ART (obrigatorio em todo PDF entregue).
+    elements.extend(_disclaimer_art_flowables(styles))
+
     doc.build(elements)
     return output_path
 
@@ -239,6 +280,7 @@ def generate_memoria_calculo(report: ReportData, output_path: str) -> str:
         f"Projeto: {report.project_name} &nbsp;|&nbsp; Data: {report.date}",
         styles["Normal"],
     ))
+    el.append(Paragraph(describe_methodology(report.methodology), styles["Normal"]))
     el.append(Spacer(1, 4 * mm))
     el.append(HRFlowable(width="100%", thickness=1, color=HEADER_BG))
     el.append(Spacer(1, 6 * mm))
@@ -478,13 +520,8 @@ def generate_memoria_calculo(report: ReportData, output_path: str) -> str:
             style = styles["ErrorText"] if w.startswith("ERRO:") else styles["WarningText"]
             el.append(Paragraph(f"• {w}", style))
 
-    el.append(Spacer(1, 12 * mm))
-    el.append(HRFlowable(width="100%", thickness=0.5, color=colors.grey))
-    el.append(Paragraph(
-        "<i>Documento gerado automaticamente por Escora.AI — "
-        "sujeito à validação do engenheiro responsável.</i>",
-        styles["Normal"],
-    ))
+    # Disclaimer Orguel p.60 + bloco ART em branco (AGENTS.md sign-off).
+    el.extend(_disclaimer_art_flowables(styles))
 
     doc.build(el)
     return output_path
@@ -540,10 +577,15 @@ def generate_orcamento(report: ReportData, output_path: str,
     el.append(Spacer(1, 6 * mm))
 
     # --- PROPOSAL INFO ---
+    # Rastreabilidade (§28.9): metodologia tambem no orcamento (artefato baixavel).
+    # describe_methodology ja prefixa "Metodologia: " — removido aqui pois o rotulo
+    # da coluna ja diz "Metodologia:".
+    metodologia_txt = describe_methodology(report.methodology).removeprefix("Metodologia: ")
     info_data = [
         ["Projeto:", report.project_name],
         ["Cliente:", client_name or "(a definir)"],
         ["Data:", today],
+        ["Metodologia:", metodologia_txt],
         ["Validade:", f"{validity_days} dias"],
         ["Prazo de entrega:", f"{delivery_days} dias úteis"],
         ["Período de locação:", f"{rental_period_days} dias"],
