@@ -518,7 +518,7 @@ def _recalc_beam_loads(br: BeamShoringResult) -> None:
     total_load = br.total_linear_load_kn_m * beam_length
     load_per = total_load / len(br.shores)
     cap = br.selected_shore.load_capacity_kn if br.selected_shore else 1.0
-    util = load_per / cap
+    util = load_per / cap if cap else 0.0
     for s in br.shores:
         s.load_applied_kn = round(load_per, 2)
         s.utilization_ratio = round(min(util, 1.0), 4)
@@ -530,7 +530,7 @@ def _recalc_slab_loads(sr: SlabShoringResult) -> None:
         return
     load_per = sr.total_load_kn / len(sr.shores)
     cap = sr.selected_shore.load_capacity_kn if sr.selected_shore else 1.0
-    util = load_per / cap
+    util = load_per / cap if cap else 0.0
     for s in sr.shores:
         s.load_applied_kn = round(load_per, 2)
         s.utilization_ratio = round(min(util, 1.0), 4)

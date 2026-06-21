@@ -322,7 +322,9 @@ def degenerate_result_review_reason(calculation) -> Optional[str]:
     results = list(getattr(calculation, "slab_results", []) or []) + list(
         getattr(calculation, "beam_results", []) or []
     )
-    total_shores = sum(int(getattr(r, "shore_count", 0) or 0) for r in results)
+    # len(shores) é o sinal confiável (lista sempre presente); shore_count pode
+    # vir 0 mesmo com escoras reais (falso-positivo visto no 105475).
+    total_shores = sum(len(getattr(r, "shores", []) or []) for r in results)
     if volume <= 0 or total_shores <= 0:
         return (
             "Resultado vazio: nenhum escoramento dimensionado (0 escoras ou "

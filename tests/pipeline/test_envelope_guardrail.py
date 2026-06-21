@@ -55,28 +55,34 @@ def test_none_calculation_no_review():
 
 # --- Gap: resultado vazio / 0 escoras (ex.: 110749 = 0 lajes/0 vigas/0 volume) ---
 
-def _calc_n(volume_m3, slab_counts=(), beam_counts=()):
+def _result(n_shores=0, weight=0.0, shore_count=None):
     from types import SimpleNamespace as NS
     return NS(
-        total_volume_m3=volume_m3,
-        slab_results=[NS(shore_count=c) for c in slab_counts],
-        beam_results=[NS(shore_count=c) for c in beam_counts],
+        shores=[NS() for _ in range(n_shores)],
+        shore_count=(shore_count if shore_count is not None else n_shores),
+        shores_weight_kg=weight,
     )
 
 
+def _calc_d(volume_m3, slabs=(), beams=()):
+    from types import SimpleNamespace as NS
+    return NS(total_volume_m3=volume_m3, slab_results=list(slabs), beam_results=list(beams))
+
+
 def test_degenerate_zero_volume_flags():
-    assert degenerate_result_review_reason(_calc_n(0.0)) is not None
+    assert degenerate_result_review_reason(_calc_d(0.0)) is not None
 
 
-def test_degenerate_zero_shores_flags():
-    # tem painel, mas 0 escoras dimensionadas
-    assert degenerate_result_review_reason(_calc_n(100.0, slab_counts=[0])) is not None
+def test_degenerate_no_results_flags():
+    # volume > 0 mas nenhum painel/escora dimensionada (ex.: 110749)
+    assert degenerate_result_review_reason(_calc_d(100.0)) is not None
 
 
-def test_normal_result_not_degenerate():
-    assert degenerate_result_review_reason(
-        _calc_n(100.0, slab_counts=[10], beam_counts=[4])
-    ) is None
+def test_degenerate_real_result_not_flagged_even_if_shore_count_zero():
+    # Regressão 105475: tem volume, peso e 36 escoras na lista, mas shore_count=0.
+    # Não pode ser classificado como "vazio" (falso-positivo do diagnóstico codex).
+    calc = _calc_d(1484.7, slabs=[_result(n_shores=36, weight=5686.0, shore_count=0)])
+    assert degenerate_result_review_reason(calc) is None
 
 
 def test_degenerate_none_calc_no_flag():
