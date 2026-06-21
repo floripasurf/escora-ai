@@ -270,6 +270,43 @@ def _detect_coordinate_scale(parse) -> float:
         return scale
 
 
+def envelope_review_reason(
+    calculation, low: float = 12.0, high: float = 16.0
+) -> Optional[str]:
+    """Retorna um motivo de revisão se o consumo kg/m³ ficar fora de [low, high].
+
+    AGENTS.md: o envelope kg/m³ e o gate de validacao mais importante; projetos
+    fora dele devem ser sinalizados para revisao ANTES da saida. Aqui isso vira
+    um `requires_review` (nao bloqueia a geracao, mas impede que um resultado
+    sub/superdimensionado seja entregue como calculo confiavel). Espelha a
+    formula de tests/regression/test_envelope.py.
+
+    Retorna None quando nao da para avaliar (sem calculo, volume<=0 ou peso<=0).
+    """
+    if calculation is None:
+        return None
+    volume = getattr(calculation, "total_volume_m3", 0.0) or 0.0
+    if volume <= 0:
+        return None
+    weight = sum(
+        getattr(sr, "shores_weight_kg", 0.0) or 0.0
+        for sr in getattr(calculation, "slab_results", [])
+    ) + sum(
+        getattr(br, "shores_weight_kg", 0.0) or 0.0
+        for br in getattr(calculation, "beam_results", [])
+    )
+    if weight <= 0:
+        return None
+    kg_m3 = weight / volume
+    if low <= kg_m3 <= high:
+        return None
+    return (
+        f"Consumo de escoramento {kg_m3:.1f} kg/m³ fora do envelope esperado "
+        f"[{low:.0f}, {high:.0f}] kg/m³ — possivel sub/superdimensionamento. "
+        "Revisao de engenharia obrigatoria antes do uso do resultado."
+    )
+
+
 def run_pipeline(
     filepath: str,
     scale_override: Optional[float] = None,
@@ -621,6 +658,14 @@ def run_pipeline(
                 f"Caso especial ({structural_system.system.value}): revisao de "
                 "engenharia obrigatoria antes do uso do resultado."
             )
+
+    # Guardrail kg/m³ (AGENTS.md): consumo fora de [12,16] indica possivel
+    # sub/superdimensionamento — flag para revisao em vez de entregar como
+    # calculo confiavel. Nao bloqueia a geracao; alerta a UI/API.
+    _env_reason = envelope_review_reason(result.calculation)
+    if _env_reason:
+        result.requires_review = True
+        result.review_reasons.append(_env_reason)
 
     # Rastreabilidade (§28.9): registra qual metodologia gerou este resultado.
     # Inclui o perfil cru + os parametros EFETIVOS aplicados no calculo e a
