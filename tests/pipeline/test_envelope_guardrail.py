@@ -34,9 +34,11 @@ def test_consumption_diagnostics_values_and_basis():
     calc = _calc(100.0, slabs=[_result(n_shores=50, weight=600.0, area=60.0)])
     d = consumption_diagnostics(calc)
     assert d["basis"] == "vertical_shores_over_shored_volume"
-    assert d["vertical_kg_m3"] == 6.0           # 600 / 100
+    assert d["vertical_kg_m3"] == 6.0                 # 600 / 100 (volume escorado)
     assert d["total_shores"] == 50
-    assert d["shores_per_m2"] == round(50 / 60, 3)
+    # nomes explícitos: área é só de lajes, peso/escoras inclui vigas (#3 codex)
+    assert d["shores_per_slab_m2"] == round(50 / 60, 3)
+    assert d["vertical_kg_per_slab_m2"] == round(600 / 60, 2)
     assert d["total_volume_m3"] == 100.0
 
 
@@ -64,6 +66,15 @@ def test_degenerate_real_result_not_flagged_even_if_shore_count_zero():
     # Regressão 105475: tem volume, peso e 36 escoras na lista, mas shore_count=0.
     calc = _calc(1484.7, slabs=[_result(n_shores=36, weight=5686.0, shore_count=0)])
     assert degenerate_result_review_reason(calc) is None
+
+
+def test_degenerate_shores_but_zero_weight_flags():
+    # Gap codex #4 (ex.: 101112 = 225 escoras, peso 0 por catálogo/inventário):
+    # escoras posicionadas mas peso/BOM não calculável → revisão.
+    calc = _calc(100.0, slabs=[_result(n_shores=225, weight=0.0, area=60.0)])
+    reason = degenerate_result_review_reason(calc)
+    assert reason is not None
+    assert "peso" in reason.lower() or "bom" in reason.lower()
 
 
 def test_degenerate_none_calc_no_flag():

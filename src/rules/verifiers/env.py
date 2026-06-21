@@ -22,7 +22,7 @@ _ENV_001 = Rule(
         ref="Engineer Q&A #8",
         calibration="Orguel 2026-04-07 (n=12)",
     ),
-    description_pt="kg/m³ total no envelope [12, 16]",
+    description_pt="[DESABILITADA até recalibração Orguel] kg/m³ no envelope [12,16]",
     severity="warning",
 )
 

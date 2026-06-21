@@ -488,9 +488,9 @@ CONSUMPTION_RATE_ACCEPTABLE_MAX_KG_M3 = 20.0
 def _consumption_rate_warnings(
     rows: List[ConsumptionByHeightRow],
 ) -> List[str]:
-    """Validate rate_kg_m3_bruto vs Orguel expected ranges.
+    """[DEPRECATED — NÃO CHAMAR] Validate rate_kg_m3_bruto vs Orguel ranges.
 
-    ⚠️ ATUALMENTE NÃO LIGADO ao relatório (ver build_report_data): a banda
+    ⚠️ NÃO LIGAR sem recalibrar a banda antes (ver build_report_data): a banda
     [8,20]/[12,16] não casa com a base do motor (vertical / volume escorado) e
     falso-positivava até projeto normal (CFL=6.7, CVS=5.1). Mantido com os
     thresholds para a recalibração futura contra a referência Orguel; re-ligar

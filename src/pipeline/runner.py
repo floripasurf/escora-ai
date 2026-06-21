@@ -293,8 +293,9 @@ def consumption_diagnostics(calculation) -> dict:
     area = sum(getattr(s, "area_m2", 0.0) or 0.0 for s in slabs)
     return {
         "vertical_kg_m3": round(weight / vol, 2) if vol else None,
-        "vertical_kg_m2": round(weight / area, 2) if area else None,
-        "shores_per_m2": round(n_shores / area, 3) if area else None,
+        # área é só de lajes; peso/escoras inclui vigas — nome deixa explícito.
+        "vertical_kg_per_slab_m2": round(weight / area, 2) if area else None,
+        "shores_per_slab_m2": round(n_shores / area, 3) if area else None,
         "total_shores": n_shores,
         "total_vertical_weight_kg": round(weight, 1),
         "total_volume_m3": round(vol, 2),
@@ -325,6 +326,14 @@ def degenerate_result_review_reason(calculation) -> Optional[str]:
             "Resultado vazio: nenhum escoramento dimensionado (0 escoras ou "
             "volume nulo) — possivel falha de deteccao do projeto. Revisao de "
             "engenharia obrigatoria."
+        )
+    # Escoras posicionadas mas peso/BOM zerado (catálogo/inventário sem peso —
+    # ex.: 101112): o BOM/consumo não é calculável → resultado não confiável.
+    total_weight = sum(getattr(r, "shores_weight_kg", 0.0) or 0.0 for r in results)
+    if total_weight <= 0:
+        return (
+            "Peso/BOM não calculável: há escoras posicionadas mas peso total = 0 "
+            "(catálogo/inventário sem peso). Revisao de engenharia obrigatoria."
         )
     return None
 
