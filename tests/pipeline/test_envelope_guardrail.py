@@ -15,9 +15,9 @@ from src.pipeline.runner import (
 )
 
 
-def _result(n_shores=0, weight=0.0, area=0.0, shore_count=None):
+def _result(n_shores=0, weight=0.0, area=0.0, shore_count=None, model_weight=11.0):
     return NS(
-        shores=[NS() for _ in range(n_shores)],
+        shores=[NS(shore=NS(weight_kg=model_weight)) for _ in range(n_shores)],
         shore_count=(shore_count if shore_count is not None else n_shores),
         shores_weight_kg=weight,
         area_m2=area,
@@ -40,6 +40,20 @@ def test_consumption_diagnostics_values_and_basis():
     assert d["shores_per_slab_m2"] == round(50 / 60, 3)
     assert d["vertical_kg_per_slab_m2"] == round(600 / 60, 2)
     assert d["total_volume_m3"] == 100.0
+    # base de volume explícita (#2 codex): vertical usa volume líquido escorado
+    assert d["vertical_volume_basis"] == "net_shored_volume"
+
+
+def test_degenerate_mixed_zero_weight_model_flags():
+    # #1 codex: total > 0 mas há modelo de escora com peso 0 no catálogo →
+    # BOM subestimado, deve sinalizar (antes só pegava total == 0).
+    good = _result(n_shores=10, weight=110.0, area=20.0, model_weight=11.0)
+    bad = _result(n_shores=5, weight=0.0, area=20.0, model_weight=0.0)
+    # peso total do calc > 0 (110), mas 'bad' tem modelo sem peso
+    calc = _calc(100.0, slabs=[good, bad])
+    reason = degenerate_result_review_reason(calc)
+    assert reason is not None
+    assert "peso" in reason.lower()
 
 
 def test_consumption_diagnostics_none_calc():

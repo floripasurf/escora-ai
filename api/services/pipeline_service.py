@@ -27,6 +27,28 @@ logger = logging.getLogger(__name__)
 run_pipeline = None
 
 
+def _build_diagnostics(result, report_data) -> dict:
+    """Funde o diagnóstico vertical (runner) com o BOM-parcial (report_data).
+
+    Diagnóstico, NÃO gate. Vertical = peso das escoras / volume LÍQUIDO; BOM
+    parcial = escoras+acessórios / volume BRUTO — bases explícitas p/ não
+    confundir. A banda [12,16] não casa com estas bases (recalibração Orguel =
+    follow-up); por isso nada aqui marca revisão.
+    """
+    diag = dict(getattr(result, "diagnostics", None) or {})
+    ct = getattr(report_data, "consumption_totals", None) or {}
+    diag.update({
+        "bom_partial_kg_m3": ct.get("rate_kg_m3_bruto"),
+        "bom_partial_kg_m2": ct.get("rate_kg_m2"),
+        "bom_partial_total_kg": ct.get("total_kg"),
+        "bom_partial_basis": "shores+accessories_over_gross_volume",
+        "bom_partial_volume_basis": "gross_shored_volume",
+        "total_liquid_volume_m3": ct.get("volume_liquido_m3"),
+        "total_gross_volume_m3": ct.get("volume_bruto_m3"),
+    })
+    return diag
+
+
 def process_dxf(
     input_path: str,
     job_id: str,
@@ -183,18 +205,6 @@ def process_dxf(
     except Exception as e:
         logger.warning(f"Mermaid diagram generation failed (non-fatal): {e}")
 
-    # Diagnóstico kg/m³ (sem alarme): métricas verticais do runner + BOM-parcial
-    # (escoras+acessórios / volume bruto) do report_data. Base explícita; NÃO é
-    # gate — a banda [12,16] não casa com estas bases (recalibração = follow-up).
-    _diag = dict(result.diagnostics or {})
-    _ct = report_data.consumption_totals or {}
-    _diag.update({
-        "bom_partial_kg_m3": _ct.get("rate_kg_m3_bruto"),
-        "bom_partial_kg_m2": _ct.get("rate_kg_m2"),
-        "bom_partial_total_kg": _ct.get("total_kg"),
-        "bom_partial_basis": "shores+accessories_over_gross_volume",
-    })
-
     return {
         "beam_count": len(calc.beam_results),
         "pillar_count": pillar_count,
@@ -203,7 +213,7 @@ def process_dxf(
         "methodology": result.methodology,  # rastreabilidade §28.9
         "requires_review": result.requires_review,  # §5.1 fora de escopo / caso especial
         "review_reasons": result.review_reasons,
-        "diagnostics": _diag,  # vertical (runner) + BOM-parcial (report_data), sem alarme
+        "diagnostics": _build_diagnostics(result, report_data),  # vertical + BOM-parcial, sem alarme
         "warnings": result.warnings[:60],  # Limit warnings (diagnostics first)
         "output_dxf_path": output_dxf,
         "dwg_path": dwg_path,

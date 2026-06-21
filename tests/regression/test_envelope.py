@@ -36,7 +36,14 @@ def test_kg_per_m3_sanity(calibration_dxf):
         getattr(br, 'shores_weight_kg', 0.0) for br in calc.beam_results
     )
     if total_weight <= 0:
-        pytest.skip(f"{project_id}: zero weight (BOM not populated)")
+        # Peso/BOM não calculável agora é condição de REVISÃO (não skip) — #6
+        # codex: há volume/escoras mas peso 0 (catálogo/inventário) → o pipeline
+        # deve marcar requires_review em vez de passar silencioso.
+        assert result.requires_review, (
+            f"{project_id}: peso total = 0 com volume > 0 deveria marcar "
+            "requires_review (peso/BOM não calculável)"
+        )
+        return
 
     kg_m3 = total_weight / calc.total_volume_m3
     assert SANITY_MIN_KG_M3 <= kg_m3 <= SANITY_MAX_KG_M3, (

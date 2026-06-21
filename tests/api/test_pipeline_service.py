@@ -18,6 +18,26 @@ from src.models.shore import (
 )
 
 
+def test_build_diagnostics_includes_bom_partial_contract():
+    # #4 codex: travar o contrato — process_dxf deve expor vertical + bom_partial.
+    from types import SimpleNamespace as NS
+    from api.services.pipeline_service import _build_diagnostics
+    result = NS(diagnostics={"vertical_kg_m3": 6.0, "basis": "vertical_shores_over_shored_volume"})
+    report_data = NS(consumption_totals={
+        "rate_kg_m3_bruto": 5.1, "rate_kg_m2": 14.0, "total_kg": 10000.0,
+        "volume_liquido_m3": 1400.0, "volume_bruto_m3": 1600.0,
+    })
+    d = _build_diagnostics(result, report_data)
+    for k in (
+        "vertical_kg_m3", "bom_partial_kg_m3", "bom_partial_kg_m2",
+        "bom_partial_total_kg", "bom_partial_basis", "bom_partial_volume_basis",
+        "total_liquid_volume_m3", "total_gross_volume_m3",
+    ):
+        assert k in d, k
+    assert d["bom_partial_kg_m3"] == 5.1
+    assert d["vertical_kg_m3"] == 6.0
+
+
 def test_dwg_conversion_timeout_is_non_fatal(monkeypatch, tmp_path: Path):
     output_dxf = tmp_path / "out.dxf"
     output_dxf.write_text("0\nEOF\n", encoding="utf-8")
