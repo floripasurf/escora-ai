@@ -87,6 +87,28 @@ class TestLinearDistribution:
         assert len(shores) >= 1
 
 
+class TestZeroCapacityShoreGuard:
+    """Escora com load_capacity_kn==0 (ex.: entrada sintetica/custom) nao deve
+    causar ZeroDivisionError — bug visto no projeto 101112 (diagnostico codex)."""
+
+    def _zero_cap_shore(self):
+        return _make_shore().model_copy(update={"load_capacity_kn": 0.0})
+
+    def test_distribute_linear_no_zerodivision(self):
+        slab = _make_slab([(0, 0), (10, 0), (10, 1.5), (0, 1.5)])  # corredor → _distribute_linear
+        shores, *_ = _distribute_linear(slab, self._zero_cap_shore(), 50.0, 1.1)
+        assert len(shores) >= 1
+        assert all(s.utilization_ratio == 0.0 for s in shores)
+
+    def test_distribute_shores_wide_grid_no_zerodivision(self):
+        slab = _make_slab([(0, 0), (5, 0), (5, 5), (0, 5)])  # largo → grid (linha 376)
+        shores, *_ = distribute_shores(
+            slab, self._zero_cap_shore(), total_load_kn=50.0, max_spacing=1.1,
+        )
+        assert len(shores) >= 1
+        assert all(s.utilization_ratio == 0.0 for s in shores)
+
+
 class TestDistributeShoresCorridorIntegration:
     def test_narrow_slab_uses_linear_distribution(self):
         """distribute_shores should detect a narrow slab and use linear mode."""

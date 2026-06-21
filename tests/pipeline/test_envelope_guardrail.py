@@ -7,7 +7,10 @@ resultado passa a ser marcado para revisão, em vez de entregue como confiável.
 
 from types import SimpleNamespace
 
-from src.pipeline.runner import envelope_review_reason
+from src.pipeline.runner import (
+    envelope_review_reason,
+    degenerate_result_review_reason,
+)
 
 
 def _calc(volume_m3, slab_weights=(), beam_weights=()):
@@ -48,3 +51,33 @@ def test_no_weight_no_review():
 
 def test_none_calculation_no_review():
     assert envelope_review_reason(None) is None
+
+
+# --- Gap: resultado vazio / 0 escoras (ex.: 110749 = 0 lajes/0 vigas/0 volume) ---
+
+def _calc_n(volume_m3, slab_counts=(), beam_counts=()):
+    from types import SimpleNamespace as NS
+    return NS(
+        total_volume_m3=volume_m3,
+        slab_results=[NS(shore_count=c) for c in slab_counts],
+        beam_results=[NS(shore_count=c) for c in beam_counts],
+    )
+
+
+def test_degenerate_zero_volume_flags():
+    assert degenerate_result_review_reason(_calc_n(0.0)) is not None
+
+
+def test_degenerate_zero_shores_flags():
+    # tem painel, mas 0 escoras dimensionadas
+    assert degenerate_result_review_reason(_calc_n(100.0, slab_counts=[0])) is not None
+
+
+def test_normal_result_not_degenerate():
+    assert degenerate_result_review_reason(
+        _calc_n(100.0, slab_counts=[10], beam_counts=[4])
+    ) is None
+
+
+def test_degenerate_none_calc_no_flag():
+    assert degenerate_result_review_reason(None) is None

@@ -140,7 +140,12 @@ def _distribute_linear(
     # Recalculate loads
     if shores:
         load_per_shore = total_load_kn / len(shores)
-        utilization = load_per_shore / shore.load_capacity_kn
+        # Guarda: escora com capacidade 0 (entrada sintetica/custom) nao deve
+        # causar ZeroDivisionError; usa o default 0.0 da propria funcao.
+        utilization = (
+            load_per_shore / shore.load_capacity_kn
+            if shore.load_capacity_kn else 0.0
+        )
         for s in shores:
             s.load_applied_kn = round(load_per_shore, 2)
             s.utilization_ratio = round(utilization, 4)
@@ -373,7 +378,12 @@ def distribute_shores(
     # Recalcular carga com número efetivo de escoras
     if shores:
         load_per_shore = total_load_kn / len(shores)
-        utilization = load_per_shore / shore.load_capacity_kn
+        # Guarda: escora com capacidade 0 (entrada sintetica/custom) nao deve
+        # causar ZeroDivisionError; usa o default 0.0 da propria funcao.
+        utilization = (
+            load_per_shore / shore.load_capacity_kn
+            if shore.load_capacity_kn else 0.0
+        )
         for s in shores:
             s.load_applied_kn = round(load_per_shore, 2)
             s.utilization_ratio = round(utilization, 4)

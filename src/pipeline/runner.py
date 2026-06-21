@@ -307,6 +307,31 @@ def envelope_review_reason(
     )
 
 
+def degenerate_result_review_reason(calculation) -> Optional[str]:
+    """Retorna motivo de revisao quando o calculo rodou mas o resultado e vazio.
+
+    Ex.: projeto 110749 conclui com 0 lajes/0 vigas/0 volume — sairia como job
+    'concluido' com 0 escoras e requires_review=False. Aqui marcamos para
+    revisao em vez de entregar um resultado vazio como se fosse valido.
+
+    Retorna None para calculo ausente (esse caminho ja vira erro de job).
+    """
+    if calculation is None:
+        return None
+    volume = getattr(calculation, "total_volume_m3", 0.0) or 0.0
+    results = list(getattr(calculation, "slab_results", []) or []) + list(
+        getattr(calculation, "beam_results", []) or []
+    )
+    total_shores = sum(int(getattr(r, "shore_count", 0) or 0) for r in results)
+    if volume <= 0 or total_shores <= 0:
+        return (
+            "Resultado vazio: nenhum escoramento dimensionado (0 escoras ou "
+            "volume nulo) — possivel falha de deteccao do projeto. Revisao de "
+            "engenharia obrigatoria."
+        )
+    return None
+
+
 def run_pipeline(
     filepath: str,
     scale_override: Optional[float] = None,
@@ -666,6 +691,12 @@ def run_pipeline(
     if _env_reason:
         result.requires_review = True
         result.review_reasons.append(_env_reason)
+
+    # Resultado vazio (0 escoras / volume nulo) tambem exige revisao.
+    _empty_reason = degenerate_result_review_reason(result.calculation)
+    if _empty_reason:
+        result.requires_review = True
+        result.review_reasons.append(_empty_reason)
 
     # Rastreabilidade (§28.9): registra qual metodologia gerou este resultado.
     # Inclui o perfil cru + os parametros EFETIVOS aplicados no calculo e a
