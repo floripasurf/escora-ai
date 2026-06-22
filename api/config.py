@@ -5,15 +5,20 @@ All persistent paths derive from a single `data_dir` root, resolved from
 In production that root is `/data` (Fly volume); locally it's `./data`.
 """
 
+import logging
 import os
 from pathlib import Path
 
 from pydantic_settings import BaseSettings
 
+_logger = logging.getLogger(__name__)
+
+_REDIS_DEV_DEFAULT = "redis://localhost:6379"
+
 
 class Settings(BaseSettings):
     database_url: str = "sqlite:///./escora.db"  # legacy, unused
-    redis_url: str = "redis://localhost:6379"
+    redis_url: str = _REDIS_DEV_DEFAULT
     default_tenant_id: str = "pilot"
     # Hard cap on uploaded DXF size. ezdxf can expand a compressed DXF
     # 10-50x in RAM (entity graph + lookup tables); on a 2 GB VM anything
@@ -60,3 +65,12 @@ class Settings(BaseSettings):
 
 settings = Settings()
 settings.ensure_dirs()
+
+# Defensive: when running in production, the localhost Redis default almost
+# certainly means a missed env var. Warn loudly so it shows up in deploy logs.
+if os.environ.get("ESCORA_ENV", "").lower() == "prod" and settings.redis_url == _REDIS_DEV_DEFAULT:
+    _logger.warning(
+        "ESCORA_ENV=prod but REDIS_URL still defaults to %s — set REDIS_URL "
+        "before any background-job work.",
+        _REDIS_DEV_DEFAULT,
+    )

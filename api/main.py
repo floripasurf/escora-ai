@@ -1,6 +1,7 @@
 """FastAPI application — Escora.AI SaaS MVP."""
 
 import logging
+import os
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -22,9 +23,23 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Escora.AI", version="0.3.0")
 
+
+def _cors_origins() -> list[str]:
+    """Comma-separated allowlist from ``CORS_ALLOWED_ORIGINS``.
+
+    Defaults to common localhost dev origins when the env var is unset,
+    so dev keeps working but production must opt-in explicitly.
+    """
+    raw = os.environ.get("CORS_ALLOWED_ORIGINS", "").strip()
+    if not raw:
+        return ["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000"]
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins(),
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -77,13 +92,13 @@ def _startup() -> None:
 
 @app.get("/api/v1/health")
 def health():
-    jobs = job_service.all_jobs()
-    return {
-        "status": "ok",
-        "jobs_count": len(jobs),
-        "version": "0.3.0",
-        "data_dir": str(settings.data_root),
-    }
+    """Public liveness probe — intentionally minimal.
+
+    Operational details (job counts, data_dir, queue stats) belong behind an
+    authenticated diagnostics endpoint, not in a public probe that load
+    balancers and uptime monitors hit anonymously.
+    """
+    return {"status": "ok", "version": "0.3.0"}
 
 
 @app.get("/")
