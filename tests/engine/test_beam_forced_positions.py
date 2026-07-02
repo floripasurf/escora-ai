@@ -5,7 +5,6 @@ The pipeline computes beam-beam intersections that lack a pillar and feeds
 them as `forced_positions` to the shore distributor, which must guarantee
 one shore within tolerance of each forced point.
 """
-import pytest
 
 from src.engine.beam_calculator import distribute_beam_shores
 from src.models.shore import ShoreCatalogEntry

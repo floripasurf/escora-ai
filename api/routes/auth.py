@@ -10,7 +10,7 @@ Login flow:
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel
 
 from src.auth.branches import (
@@ -24,7 +24,6 @@ from src.auth.branches import (
     revoke_session,
 )
 from src.models.methodology import load_methodology
-from api.deps import get_current_branch
 from api.services.methodology_view import serialize_profile
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])

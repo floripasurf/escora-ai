@@ -1,6 +1,5 @@
 """Test calculation result models."""
 
-import pytest
 from shapely.geometry import box
 from src.models.calculation_models import (
     BeamShoringResult, SlabShoringResult, CalculationResult,

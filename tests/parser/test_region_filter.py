@@ -11,8 +11,7 @@ from src.parser.region_filter import (
     MIN_REGION_FILTER_CENTROIDS,
 )
 from src.pipeline.stage_parse import (
-    TextEntity, SegmentEntity, PolylineEntity, HatchEntity,
-    RectEntity, CircleEntity, DimensionEntity,
+    TextEntity, SegmentEntity, PolylineEntity, RectEntity,
 )
 
 

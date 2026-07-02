@@ -9,9 +9,8 @@ Usage:
 """
 
 import logging
-import math
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
 
 import numpy as np

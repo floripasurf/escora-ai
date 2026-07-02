@@ -1,12 +1,12 @@
 """Design preview endpoint — synchronous layout generation for real-time editing."""
 
 import logging
-from typing import Optional, List
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from src.models.masonry import DesignInput, SiteAnalysis
+from src.models.masonry import DesignInput
 from src.layout.solver import solve_layout_interactive
 from src.utils.masonry_constants import MIN_ROOM_AREAS, MIN_ROOM_DIMENSION
 from api.services.project_pipeline_service import _build_preview

@@ -19,13 +19,12 @@ import math
 from dataclasses import dataclass
 from typing import List, Literal, Optional
 
-from src.models.masonry import Foundation, FoundationType, FloorPlan, Wall
+from src.models.masonry import Foundation, FoundationType, FloorPlan
 from src.utils.masonry_constants import (
     SOLO_CAPACIDADE_PADRAO,
     SAPATA_LARGURA_MIN, SAPATA_PROFUNDIDADE_MIN, SAPATA_ALTURA_MIN,
     SAPATA_ARMADURA_PADRAO,
     RADIER_ESPESSURA_MIN, RADIER_ARMADURA_PADRAO,
-    GAMMA_F,
 )
 
 logger = logging.getLogger(__name__)

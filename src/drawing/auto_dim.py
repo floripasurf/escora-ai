@@ -15,10 +15,8 @@ Usage:
     auto_dimension_plan(sheet, model)
 """
 
-import math
 import logging
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from typing import List, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -314,7 +312,7 @@ def auto_dimension_section(
     mark_x = ox + x_max + 1.2
 
     # Floor level
-    sheet.add_text((mark_x, oy), f"\u00B10,00", height=th)
+    sheet.add_text((mark_x, oy), "\u00B10,00", height=th)
 
     # Ceiling level
     sheet.add_text(

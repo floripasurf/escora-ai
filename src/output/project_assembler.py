@@ -10,7 +10,7 @@ Gera um arquivo ZIP contendo:
 import logging
 import zipfile
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 
 logger = logging.getLogger(__name__)
 

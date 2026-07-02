@@ -9,7 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
-from shapely.geometry import Polygon
 
 
 class IncompleteDataError(Exception):
@@ -124,6 +123,9 @@ class RuleProject:
     total_volume_m3: float = 0.0
     total_shores_weight_kg: float = 0.0
     pe_direito_m: float = 2.80
+    # Como a escala coordenada->metros foi determinada (PipelineResult.scale_method):
+    # insunits/dimension/range/override = confiavel; text/default = fallback.
+    scale_method: str = ""
     # --- Manual §26 items 9 e 10: bloco opcional de reescoramento ---
     reescoramento_data: Optional[ReescoramentoData] = None
     desforma_dias: Optional[int] = None
@@ -255,6 +257,7 @@ class RuleProject:
             total_volume_m3=calc.total_volume_m3,
             total_shores_weight_kg=total_weight,
             pe_direito_m=calc.pe_direito_m,
+            scale_method=getattr(result, "scale_method", ""),
             reescoramento_data=reescoramento,
             desforma_dias=desforma_dias,
             desforma_justificativa=desforma_just,

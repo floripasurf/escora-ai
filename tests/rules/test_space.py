@@ -1,5 +1,4 @@
 """Tests for spacing rules SPACE-001 and SPACE-002."""
-import pytest
 
 from src.rules.verifiers.space import _verify_slab_spacing, _verify_cruzeta_spacing
 from tests.rules.conftest import make_beam, make_project, make_shore, make_slab, rect

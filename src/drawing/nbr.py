@@ -3,9 +3,9 @@
 Consolidates all ABNT/NBR rules into typed constants used by the drawing engine.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Tuple, Optional
+from typing import List, Tuple
 
 
 # ---------------------------------------------------------------------------

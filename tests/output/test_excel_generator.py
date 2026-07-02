@@ -1,15 +1,12 @@
 """Smoke tests for Excel report generation."""
 
-import pytest
 import os
-from pathlib import Path
 from openpyxl import load_workbook
 from src.output.excel_generator import generate_excel
 from src.output.report_data import (
-    ReportData, ReportMetadata, SummaryData,
-    BeamRow, SlabRow, BomRow, build_report_data,
+    ReportData, SummaryData,
+    BeamRow, SlabRow, BomRow,
 )
-from src.models.calculation_models import CalculationResult
 
 
 def _empty_report():

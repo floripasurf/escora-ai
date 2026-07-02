@@ -1,0 +1,28 @@
+name: Nightly (slow + regression)
+
+on:
+  schedule:
+    - cron: "0 3 * * *"  # 03:00 UTC = 00:00 BRT
+  workflow_dispatch:
+
+jobs:
+  slow:
+    name: pytest (slow + regression)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      # A suíte @slow inclui tests/regression (test_pipeline_runs +
+      # test_envelope). No runner hospedado só existem as fixtures commitadas
+      # em tests/fixtures/*.DXF — os DXFs de clientes (input/, gitignored)
+      # rodam apenas nas máquinas de dev. Cobertura parcial consciente.
+      - name: Run slow suite (inclui regressão)
+        run: pytest -m slow -q

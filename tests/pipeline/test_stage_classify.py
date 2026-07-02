@@ -1,4 +1,3 @@
-import pytest
 from src.pipeline.stage_segment import LevelSegment
 from src.pipeline.stage_parse import SegmentEntity, RectEntity, TextEntity
 from src.pipeline.stage_classify import classify_elements

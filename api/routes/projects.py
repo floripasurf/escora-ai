@@ -16,7 +16,7 @@ import multiprocessing as mp
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional
 
 from api.config import settings
 from api.services.project_pipeline_service import process_project

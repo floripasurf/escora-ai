@@ -1,5 +1,4 @@
 """Tests for load rules LOAD-001 through LOAD-004."""
-import pytest
 
 from src.rules.project import LoadParams
 from src.rules.verifiers.load import (

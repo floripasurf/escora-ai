@@ -6,7 +6,6 @@ from src.utils.labels import (
     CATEGORY_DEFAULT,
     CATEGORY_LABELS_PT,
     classify_layer,
-    extract_room_hint,
     extract_structural_name,
 )
 

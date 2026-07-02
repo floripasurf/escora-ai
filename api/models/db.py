@@ -1,7 +1,7 @@
 """SQLAlchemy models for Escora.AI."""
 
-from sqlalchemy import Column, String, Float, Integer, JSON, DateTime, Enum as SAEnum, create_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy import Column, String, Float, Integer, JSON, DateTime, Enum as SAEnum
+from sqlalchemy.orm import declarative_base
 from datetime import datetime
 import enum
 

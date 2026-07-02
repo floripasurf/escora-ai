@@ -1,7 +1,5 @@
-import pytest
 from src.parser.text_classifier import (
     classify_text, extract_section, extract_thickness,
-    TextClassification,
 )
 from src.models.pipeline_models import ElementType
 

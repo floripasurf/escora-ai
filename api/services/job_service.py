@@ -23,7 +23,7 @@ import sqlite3
 import threading
 import uuid
 from datetime import datetime, timedelta
-from typing import Any, Iterable, List, Optional
+from typing import Any, List, Optional
 
 from api.config import settings
 

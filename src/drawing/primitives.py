@@ -6,16 +6,13 @@ for line types, text height, arrow styles, and hatching patterns.
 
 import math
 from dataclasses import dataclass, field
-from typing import List, Tuple, Optional, Sequence
+from typing import List, Tuple, Optional
 
 import ezdxf
-from ezdxf.entities import DXFGraphic
-from ezdxf.math import Vec2
 
 from .nbr import (
-    DimensionMethod, DimensionTerminator, DimensionRules,
-    HatchMaterial, LetteringStyle, LineType, Scale,
-    mm_to_lineweight,
+    DimensionTerminator, DimensionRules,
+    HatchMaterial, Scale,
 )
 
 Point2D = Tuple[float, float]

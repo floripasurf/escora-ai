@@ -1,5 +1,4 @@
 """Tests for geometric rules GEOM-001 through GEOM-004."""
-import pytest
 
 from src.rules.verifiers.geom import (
     _verify_column_setback,
@@ -8,7 +7,7 @@ from src.rules.verifiers.geom import (
     _verify_shore_in_polygon,
 )
 from tests.rules.conftest import (
-    make_beam, make_pillar, make_project, make_shore, make_slab, rect,
+    make_pillar, make_project, make_shore, make_slab, rect,
 )
 
 

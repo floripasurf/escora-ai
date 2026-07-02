@@ -10,16 +10,15 @@ from datetime import date
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import mm, cm
+from reportlab.lib.units import mm
 from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable,
-    PageBreak, KeepTogether,
+    KeepTogether,
 )
 from src.models.methodology import describe_methodology
 from src.output.report_data import ReportData
 from src.utils.constants import (
     GAMMA_CONCRETO, GAMMA_F, Q_SOBRECARGA_DEFAULT, Q_FORMA_DEFAULT,
-    ESPESSURA_DEFAULT,
     ESPACAMENTO_MAX_DEFAULT, ESPACAMENTO_MAX_VIGA, ESPACAMENTO_POR_ALTURA,
     CONTRA_FLECHA, DISTANCIA_BORDA_MIN, DISTANCIA_PILAR_MIN,
 )
@@ -147,7 +146,7 @@ def generate_pdf(report: ReportData, output_path: str) -> str:
 
     # === HEADER ===
     elements.append(Paragraph(
-        f"<b>Relatório de Escoramento</b>", styles["Title"],
+        "<b>Relatório de Escoramento</b>", styles["Title"],
     ))
     elements.append(Paragraph(
         f"Projeto: {report.project_name} &nbsp;&nbsp;|&nbsp;&nbsp; Data: {report.date}",
@@ -672,7 +671,7 @@ def generate_orcamento(report: ReportData, output_path: str,
     el.append(Paragraph("3. Resumo Técnico", styles["SectionTitle"]))
     tech_items = [
         f"Total de escoras/torres: {s.total_shores}",
-        f"Norma de referência: NBR 15696:2009",
+        "Norma de referência: NBR 15696:2009",
         f"Coeficiente de majoração: γf = {GAMMA_F}",
         f"Sobrecarga de trabalho: {Q_SOBRECARGA_DEFAULT} kN/m²",
     ]

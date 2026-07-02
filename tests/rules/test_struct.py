@@ -1,5 +1,4 @@
 """Tests for structural rules STRUCT-001 and STRUCT-002."""
-import pytest
 
 from src.rules.verifiers.struct import (
     _verify_beam_intersection_support,

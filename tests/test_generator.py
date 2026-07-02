@@ -3,7 +3,6 @@
 import pytest
 import os
 import csv
-from pathlib import Path
 from shapely.geometry import Polygon
 
 from src.models.slab import Slab

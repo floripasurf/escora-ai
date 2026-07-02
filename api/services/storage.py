@@ -1,7 +1,6 @@
 """File storage service (local filesystem for MVP)."""
 
 from pathlib import Path
-from typing import BinaryIO
 
 from fastapi import HTTPException, UploadFile
 

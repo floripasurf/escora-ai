@@ -1,7 +1,6 @@
 import pytest
 from src.parser.segment_classifier import (
-    find_beam_candidates, BeamCandidate,
-    find_pillar_candidates, PillarCandidate,
+    find_beam_candidates, find_pillar_candidates,
 )
 
 

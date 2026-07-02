@@ -21,6 +21,7 @@ import hashlib
 import hmac
 import logging
 import os
+import re
 import secrets
 import shutil
 import sqlite3
@@ -266,7 +267,6 @@ def clear_sessions() -> None:
         pass
 
 
-import re
 _EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
 _create_user_lock = threading.Lock()
 

@@ -19,8 +19,7 @@ from pathlib import Path
 from typing import List
 
 from src.models.masonry import (
-    FloorPlan, Wall, Lintel, TieBeam, Foundation,
-    MasonryProject, FoundationType,
+    Wall, Lintel, TieBeam, MasonryProject,
 )
 
 logger = logging.getLogger(__name__)
@@ -300,7 +299,7 @@ def _draw_title(msp, project: MasonryProject) -> None:
     y = -1.0
 
     lines = [
-        f"ESTRUTURA.AI -- Projeto Estrutural",
+        "ESTRUTURA.AI -- Projeto Estrutural",
         f"Alvenaria Estrutural -- Blocos {project.input.block_size.value}cm",
         f"fbk = {project.block_fbk_mpa:.1f} MPa",
         f"Area: {floor.width_m:.2f} x {floor.depth_m:.2f}m = {floor.width_m * floor.depth_m:.1f}m\u00b2",

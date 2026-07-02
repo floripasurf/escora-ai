@@ -9,7 +9,6 @@ Learns from the differences:
 
 import math
 import logging
-from pathlib import Path
 from typing import List, Dict, Tuple
 
 import ezdxf

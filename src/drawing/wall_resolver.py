@@ -16,10 +16,10 @@ Usage:
 
 import math
 import logging
-from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from dataclasses import dataclass
+from typing import List, Tuple
 
-from shapely.geometry import Polygon, MultiPolygon, box
+from shapely.geometry import Polygon, MultiPolygon
 from shapely.ops import unary_union
 
 from .nbr import HatchMaterial, LineType

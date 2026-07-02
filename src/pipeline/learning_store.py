@@ -501,7 +501,7 @@ class LearningStore:
         unique_files = len(set(r.filename for r in self._records))
 
         lines = [
-            f"=== Escora.AI — Base de Aprendizado (v2) ===",
+            "=== Escora.AI — Base de Aprendizado (v2) ===",
             f"Arquivos únicos: {unique_files}",
             f"Records armazenados: {len(self._records)}",
             "",
@@ -535,7 +535,7 @@ class LearningStore:
         total_pillars = sum(r.pillar_count for r in self._records)
         total_shores = sum(r.total_shores for r in self._records)
         total_slabs = sum(r.slab_count for r in self._records)
-        lines.append(f"Totais (por arquivo único):")
+        lines.append("Totais (por arquivo único):")
         lines.append(f"  Vigas detectadas: {total_beams}")
         lines.append(f"  Pilares detectados: {total_pillars}")
         lines.append(f"  Painéis de laje: {total_slabs}")
@@ -556,7 +556,7 @@ class LearningStore:
         # Quality metrics
         valid_runs = sum(1 for r in self._records if r.is_valid)
         lines.append("")
-        lines.append(f"Qualidade:")
+        lines.append("Qualidade:")
         lines.append(f"  Runs válidos: {valid_runs}/{len(self._records)}")
         avg_score = self.get_avg_beam_score()
         if avg_score:

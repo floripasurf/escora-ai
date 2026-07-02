@@ -6,9 +6,8 @@ Orquestra o fluxo completo:
 
 import logging
 import math
-from datetime import date
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 from src.models.masonry import ProjectInput, MasonryProject
 from src.layout.solver import solve_layout
@@ -19,7 +18,7 @@ from src.output.arch_dxf_generator import generate_architectural_dxf
 from src.output.structural_dxf_generator import generate_structural_dxf
 from src.output.project_assembler import assemble_project
 from src.generator.masonry_bom_generator import (
-    calculate_masonry_bom, write_masonry_bom_csv,
+    write_masonry_bom_csv,
 )
 from src.output.masonry_pdf_generator import generate_masonry_memorial
 from src.utils.masonry_constants import BLOCO_14_DIMS, BLOCO_19_DIMS

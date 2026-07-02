@@ -1,7 +1,13 @@
 # Escora.AI — Próximas Melhorias (Consolidado)
 
-**Data:** 2026-04-07
-**Status do produto:** MVP SaaS multi-tenant em produção em `https://escora-ai.fly.dev`, com login/senha por locadora, seleção de unidade (branch), pipeline completo (DXF → BOM/IFC/PDFs), feedback loop automático por revisão, modos de otimização (`price` / `inventory`) e catálogo calibrado com dados reais da Orguel SJC.
+**Data:** 2026-04-07 (atualizado 2026-07-02)
+**Status do produto:** MVP SaaS multi-tenant em produção — web estático no Vercel (`https://estrutura.app`), engine FastAPI no **Mac Mini** via Cloudflare Tunnel (`escora.blackcube.dev`; o deploy Fly.io foi desativado — ver `docs/ops/mac-mini-deploy.md`). Login/senha por locadora, seleção de unidade (branch), pipeline completo (DXF → BOM/IFC/PDFs), feedback loop automático por revisão, modos de otimização (`price` / `inventory`) e catálogo calibrado com dados reais da Orguel SJC.
+
+> **Nota 2026-07-02:** P1 (SQLite) e P2 (orphan sweeper) já foram entregues
+> (`api/services/job_service.py` + startup do `api/main.py`); P3/P4 mudaram de
+> contexto com a saída do Fly (o Mac Mini não tem cold start). P5 (IDs
+> não-adivinháveis) segue pendente para jobs. Referências a `fly volumes`/
+> `fly.toml` abaixo são históricas.
 
 Este documento consolida `docs/production_upgrade_plan.md`, `docs/roadmap/milestone_plan.md` e os research notes, removendo o que já foi entregue e marcando o que ainda entrega valor claro.
 
@@ -174,4 +180,4 @@ Tier 1 (confiabilidade) vem primeiro **porque sem ele os ganhos do parser somem 
 
 - Todas as mudanças Tier 1 devem sair juntas em um único deploy para não criar estados intermediários estranhos (ex: SQLite sem sweeper = jobs presos em `processing`).
 - Tier 2 pode ir em PRs separados por item — cada um tem critério de aceite próprio (um DXF que antes não parseava, agora parseia).
-- Manter sempre `python3 -m pytest tests/ -x -q` verde antes de qualquer commit. Suite atual: 242 testes, ~47s.
+- Manter sempre `python3 -m pytest tests/ -x -q` verde antes de qualquer commit. Suite atual: ~820 testes, ~2min (contagem 2026-07-02; CI roda `-m 'not slow'` + ruff + mypy + gate de cobertura).

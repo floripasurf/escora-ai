@@ -1,4 +1,3 @@
-import pytest
 from src.parser.scale_detector import detect_scale_from_texts
 
 

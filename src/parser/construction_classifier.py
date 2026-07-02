@@ -10,7 +10,7 @@ These classifications determine which normative rules and shoring methods apply.
 import re
 import logging
 from enum import Enum
-from typing import List, Optional, Tuple
+from typing import List
 from dataclasses import dataclass, field
 from src.pipeline.stage_parse import (
     TextEntity, SegmentEntity, RectEntity, HatchEntity, DimensionEntity, PolylineEntity,

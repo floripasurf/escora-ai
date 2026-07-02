@@ -15,20 +15,22 @@ Referências:
 """
 
 import logging
-from typing import List, Tuple, Optional
+from typing import TYPE_CHECKING, List, Tuple, Optional
 
 from src.models.masonry import (
     ProjectInput, FloorPlan, Room, Wall, WallOpening,
-    RoomType, OpeningType, BlockSize,
+    RoomType, OpeningType,
 )
-from src.layout.templates import find_best_template
+
+if TYPE_CHECKING:
+    from src.models.masonry import DesignInput, SiteAnalysis
 from src.layout.shape_grammar import generate_layout
 from src.layout.modular_grid import (
-    get_module, snap_to_module, generate_grid, validate_modular_coordination,
+    get_module, snap_to_module, validate_modular_coordination,
 )
 from src.utils.masonry_constants import (
-    MIN_ROOM_AREAS, MIN_ROOM_DIMENSION, DOOR_SIZES, WINDOW_SIZES,
-    MAX_ROOM_AREAS, MAX_ASPECT_RATIO, TARGET_AREA_RATIO,
+    MIN_ROOM_AREAS, DOOR_SIZES, WINDOW_SIZES,
+    MAX_ASPECT_RATIO,
 )
 
 logger = logging.getLogger(__name__)
@@ -590,8 +592,8 @@ def _check_bathroom_proximity(rooms: List[Room], warnings: List[str]) -> None:
 
         if not adjacent:
             warnings.append(
-                f"AVISO: Banheiro sem adjacência a quartos ou circulação "
-                f"— acesso difícil"
+                "AVISO: Banheiro sem adjacência a quartos ou circulação "
+                "— acesso difícil"
             )
 
 
@@ -671,7 +673,6 @@ def _apply_economy_presets(input_data) -> None:
     - Ceiling: 2.60m (minimum NBR, saves on walls)
     - Block: 14cm (less material)
     """
-    from src.utils.masonry_constants import ECONOMY_PRESET
 
     # Only set defaults — don't override user's explicit choices
     if not hasattr(input_data, '_economy_applied'):
@@ -770,7 +771,6 @@ def _position_garage_for_access(
     - east:  street at x=width (right), garage door on x_max wall
     - west:  street at x=0 (left), garage door on x_min wall
     """
-    from src.utils.masonry_constants import VEHICLE_ACCESS
 
     garage_room = None
     garage_idx = None

@@ -6,10 +6,10 @@ on:
   pull_request:
 
 jobs:
-  pytest:
-    name: pytest (not slow)
+  lint:
+    name: ruff + mypy
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -20,5 +20,30 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-      - name: Run test suite (excludes @slow)
-        run: pytest -m 'not slow' -q
+      - name: ruff
+        run: ruff check src api tests
+      - name: mypy (escopo incremental)
+        run: mypy
+
+  pytest:
+    name: pytest (not slow) + coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      # sysmon (PEP 669, py3.12+): ~17% de overhead de coverage vs ~10x do
+      # core trace — sem ele a suíte ia de 2min para 20min.
+      COVERAGE_CORE: sysmon
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      # Baseline 63% (2026-07-02); floor com folga de 2pp. Ratchet: subir o
+      # floor quando a cobertura subir, nunca baixar.
+      - name: Run test suite (excludes @slow) with coverage gate
+        run: pytest -m 'not slow' -q --cov=src --cov=api --cov-report=term --cov-fail-under=61

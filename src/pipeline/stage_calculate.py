@@ -36,7 +36,6 @@ from src.engine.beam_calculator import (
     estimate_beam_shore_height,
 )
 from src.engine.grid_distributor import distribute_shores, PillarExclusion
-from src.engine.shore_capacity import compute_adaptive_spacing
 from src.engine.shore_selector import load_catalog, select_shore
 from src.engine.vm_grid_builder import (
     ShorePoint, VMGrid, build_vm_grid, select_vm_length_mm,
@@ -46,20 +45,53 @@ from src.models.plywood import default_plywood_spec
 from src.engine.tower_selector import (
     load_tower_catalog, decide_support_type, select_tower,
     select_distribution_beam, SupportType,
-    MIXED_TOWER_GRID_SPACING,
 )
 from src.engine.validator import validate_result
-from src.engine.nervura_detector import detect_nervura_regions, distribute_nervura_shores
+from src.engine.nervura_detector import detect_nervura_regions
 from src.engine.shaft_detector import detect_all_shafts, filter_slab_polygons_by_shafts, subtract_shafts_from_slabs
 from src.ml.predictor import ShoringPredictor
 from src.utils.constants import (
-    GAMMA_F, Q_SOBRECARGA_DEFAULT, ESPESSURA_DEFAULT, ALTURA_DEFAULT,
+    ESPESSURA_DEFAULT, ALTURA_DEFAULT,
     ESPACAMENTO_MAX_DEFAULT, ESPACAMENTO_MAX_VIGA, ESPACAMENTO_POR_ALTURA,
     ESPACAMENTO_SECUNDARIAS_MANUAL, CONTRA_FLECHA, DISTANCIA_BORDA_MIN,
-    ESPACAMENTO_MIN,
+    ESPACAMENTO_MIN, Q_PROJETO_FALLBACK_LAJE_KN_M2,
 )
 
 logger = logging.getLogger(__name__)
+
+# Prefixo das pendencias de capacidade (AGENTS.md: "no silent fallbacks").
+# Warnings com este prefixo marcam requires_review no runner.
+CAPACITY_PENDENCY_PREFIX = "PENDENCIA capacidade:"
+
+
+def _effective_capacity_kn(shore, floor_height_m):
+    """Capacidade efetiva da escora com derate por altura (curva Orguel p.86).
+
+    Nunca cai silenciosamente para a capacidade NOMINAL (maior): quando o
+    pe-direito e desconhecido ou o derate falha, retorna a nominal ACOMPANHADA
+    de uma pendencia tipada que forca requires_review no resultado.
+
+    Returns:
+        (cap_kn, pendency): pendency e None no caminho normal.
+    """
+    if floor_height_m is None:
+        cap = shore.load_capacity_kn
+        return cap, (
+            f"{CAPACITY_PENDENCY_PREFIX} pe-direito indisponivel — capacidade "
+            f"NOMINAL ({cap:.1f} kN) usada sem derate por altura "
+            f"({getattr(shore, 'model', '?')}). Confirmar altura do pavimento "
+            "e capacidade efetiva antes do uso."
+        )
+    try:
+        return shore.effective_capacity(floor_height_m), None
+    except Exception as exc:
+        cap = shore.load_capacity_kn
+        return cap, (
+            f"{CAPACITY_PENDENCY_PREFIX} falha no derate por altura "
+            f"({getattr(shore, 'model', '?')} @ {floor_height_m:.2f} m: {exc}) — "
+            f"capacidade NOMINAL ({cap:.1f} kN) usada. Revisao de engenharia "
+            "obrigatoria."
+        )
 
 # Beam-pillar association proximity threshold (m)
 # Must be generous: pillar labels are offset from beam axis, SOLID fills sit
@@ -250,6 +282,7 @@ def _distribute_line_first_shores(
     floor_frame: Optional[tuple] = None,
     guide_model: Optional[str] = None,
     tripod_ratio: Optional[float] = None,
+    warnings: Optional[List[str]] = None,
 ):
     """Posiciona escoras de laje pelo modo line-first (manual §28.8).
 
@@ -263,15 +296,19 @@ def _distribute_line_first_shores(
     """
     from src.engine.line_first_builder import build_line_first_layout
 
-    q_kn_m2 = total_load_kn / slab.area_m2 if slab.area_m2 > 0 else 7.7
-    try:
-        cap_kn = (
-            shore.effective_capacity(floor_height_m)
-            if floor_height_m is not None
-            else shore.load_capacity_kn
-        )
-    except Exception:
-        cap_kn = shore.load_capacity_kn
+    if slab.area_m2 > 0:
+        q_kn_m2 = total_load_kn / slab.area_m2
+    else:
+        q_kn_m2 = Q_PROJETO_FALLBACK_LAJE_KN_M2
+        if warnings is not None:
+            warnings.append(
+                f"Laje sem area calculavel — carga de projeto fallback "
+                f"{Q_PROJETO_FALLBACK_LAJE_KN_M2:.1f} kN/m2 (laje 12 cm, "
+                "NBR 15696 §4.2) aplicada. Verificar geometria do painel."
+            )
+    cap_kn, _cap_pendency = _effective_capacity_kn(shore, floor_height_m)
+    if _cap_pendency and warnings is not None:
+        warnings.append(_cap_pendency)
     extra = {}
     if tower_mode:
         extra = dict(
@@ -3613,6 +3650,7 @@ def run_calculation(
                     floor_frame=_lf_floor_frame,
                     guide_model="ALU14" if lf_nervura_panel else None,
                     tripod_ratio=tripes_fracao,
+                    warnings=warnings,
                 )
             except Exception as exc:
                 logger.warning(
@@ -3797,7 +3835,11 @@ def run_calculation(
         try:
             if line_first_layout is not None:
                 from src.engine.line_first_builder import layout_to_vm_grid
-                q_unit_kn_m2 = total_load / slab.area_m2 if slab.area_m2 > 0 else 7.7
+                q_unit_kn_m2 = (
+                    total_load / slab.area_m2
+                    if slab.area_m2 > 0
+                    else Q_PROJETO_FALLBACK_LAJE_KN_M2
+                )
                 slab_vm_grid = layout_to_vm_grid(line_first_layout, q_unit_kn_m2)
                 if lf_nervura_panel:
                     # Sistema ALU14+VM80: secundarias VM80 de passo FIXO
@@ -3825,7 +3867,11 @@ def run_calculation(
                     nervura_panel_count += 1
             elif len(shores) >= 2 and slab.area_m2 > 0:
                 bbox = slab.bounding_box
-                q_unit_kn_m2 = total_load / slab.area_m2 if slab.area_m2 > 0 else 7.7
+                q_unit_kn_m2 = (
+                    total_load / slab.area_m2
+                    if slab.area_m2 > 0
+                    else Q_PROJETO_FALLBACK_LAJE_KN_M2
+                )
                 slab_vm_grid = build_vm_grid(
                     shore_points=[ShorePoint(x=s.x, y=s.y) for s in shores],
                     polygon_bbox=(bbox.min_x, bbox.min_y, bbox.max_x, bbox.max_y),

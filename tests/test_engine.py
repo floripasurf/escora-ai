@@ -1,7 +1,6 @@
 """Testes do módulo engine."""
 
 import pytest
-import math
 from shapely.geometry import Polygon
 
 from src.engine.load_calculator import (
@@ -14,7 +13,6 @@ from src.engine.shore_selector import load_catalog, select_shore
 from src.engine.grid_distributor import distribute_shores, calculate_grid_dimensions
 from src.engine.validator import validate_result
 from src.models.slab import Slab
-from src.utils.constants import GAMMA_CONCRETO, Q_SOBRECARGA_DEFAULT, GAMMA_F
 
 
 @pytest.fixture

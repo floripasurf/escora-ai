@@ -15,11 +15,10 @@ import logging
 import math
 from typing import List, Dict, Any
 
-from src.models.masonry import MasonryProject, FloorPlan, Wall, Foundation, FoundationType
+from src.models.masonry import MasonryProject, FoundationType
 from src.utils.masonry_constants import (
     BLOCO_14_DIMS, BLOCO_19_DIMS, MEIO_BLOCO_14, MEIO_BLOCO_19,
-    JUNTA_ARGAMASSA, GAMMA_GRAUTE,
-    CINTA_RESPALDO_ALTURA, VERGA_ALTURA_MIN,
+    JUNTA_ARGAMASSA, CINTA_RESPALDO_ALTURA,
 )
 
 logger = logging.getLogger(__name__)
@@ -169,7 +168,7 @@ def calculate_masonry_bom(project: MasonryProject) -> List[Dict[str, Any]]:
         "material": "Barra CA-60 φ5mm (estribos)",
         "unidade": "kg",
         "quantidade": round(rebar_5mm_kg, 1),
-        "observacao": f"Espaçamento: c/20cm",
+        "observacao": "Espaçamento: c/20cm",
     })
 
     # === FOUNDATION ===

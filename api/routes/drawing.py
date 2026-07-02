@@ -2,7 +2,6 @@
 
 import logging
 import tempfile
-from pathlib import Path
 from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException
@@ -10,11 +9,10 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from src.drawing import TechnicalSheet, NBR
-from src.drawing.nbr import HatchMaterial, ProjectionSystem
+from src.drawing.nbr import HatchMaterial
 from src.drawing.sheet import TitleBlockInfo
 from src.drawing.perspectives import (
-    draw_isometric_box, draw_isometric_from_walls,
-    draw_cavaleira_box, CavaleiraConfig, draw_elevation,
+    draw_isometric_box,
 )
 from src.drawing.views import SectionCut, generate_section_from_walls
 

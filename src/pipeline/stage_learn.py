@@ -24,8 +24,7 @@ from pathlib import Path
 from typing import Optional
 
 from src.models.pipeline_models import PipelineResult, ElementType
-from src.pipeline.learning_store import LearningRecord, LearningStore, LayerLearning
-from src.pipeline.stage_segment import LevelSegment
+from src.pipeline.learning_store import LearningRecord, LearningStore
 from src.parser.segment_classifier import find_beam_candidates, find_pillar_candidates
 
 logger = logging.getLogger(__name__)
