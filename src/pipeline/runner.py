@@ -373,6 +373,9 @@ def run_pipeline(
     branch_id: Optional[str] = None,
     slab_layout_mode: Optional[str] = None,
     methodology: Optional[MethodologyProfile] = None,
+    reescoramento=None,
+    desforma_dias: Optional[int] = None,
+    desforma_justificativa: str = "",
 ) -> PipelineResult:
     """Run the full pipeline (Stages 0-7).
 
@@ -381,6 +384,10 @@ def run_pipeline(
     vencem o perfil. `methodology` permite injetar um perfil explicito
     (caso contrario e carregado de data/locadoras.json /
     ESCORA_LOCADORAS_FILE via branch_id).
+
+    reescoramento (ReescoramentoData opcional) + desforma_dias/justificativa:
+    bloco do manual §26 items 9 e 10 fornecido pelo engenheiro; propagado ao
+    RuleProject para os verificadores DECIDE-001/002.
     """
     # Perfil de metodologia da locadora/branch (manual §28.9): define os
     # DEFAULTS de layout/passos; flags explicitas sempre vencem.
@@ -702,6 +709,12 @@ def run_pipeline(
         warnings=warnings,
         calculation=calculation,
     )
+
+    # Bloco de reescoramento/desforma: atribuido ANTES do Stage 6 para o
+    # REGISTRY.check_all (DECIDE-001/002) enxergar via RuleProject adapter.
+    result.reescoramento_data = reescoramento
+    result.desforma_dias = desforma_dias
+    result.desforma_justificativa = desforma_justificativa or ""
 
     # Manual §5.1: sistemas fora de escopo (BLOCKED) ou casos especiais
     # (SPECIAL_REVIEW/UNKNOWN) NAO devem ser tratados como projeto executivo

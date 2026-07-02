@@ -3,17 +3,23 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from src.models.masonry import DesignInput
 from src.layout.solver import solve_layout_interactive
 from src.utils.masonry_constants import MIN_ROOM_AREAS, MIN_ROOM_DIMENSION
+from api.deps import get_current_user
 from api.services.project_pipeline_service import _build_preview
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/design", tags=["design"])
+# Stateless generation endpoints: session required, no X-Branch-Id needed.
+router = APIRouter(
+    prefix="/api/v1/design",
+    tags=["design"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 class DesignPreviewRequest(BaseModel):
@@ -52,11 +58,14 @@ class DesignPreviewRequest(BaseModel):
 
 
 @router.post("/alternatives")
-async def design_alternatives(request: DesignPreviewRequest):
+def design_alternatives(request: DesignPreviewRequest):
     """Return multiple layout alternatives for the user to choose from.
 
     Returns compact previews (mini SVG data) for 3-6 templates,
     ranked by compatibility with the user's input.
+
+    Handler síncrono de propósito: FastAPI o executa no threadpool, então a
+    geração (CPU-bound) não bloqueia o event loop para os demais clientes.
     """
     try:
         from src.layout.repertoire import select_top_templates
@@ -105,11 +114,14 @@ async def design_alternatives(request: DesignPreviewRequest):
 
 
 @router.post("/preview")
-async def design_preview(request: DesignPreviewRequest):
+def design_preview(request: DesignPreviewRequest):
     """Generate layout preview synchronously for real-time editing.
 
     This endpoint is fast (~10ms) and returns JSON geometry
     for SVG/3D rendering without generating any files.
+
+    Handler síncrono de propósito: FastAPI o executa no threadpool, então a
+    geração (CPU-bound) não bloqueia o event loop para os demais clientes.
     """
     try:
         # Convert to DesignInput (exclude template_id from DesignInput)

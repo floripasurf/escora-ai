@@ -78,3 +78,9 @@ class PipelineResult(BaseModel):
     requires_review: bool = Field(default=False, description="True quando o sistema detectado esta fora de escopo / exige revisao de engenharia (manual §5.1)")
     review_reasons: List[str] = Field(default_factory=list, description="Motivos pelos quais o resultado exige revisao antes do uso")
     diagnostics: dict = Field(default_factory=dict, description="Métricas de diagnóstico (kg/m³ vertical, escoras/m², base) — NÃO são gate de revisão")
+    # Bloco opcional de reescoramento/desforma (manual §26 items 9 e 10) —
+    # fornecido pelo engenheiro no upload; consumido pelos verificadores
+    # DECIDE-001/002 via RuleProject.from_pipeline_result (getattr).
+    reescoramento_data: Optional[Any] = Field(default=None, description="ReescoramentoData (src.rules.project) quando o bloco foi preenchido")
+    desforma_dias: Optional[int] = Field(default=None, description="Prazo de desforma adotado (dias); piso NBR 14931 = 14")
+    desforma_justificativa: str = Field(default="", description="Justificativa obrigatoria quando desforma_dias < 14")

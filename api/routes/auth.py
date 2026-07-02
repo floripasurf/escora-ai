@@ -17,13 +17,23 @@ from src.auth.branches import (
     Branch,
     authenticate_user,
     change_password,
+    consume_reset_token,
+    create_reset_token,
     create_session,
     create_user,
     get_locadora_of_user,
+    hash_password,
     resolve_session,
     revoke_session,
+    revoke_sessions_for_user,
 )
+from src.auth.registry import update_password
 from src.models.methodology import load_methodology
+<<<<<<< HEAD
+=======
+from api.deps import get_current_branch
+from api.ratelimit import rate_limit
+>>>>>>> origin/main
 from api.services.methodology_view import serialize_profile
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
@@ -79,6 +89,15 @@ class ChangePasswordRequest(BaseModel):
     new_password: str
 
 
+class RequestResetRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
 class BranchDTO(BaseModel):
     id: str
     branch_name: str
@@ -97,7 +116,11 @@ class LoginResponse(BaseModel):
     branches: list[BranchDTO]
 
 
-@router.post("/login", response_model=LoginResponse)
+@router.post(
+    "/login",
+    response_model=LoginResponse,
+    dependencies=[Depends(rate_limit("login", max_calls=5, window_s=60))],
+)
 async def login(body: LoginRequest):
     user = authenticate_user(body.username.strip().lower(), body.password)
     if user is None:
@@ -123,7 +146,10 @@ async def login(body: LoginRequest):
     )
 
 
-@router.post("/signup")
+@router.post(
+    "/signup",
+    dependencies=[Depends(rate_limit("signup", max_calls=3, window_s=60))],
+)
 async def signup(body: SignupRequest):
     if not body.name or not body.email or not body.password:
         raise HTTPException(status_code=400, detail="Nome, email e senha são obrigatórios")
@@ -194,6 +220,53 @@ async def change_password_endpoint(
     # Revoke current session so the user re-logs with the new password.
     revoke_session(token)
     return {"message": "Senha atualizada. Faça login novamente."}
+
+
+@router.post(
+    "/request-reset",
+    dependencies=[Depends(rate_limit("reset", max_calls=3, window_s=60))],
+)
+async def request_password_reset(body: RequestResetRequest):
+    """Solicita link de redefinição de senha.
+
+    Resposta 200 SEMPRE (não vaza se o e-mail existe). O link só é gerado
+    quando o e-mail corresponde a um usuário; envio via Resend, ou log em
+    modo dev (sem RESEND_API_KEY).
+    """
+    import os
+
+    email = body.email.strip().lower()
+    if email and get_locadora_of_user(email) is not None:
+        token = create_reset_token(email)
+        base = os.environ.get("ESCORA_PUBLIC_URL", "https://estrutura.app")
+        from api.services.email_service import send_password_reset
+        send_password_reset(email, f"{base}/?reset={token}")
+    return {
+        "message": (
+            "Se o e-mail estiver cadastrado, você receberá um link de "
+            "redefinição em instantes."
+        )
+    }
+
+
+@router.post("/reset")
+async def reset_password(body: ResetPasswordRequest):
+    """Define nova senha a partir de um token de reset (single-use, TTL 1h)."""
+    if len(body.new_password) < 6:
+        raise HTTPException(
+            status_code=400, detail="A senha precisa ter ao menos 6 caracteres"
+        )
+    username = consume_reset_token(body.token.strip())
+    if username is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Link de redefinição inválido ou expirado. Solicite um novo.",
+        )
+    if not update_password(username, hash_password(body.new_password)):
+        raise HTTPException(status_code=400, detail="Usuário não encontrado")
+    # Derruba sessões antigas: quem tinha o token da conta perde o acesso.
+    revoke_sessions_for_user(username)
+    return {"message": "Senha redefinida. Faça login com a nova senha."}
 
 
 @router.post("/logout")

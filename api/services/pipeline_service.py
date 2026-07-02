@@ -26,6 +26,100 @@ from api.config import settings
 logger = logging.getLogger(__name__)
 run_pipeline = None
 
+# Cap de escoras no preview 2D — acima disso o payload JSON explode e o
+# browser trava; o front mostra aviso de truncamento.
+PREVIEW_MAX_SHORES = 3000
+
+
+def _set_status_detail(job_id: str, output_suffix: str, text: str) -> None:
+    """Escreve o estágio corrente do pipeline no job (progresso p/ UI).
+
+    Só no fluxo principal (output_suffix == "") — regenerate_from_revision
+    reusa process_dxf e não deve sobrescrever o detail do job original.
+    Funciona do subprocess: o worker já escreve no SQLite direto.
+    """
+    if output_suffix or not job_id:
+        return
+    try:
+        from api.services import job_service
+        job_service.update_job(job_id, status_detail=text)
+    except Exception:  # nunca derruba o pipeline por causa de progresso
+        logger.debug("status_detail update failed", exc_info=True)
+
+
+def _build_shoring_preview(calc) -> Optional[dict]:
+    """Geometria simplificada (metros) para o preview SVG 2D no browser.
+
+    Lajes como polígonos + escoras como pontos [x, y, tipo]; vigas como
+    linhas. Cap em PREVIEW_MAX_SHORES para o payload não explodir.
+    """
+    if calc is None:
+        return None
+    try:
+        slabs = []
+        beams = []
+        shore_budget = PREVIEW_MAX_SHORES
+        truncated = False
+        xs: list = []
+        ys: list = []
+
+        def _shore_points(shores):
+            nonlocal shore_budget, truncated
+            pts = []
+            for s in shores:
+                if shore_budget <= 0:
+                    truncated = True
+                    break
+                pts.append([
+                    round(s.x, 2), round(s.y, 2),
+                    getattr(s, "shore_type", "telescopic"),
+                ])
+                xs.append(s.x)
+                ys.append(s.y)
+                shore_budget -= 1
+            return pts
+
+        for sr in calc.slab_results:
+            poly = getattr(sr, "polygon", None)
+            outline = []
+            if poly is not None and hasattr(poly, "exterior"):
+                simplified = poly.simplify(0.05)
+                outline = [
+                    [round(x, 2), round(y, 2)]
+                    for x, y in simplified.exterior.coords
+                ]
+                xs.extend(p[0] for p in outline)
+                ys.extend(p[1] for p in outline)
+            slabs.append({
+                "outline": outline,
+                "shores": _shore_points(sr.shores),
+            })
+
+        for br in calc.beam_results:
+            geometry = getattr(br.beam, "geometry", None) or []
+            line = [[round(x, 2), round(y, 2)] for x, y in geometry[:2]]
+            xs.extend(p[0] for p in line)
+            ys.extend(p[1] for p in line)
+            beams.append({
+                "line": line,
+                "shores": _shore_points(br.shores),
+            })
+
+        if not xs or not ys:
+            return None
+        return {
+            "slabs": slabs,
+            "beams": beams,
+            "bbox": [
+                round(min(xs), 2), round(min(ys), 2),
+                round(max(xs), 2), round(max(ys), 2),
+            ],
+            "truncated": truncated,
+        }
+    except Exception as e:
+        logger.warning(f"Preview build failed (non-fatal): {e}")
+        return None
+
 
 def _build_diagnostics(result, report_data) -> dict:
     """Funde o diagnóstico vertical (runner) com o BOM-parcial (report_data).
@@ -58,6 +152,7 @@ def process_dxf(
     branch_id: Optional[str] = None,
     slab_layout_mode: Optional[str] = None,
     methodology=None,
+    reescoramento: Optional[dict] = None,
 ) -> dict:
     """Run the full pipeline on a DXF file and generate output.
 
@@ -76,6 +171,32 @@ def process_dxf(
     if pipeline_runner is None:
         from src.pipeline.runner import run_pipeline as pipeline_runner
 
+    # Bloco de reescoramento (docs/ux/reescoramento_input_block.md):
+    # payload validado (ReescoramentoInput.model_dump) -> ReescoramentoData
+    # do engine, habilitando os verificadores DECIDE-001/002.
+    reescoramento_data = None
+    desforma_dias = None
+    desforma_justificativa = ""
+    if reescoramento:
+        from src.rules.project import ReescoramentoData
+        reescoramento_data = ReescoramentoData(
+            fcj_aos_dias_mpa=reescoramento.get("fcj_aos_dias_mpa"),
+            eci_mpa=reescoramento.get("eci_mpa"),
+            carga_final_kn_m2=reescoramento.get("carga_final_kn_m2"),
+            carga_estado_construcao_kn_m2=reescoramento.get(
+                "carga_estado_construcao_kn_m2", 1.5
+            ),
+            num_niveis_reescoramento=reescoramento.get(
+                "num_niveis_reescoramento", 0
+            ),
+            calculista_aprovacao=reescoramento.get("calculista_aprovacao", ""),
+        )
+        desforma_dias = reescoramento.get("desforma_dias")
+        desforma_justificativa = reescoramento.get("desforma_justificativa", "")
+
+    _set_status_detail(
+        job_id, output_suffix, "Analisando o DXF e calculando o escoramento"
+    )
     result = pipeline_runner(
         input_path,
         mode=mode,
@@ -83,6 +204,9 @@ def process_dxf(
         branch_id=branch_id,
         slab_layout_mode=slab_layout_mode,
         methodology=methodology,
+        reescoramento=reescoramento_data,
+        desforma_dias=desforma_dias,
+        desforma_justificativa=desforma_justificativa,
     )
     calc = result.calculation
 
@@ -99,6 +223,8 @@ def process_dxf(
         detail = "; ".join(diagnostics[:4]) or "nenhum resultado de calculo"
         logger.error("Pipeline returned no calculation for %s: %s", input_path, detail)
         return {"error": f"Pipeline falhou — {detail}"}
+
+    _set_status_detail(job_id, output_suffix, "Gerando o DXF de escoramento")
 
     # Generate output DXF
     output_dir = Path(settings.output_dir) / job_id
@@ -177,6 +303,10 @@ def process_dxf(
     except Exception as e:
         logger.warning(f"IFC generation failed (non-fatal): {e}")
 
+    _set_status_detail(
+        job_id, output_suffix, "Gerando relatórios (memória de cálculo, BOM, IFC)"
+    )
+
     # Generate PDF reports (memória de cálculo + orçamento)
     stem = stem_base
     pdf_paths = {}
@@ -222,6 +352,7 @@ def process_dxf(
         "consumption_summary": consumption_summary,
         "ifc_path": ifc_path,
         "mermaid_diagrams": mermaid_diagrams,
+        "preview": _build_shoring_preview(calc),
         **pdf_paths,
     }
 

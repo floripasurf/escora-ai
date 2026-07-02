@@ -20,7 +20,12 @@ from api.services import job_service, storage
 from api.services import pipeline_service
 from api.services.pipeline_service import process_dxf
 from api.services.revision_service import analyze_revision
-from api.models.schemas import JobCreateResponse, JobStatusResponse, DiagnosticsData
+from api.models.schemas import (
+    JobCreateResponse,
+    JobStatusResponse,
+    DiagnosticsData,
+    ReescoramentoInput,
+)
 
 
 def _sanitize_diagnostics(raw: Optional[dict]) -> dict:
@@ -99,6 +104,7 @@ def _pipeline_worker(job_id: str) -> None:
             mode=job.get("optimization_mode", "price"),
             inventory_name=job.get("inventory_name"),
             branch_id=job.get("branch_id"),
+            reescoramento=job.get("reescoramento_json"),
         )
         if "error" in results:
             job_service.update_job(job_id, status="error", error_message=results["error"])
@@ -177,6 +183,7 @@ async def upload_dxf(
     file: UploadFile = File(...),
     office_name: Optional[str] = Form(None),
     optimization_mode: Optional[str] = Form("price"),
+    reescoramento_json: Optional[str] = Form(None),
     branch: Branch = Depends(get_current_branch),
     _: User = Depends(require_operator_or_admin),
 ):
@@ -191,6 +198,41 @@ async def upload_dxf(
     if optimization_mode not in ("price", "inventory"):
         optimization_mode = "price"
 
+    # Quota mensal por locadora (0 = ilimitado). Conta jobs de TODAS as
+    # branches da locadora desde o dia 1 do mês corrente (UTC).
+    from src.auth.registry import locadora_quota_jobs_mes
+    quota = locadora_quota_jobs_mes(branch.locadora_id)
+    if quota > 0:
+        from datetime import datetime, timezone
+        from src.auth.branches import load_registry
+        loc = load_registry().get(branch.locadora_id)
+        branch_ids = [b.id for b in loc.branches] if loc else [branch.id]
+        month_start = datetime.now(timezone.utc).replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        ).replace(tzinfo=None).isoformat()
+        used = job_service.count_jobs_since(branch_ids, month_start)
+        if used >= quota:
+            raise HTTPException(
+                429,
+                f"Quota mensal de projetos atingida ({used}/{quota}). "
+                "Fale com o suporte para ampliar o plano.",
+            )
+
+    # Bloco opcional de reescoramento/desforma (manual §26 items 9 e 10):
+    # validado aqui (400 com detalhe pydantic) e persistido no job — o worker
+    # roda em subprocess e relê o job do DB, não a request.
+    reescoramento_data: Optional[dict] = None
+    if reescoramento_json:
+        import json as _json
+        try:
+            reescoramento_data = ReescoramentoInput(
+                **_json.loads(reescoramento_json)
+            ).model_dump()
+        except Exception as e:
+            raise HTTPException(
+                400, f"Bloco de reescoramento invalido: {e}"
+            ) from e
+
     job = job_service.create_job(file.filename, "", branch_id=branch.id)
     input_path = await storage.save_upload_stream(
         file, file.filename, job["id"], max_bytes=MAX_FILE_SIZE
@@ -200,6 +242,7 @@ async def upload_dxf(
         input_path=input_path,
         optimization_mode=optimization_mode,
         inventory_name=branch.inventory_name,
+        reescoramento_json=reescoramento_data,
     )
 
     # Process in background
@@ -246,6 +289,7 @@ async def get_status(
         "status": job["status"],
         "filename": job["filename"],
         "error_message": job.get("error_message"),
+        "status_detail": job.get("status_detail"),
         "created_at": job["created_at"],
         "updated_at": job["updated_at"],
         "has_output_dxf": job.get("output_dxf_path") is not None,
@@ -276,6 +320,7 @@ async def get_status(
             "diagnostics": _sanitize_diagnostics(results.get("diagnostics")),
             "has_dwg": job.get("dwg_path") is not None,
             "consumption_summary": results.get("consumption_summary"),
+            "preview": results.get("preview"),
         })
 
     revision = job.get("revision_data")
@@ -624,7 +669,10 @@ async def upload_revision(
 
     # Save revision (streamed to disk, never buffered in RAM)
     revision_path = await storage.save_upload_stream(
-        file, f"revisao_{file.filename}", job_id, max_bytes=MAX_FILE_SIZE
+        file,
+        f"revisao_{storage.sanitize_filename(file.filename)}",
+        job_id,
+        max_bytes=MAX_FILE_SIZE,
     )
     job_service.update_job(job_id, revision_path=revision_path)
 

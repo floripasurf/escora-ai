@@ -4,9 +4,10 @@ import logging
 import tempfile
 from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 
 from src.drawing import TechnicalSheet, NBR
 from src.drawing.nbr import HatchMaterial
@@ -15,10 +16,31 @@ from src.drawing.perspectives import (
     draw_isometric_box,
 )
 from src.drawing.views import SectionCut, generate_section_from_walls
+from api.deps import get_current_user
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/drawing", tags=["drawing"])
+# Stateless generation endpoints: session required, no X-Branch-Id needed.
+router = APIRouter(
+    prefix="/api/v1/drawing",
+    tags=["drawing"],
+    dependencies=[Depends(get_current_user)],
+)
+
+
+def _unlink_quiet(path: str) -> None:
+    Path(path).unlink(missing_ok=True)
+
+
+def _save_sheet_tempfile(sheet: "TechnicalSheet") -> str:
+    """Save the sheet to a tempfile; unlink it if the save itself fails."""
+    with tempfile.NamedTemporaryFile(suffix=".dxf", delete=False) as f:
+        tmp_path = f.name
+    try:
+        return sheet.save(tmp_path)
+    except Exception:
+        _unlink_quiet(tmp_path)
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -82,11 +104,13 @@ class FloorPlanRequest(BaseModel):
     """Request for floor plan drawing generation."""
     format: str = Field(default="A2", description="Sheet format: A0-A4")
     scale: str = Field(default="1:50", description="Drawing scale")
-    walls: List[WallSpec]
-    openings: List[OpeningSpec] = []
-    dimensions: List[DimensionSpec] = []
-    sections: List[SectionSpec] = []
-    room_labels: List[dict] = Field(default=[], description="[{name, x, y, area_m2}]")
+    # Caps mantêm o trabalho por request limitado (handlers rodam no
+    # threadpool; sem cap, uma lista gigante seguraria um worker por minutos).
+    walls: List[WallSpec] = Field(max_length=2000)
+    openings: List[OpeningSpec] = Field(default=[], max_length=1000)
+    dimensions: List[DimensionSpec] = Field(default=[], max_length=500)
+    sections: List[SectionSpec] = Field(default=[], max_length=50)
+    room_labels: List[dict] = Field(default=[], max_length=500, description="[{name, x, y, area_m2}]")
     title_block: Optional[TitleBlockSpec] = None
     include_isometric: bool = False
     include_elevation: bool = False
@@ -117,10 +141,12 @@ class SimpleDrawingRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.post("/floor-plan")
-async def generate_floor_plan(request: FloorPlanRequest):
+def generate_floor_plan(request: FloorPlanRequest):
     """Generate a complete floor plan DXF from wall/opening specifications.
 
-    Returns the DXF file as a download.
+    Returns the DXF file as a download. Handler síncrono de propósito:
+    FastAPI o executa no threadpool — a geração ezdxf (CPU-bound) não
+    bloqueia o event loop.
     """
     try:
         sheet = TechnicalSheet(request.format, scale=request.scale)
@@ -189,14 +215,14 @@ async def generate_floor_plan(request: FloorPlanRequest):
                 tuple(s.start), tuple(s.end), label=s.label,
             )
 
-        # Save to temp file
-        with tempfile.NamedTemporaryFile(suffix=".dxf", delete=False) as f:
-            path = sheet.save(f.name)
+        # Save to temp file, removed after the response is sent
+        path = _save_sheet_tempfile(sheet)
 
         return FileResponse(
             path,
             media_type="application/dxf",
             filename="planta_baixa.dxf",
+            background=BackgroundTask(_unlink_quiet, path),
         )
 
     except Exception as e:
@@ -205,8 +231,8 @@ async def generate_floor_plan(request: FloorPlanRequest):
 
 
 @router.post("/section")
-async def generate_section(request: FloorPlanRequest):
-    """Generate a building section (corte) DXF."""
+def generate_section(request: FloorPlanRequest):
+    """Generate a building section (corte) DXF. Handler síncrono → threadpool."""
     try:
         if not request.sections:
             raise HTTPException(400, "No section cuts defined")
@@ -244,13 +270,13 @@ async def generate_section(request: FloorPlanRequest):
                 origin=(0.05, 0.05 + origin_y),
             )
 
-        with tempfile.NamedTemporaryFile(suffix=".dxf", delete=False) as f:
-            path = sheet.save(f.name)
+        path = _save_sheet_tempfile(sheet)
 
         return FileResponse(
             path,
             media_type="application/dxf",
             filename="corte.dxf",
+            background=BackgroundTask(_unlink_quiet, path),
         )
 
     except HTTPException:
@@ -261,8 +287,8 @@ async def generate_section(request: FloorPlanRequest):
 
 
 @router.post("/perspective")
-async def generate_perspective(request: FloorPlanRequest):
-    """Generate an isometric perspective DXF."""
+def generate_perspective(request: FloorPlanRequest):
+    """Generate an isometric perspective DXF. Handler síncrono → threadpool."""
     try:
         sheet = TechnicalSheet(request.format, scale=request.scale)
 
@@ -298,13 +324,13 @@ async def generate_perspective(request: FloorPlanRequest):
                     w.thickness, abs(dy), w.height,
                 )
 
-        with tempfile.NamedTemporaryFile(suffix=".dxf", delete=False) as f:
-            path = sheet.save(f.name)
+        path = _save_sheet_tempfile(sheet)
 
         return FileResponse(
             path,
             media_type="application/dxf",
             filename="perspectiva.dxf",
+            background=BackgroundTask(_unlink_quiet, path),
         )
 
     except Exception as e:

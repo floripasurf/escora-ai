@@ -35,7 +35,7 @@ PROCESSING_TIMEOUT_SECONDS = settings.pipeline_timeout_seconds + 120
 _lock = threading.Lock()
 
 # Fields stored as JSON in SQLite for simplicity.
-_JSON_FIELDS = {"results_data", "validated_results", "revision_data"}
+_JSON_FIELDS = {"results_data", "validated_results", "revision_data", "reescoramento_json"}
 
 # Column order — also defines the full set of valid job fields.
 _COLUMNS = (
@@ -59,6 +59,8 @@ _COLUMNS = (
     "validated_results",
     "revision_data",
     "error_message",
+    "status_detail",
+    "reescoramento_json",
     "optimization_mode",
     "inventory_name",
     "created_at",
@@ -87,6 +89,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     validated_results TEXT,
     revision_data TEXT,
     error_message TEXT,
+    status_detail TEXT,
+    reescoramento_json TEXT,
     optimization_mode TEXT DEFAULT 'price',
     inventory_name TEXT,
     created_at TEXT NOT NULL,
@@ -110,6 +114,14 @@ def _connect() -> sqlite3.Connection:
 def init_db() -> None:
     with _lock, _connect() as conn:
         conn.executescript(_CREATE_SQL)
+        # Migração idempotente para DBs criados antes da coluna existir.
+        # NUNCA dentro do _CREATE_SQL: CREATE TABLE IF NOT EXISTS não altera
+        # tabela existente, então a coluna nova precisa do ALTER explícito.
+        for col in ("status_detail", "reescoramento_json"):
+            try:
+                conn.execute(f"ALTER TABLE jobs ADD COLUMN {col} TEXT")
+            except sqlite3.OperationalError:
+                pass  # coluna já existe
 
 
 def _row_to_job(row: sqlite3.Row) -> dict:
@@ -237,6 +249,22 @@ def list_jobs(branch_id: Optional[str] = None) -> List[dict]:
                 "SELECT * FROM jobs ORDER BY created_at DESC"
             ).fetchall()
     return [_row_to_job(r) for r in rows]
+
+
+def count_jobs_since(branch_ids: Iterable[str], since_iso: str) -> int:
+    """Conta jobs criados a partir de ``since_iso`` nas branches dadas (quota)."""
+    ids = [b for b in branch_ids if b]
+    if not ids:
+        return 0
+    init_db()
+    placeholders = ",".join("?" for _ in ids)
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            f"SELECT COUNT(*) FROM jobs WHERE branch_id IN ({placeholders}) "
+            "AND created_at >= ?",
+            (*ids, since_iso),
+        ).fetchone()
+    return int(row[0]) if row else 0
 
 
 def all_jobs() -> List[dict]:

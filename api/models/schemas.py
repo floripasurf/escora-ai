@@ -1,8 +1,44 @@
 """Pydantic request/response schemas."""
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Optional, List
 from datetime import datetime
+
+
+class ReescoramentoInput(BaseModel):
+    """Bloco opcional de reescoramento/desforma (docs/ux/reescoramento_input_block.md).
+
+    Espelha o JSON Schema v1 (estrutura.app/schemas/reescoramento.v1.json),
+    incluindo a regra condicional: desforma_dias < 14 (piso NBR 14931) exige
+    justificativa E aprovacao do calculista.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    multi_pavimento: bool = False
+    num_niveis_reescoramento: int = Field(default=0, ge=0, le=6)
+    fcj_aos_dias_mpa: Optional[float] = Field(default=None, ge=5, le=80)
+    fcj_idade_dias: int = Field(default=14, ge=1, le=90)
+    eci_mpa: Optional[float] = Field(default=None, ge=10000, le=60000)
+    carga_final_kn_m2: Optional[float] = Field(default=None, ge=0, le=50)
+    carga_estado_construcao_kn_m2: float = 1.5
+    calculista_aprovacao: str = ""
+    desforma_dias: int = Field(default=14, ge=1, le=90)
+    desforma_justificativa: str = ""
+    desforma_anexo_laudo: str = ""
+
+    @model_validator(mode="after")
+    def _desforma_antecipada_exige_justificativa(self):
+        if self.desforma_dias < 14:
+            if not self.desforma_justificativa.strip():
+                raise ValueError(
+                    "desforma_dias < 14 (piso NBR 14931) exige justificativa tecnica"
+                )
+            if len(self.calculista_aprovacao.strip()) < 5:
+                raise ValueError(
+                    "desforma_dias < 14 exige aprovacao do calculista (nome + CREA/CAU)"
+                )
+        return self
 
 
 class JobCreateResponse(BaseModel):
@@ -60,6 +96,8 @@ class JobStatusResponse(BaseModel):
     status: str
     filename: str
     error_message: Optional[str] = None
+    # Estágio corrente do pipeline enquanto status == "processing"
+    status_detail: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     # Results (filled when status == "done")
@@ -87,4 +125,6 @@ class JobStatusResponse(BaseModel):
     review_reasons: Optional[List[str]] = None
     diagnostics: Optional[DiagnosticsData] = None
     consumption_summary: Optional[List[ConsumptionSummaryRow]] = None
+    # Geometria simplificada p/ preview SVG 2D ({slabs, beams, bbox, truncated})
+    preview: Optional[dict] = None
 

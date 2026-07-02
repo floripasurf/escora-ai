@@ -22,9 +22,13 @@ from api.services.inventory_service import (
     template_xlsx,
     upsert_inventory_item,
 )
+from api.services.storage import read_upload_capped
 from src.auth.branches import Branch, User
 
 router = APIRouter(prefix="/api/v1/inventory", tags=["inventory"])
+
+# CSV/XLSX imports are parsed fully in RAM — cap far below the DXF limit.
+IMPORT_MAX_BYTES = 5 * 1024 * 1024
 
 
 class InventoryItemRequest(BaseModel):
@@ -125,7 +129,7 @@ async def import_preview(
     branch: Branch = Depends(get_current_branch),
     _: User = Depends(require_owner_or_admin),
 ):
-    raw = await file.read()
+    raw = await read_upload_capped(file, IMPORT_MAX_BYTES)
     filename = file.filename or ""
     try:
         if _is_xlsx(filename, raw):
@@ -142,7 +146,7 @@ async def import_csv(
     branch: Branch = Depends(get_current_branch),
     user: User = Depends(require_owner_or_admin),
 ):
-    raw = await file.read()
+    raw = await read_upload_capped(file, IMPORT_MAX_BYTES)
     filename = file.filename or ""
     try:
         if _is_xlsx(filename, raw):

@@ -1,6 +1,8 @@
 """FastAPI application — Escora.AI SaaS MVP."""
 
 import logging
+import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -16,17 +18,53 @@ from api.routes.design import router as design_router
 from api.routes.drawing import router as drawing_router
 from api.routes.inventory import router as inventory_router
 from api.config import settings
-from api.services import job_service
+from api.services import job_service, project_service
+
+# Config central de logging: sem isto os logger.* espalhados dependiam da
+# config default do uvicorn (nível/formato inconsistentes entre módulos).
+logging.basicConfig(
+    level=os.environ.get("ESCORA_LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Escora.AI", version="0.3.0")
+# Observabilidade opcional: só ativa com SENTRY_DSN no ambiente (plist do
+# engine). O default do sentry-sdk já captura exceções ASGI não tratadas.
+if os.environ.get("SENTRY_DSN"):
+    try:
+        import sentry_sdk
 
+        sentry_sdk.init(dsn=os.environ["SENTRY_DSN"], traces_sample_rate=0.0)
+        logger.info("Sentry habilitado")
+    except ImportError:
+        logger.warning(
+            "SENTRY_DSN setado mas sentry-sdk não instalado (pip install -e '.[ops]')"
+        )
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    _startup()
+    yield
+
+
+app = FastAPI(title="Escora.AI", version="0.3.0", lifespan=_lifespan)
+
+# The production frontend (https://estrutura.app) calls the engine
+# cross-origin; pages served by the engine itself are same-origin.
+_DEFAULT_CORS_ORIGINS = (
+    "https://estrutura.app,http://localhost:8020,http://127.0.0.1:8020"
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[
+        o.strip()
+        for o in os.environ.get("ESCORA_CORS_ORIGINS", _DEFAULT_CORS_ORIGINS).split(",")
+        if o.strip()
+    ],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    allow_headers=["Authorization", "X-Branch-Id", "Content-Type"],
 )
 
 app.include_router(auth_router)
@@ -43,9 +81,7 @@ if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
-@app.on_event("startup")
 def _startup() -> None:
-    import os
     import shutil
 
     settings.ensure_dirs()
@@ -67,6 +103,10 @@ def _startup() -> None:
     swept = job_service.sweep_orphan_processing()
     if swept:
         logger.warning(f"Startup: marked {swept} orphan job(s) as error")
+    project_service.init_db()
+    swept_projects = project_service.sweep_orphan_processing()
+    if swept_projects:
+        logger.warning(f"Startup: marked {swept_projects} orphan project(s) as error")
     # Session store (SQLite) warm-up.
     from src.auth.branches import init_sessions_db, repair_default_inventory_names
     from src.auth.registry import init_registry_db

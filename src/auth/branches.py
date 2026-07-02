@@ -261,10 +261,89 @@ def clear_sessions() -> None:
     """Test helper: wipe all sessions."""
     try:
         init_sessions_db()
+        init_reset_tokens_db()
         with _session_lock, _session_conn() as conn:
             conn.execute("DELETE FROM sessions")
+            conn.execute("DELETE FROM reset_tokens")
     except Exception:
         pass
+
+
+# ---------- Password reset tokens ----------
+# Mesmo padrão das sessões (SQLite em sessions.db), mas o token é armazenado
+# como SHA-256: um vazamento do .db não permite resetar senhas de ninguém.
+
+RESET_TOKEN_TTL_SECONDS = 60 * 60  # 1 hora
+
+
+def init_reset_tokens_db() -> None:
+    with _session_lock, _session_conn() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS reset_tokens (
+                token_hash TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
+                expires_at REAL NOT NULL,
+                used INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+
+
+def _hash_reset_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def create_reset_token(username: str) -> str:
+    """Cria um token de reset single-use (TTL 1h) e retorna o valor CRU."""
+    init_sessions_db()
+    init_reset_tokens_db()
+    token = secrets.token_urlsafe(32)
+    expires_at = time.time() + RESET_TOKEN_TTL_SECONDS
+    with _session_lock, _session_conn() as conn:
+        # Invalida tokens anteriores do mesmo usuário (só o mais novo vale).
+        conn.execute(
+            "UPDATE reset_tokens SET used = 1 WHERE username = ?",
+            (username.strip().lower(),),
+        )
+        conn.execute(
+            "INSERT INTO reset_tokens (token_hash, username, expires_at) VALUES (?, ?, ?)",
+            (_hash_reset_token(token), username.strip().lower(), expires_at),
+        )
+    return token
+
+
+def consume_reset_token(token: str) -> Optional[str]:
+    """Valida TTL + single-use e marca como usado. Retorna o username ou None."""
+    if not token:
+        return None
+    init_reset_tokens_db()
+    with _session_lock, _session_conn() as conn:
+        row = conn.execute(
+            "SELECT username, expires_at, used FROM reset_tokens WHERE token_hash = ?",
+            (_hash_reset_token(token),),
+        ).fetchone()
+        if row is None:
+            return None
+        username, expires_at, used = row
+        if used or expires_at < time.time():
+            return None
+        conn.execute(
+            "UPDATE reset_tokens SET used = 1 WHERE token_hash = ?",
+            (_hash_reset_token(token),),
+        )
+    return username
+
+
+def revoke_sessions_for_user(username: str) -> int:
+    """Derruba todas as sessões do usuário (pós-reset de senha)."""
+    init_sessions_db()
+    with _session_lock, _session_conn() as conn:
+        cur = conn.execute(
+            "DELETE FROM sessions WHERE username = ?",
+            (username.strip().lower(),),
+        )
+        return cur.rowcount
 
 
 _EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")

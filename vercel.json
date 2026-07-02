@@ -7,6 +7,16 @@
   "cleanUrls": true,
   "redirects": [
     {
+      "source": "/en",
+      "destination": "/",
+      "permanent": false
+    },
+    {
+      "source": "/en.html",
+      "destination": "/",
+      "permanent": false
+    },
+    {
       "source": "/:path(.*)",
       "has": [
         { "type": "host", "value": "shoring.app" }
