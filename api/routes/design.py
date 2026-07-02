@@ -3,17 +3,23 @@
 import logging
 from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from src.models.masonry import DesignInput, SiteAnalysis
 from src.layout.solver import solve_layout_interactive
 from src.utils.masonry_constants import MIN_ROOM_AREAS, MIN_ROOM_DIMENSION
+from api.deps import get_current_user
 from api.services.project_pipeline_service import _build_preview
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/design", tags=["design"])
+# Stateless generation endpoints: session required, no X-Branch-Id needed.
+router = APIRouter(
+    prefix="/api/v1/design",
+    tags=["design"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 class DesignPreviewRequest(BaseModel):

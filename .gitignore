@@ -48,3 +48,6 @@ input/Prints/
 data/analysis/
 diagnostics/
 Quarantine/
+
+# Registry seed with real credentials — never commit (use data/locadoras.example.json as template)
+data/locadoras.json

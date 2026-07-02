@@ -325,6 +325,31 @@
 
 <script>
 const API = window.location.origin;
+// Auth: reuses the session created on the main app (index.html login).
+const TOKEN = localStorage.getItem('escora_token') || '';
+const BRANCH_ID = localStorage.getItem('escora_branch_id') || '';
+if (!TOKEN || !BRANCH_ID) window.location.replace('/');
+
+function authHeaders(extra = {}) {
+    return { 'Authorization': `Bearer ${TOKEN}`, 'X-Branch-Id': BRANCH_ID, ...extra };
+}
+
+async function authDownload(url, filename) {
+    try {
+        const res = await fetch(`${API}${url}`, { headers: authHeaders() });
+        if (res.status === 401) { window.location.replace('/'); return; }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const blob = await res.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(a.href);
+    } catch (err) {
+        alert('Erro ao baixar arquivo: ' + err.message);
+    }
+}
+
 let currentStep = 1;
 let projectId = null;
 
@@ -389,9 +414,10 @@ async function generateProject() {
         // Create project
         const res = await fetch(`${API}/api/v1/projects`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify(data),
         });
+        if (res.status === 401) { window.location.replace('/'); return; }
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const { id } = await res.json();
         projectId = id;
@@ -410,7 +436,7 @@ async function pollStatus(id) {
     for (let i = 0; i < maxAttempts; i++) {
         await new Promise(r => setTimeout(r, 1000));
         try {
-            const res = await fetch(`${API}/api/v1/projects/${id}/status`);
+            const res = await fetch(`${API}/api/v1/projects/${id}/status`, { headers: authHeaders() });
             const data = await res.json();
 
             if (data.status === 'done') {
@@ -444,16 +470,17 @@ function showResults(data) {
     const dlGrid = document.getElementById('dl-grid');
     dlGrid.innerHTML = '';
     const files = [
-        { key: 'has_arch_dxf', url: `/api/v1/projects/${projectId}/download/dxf/arch`, ext: 'DXF', name: 'Planta Arquitetônica' },
-        { key: 'has_struct_dxf', url: `/api/v1/projects/${projectId}/download/dxf/struct`, ext: 'DXF', name: 'Planta Estrutural' },
-        { key: 'has_memorial_pdf', url: `/api/v1/projects/${projectId}/download/pdf`, ext: 'PDF', name: 'Memorial de Cálculo' },
-        { key: 'has_bom_csv', url: `/api/v1/projects/${projectId}/download/csv`, ext: 'CSV', name: 'Lista de Materiais' },
-        { key: 'has_zip', url: `/api/v1/projects/${projectId}/download/zip`, ext: 'ZIP', name: 'Pacote Completo' },
+        { key: 'has_arch_dxf', url: `/api/v1/projects/${projectId}/download/dxf/arch`, ext: 'DXF', name: 'Planta Arquitetônica', file: 'planta_arquitetonica.dxf' },
+        { key: 'has_struct_dxf', url: `/api/v1/projects/${projectId}/download/dxf/struct`, ext: 'DXF', name: 'Planta Estrutural', file: 'planta_estrutural.dxf' },
+        { key: 'has_memorial_pdf', url: `/api/v1/projects/${projectId}/download/pdf`, ext: 'PDF', name: 'Memorial de Cálculo', file: 'memorial_calculo.pdf' },
+        { key: 'has_bom_csv', url: `/api/v1/projects/${projectId}/download/csv`, ext: 'CSV', name: 'Lista de Materiais', file: 'lista_materiais.csv' },
+        { key: 'has_zip', url: `/api/v1/projects/${projectId}/download/zip`, ext: 'ZIP', name: 'Pacote Completo', file: 'projeto_completo.zip' },
     ];
     files.forEach(f => {
         if (data[f.key]) {
             const a = document.createElement('a');
-            a.href = f.url;
+            a.href = '#';
+            a.onclick = (e) => { e.preventDefault(); authDownload(f.url, f.file); };
             a.className = 'dl-btn';
             a.innerHTML = `<span class="ext">${f.ext}</span><span class="name">${f.name}</span>`;
             dlGrid.appendChild(a);

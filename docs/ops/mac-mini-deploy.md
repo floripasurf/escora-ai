@@ -58,6 +58,17 @@ retenção 14. Sincronize `~/escora-backups` para fora da máquina (rsync/iCloud
 - [ ] BACKUP diário agendado e restauração testada uma vez (gap aberto)
 - [ ] `git pull` em `~/escora-ai` + `kickstart com.escora.engine` + smoke no /health
 - [ ] `SIGNUP_INVITE_CODES` setado no ambiente do engine + códigos gerados p/ pilotos
-- [ ] **Rotacionar** os hashes em `data/locadoras.json` (admin `devsalt2026` + conta pessoal) e **limpar** o `registry.db` de produção se contiver dados de teste
+- [ ] **Rotacionar** as senhas reais no `registry.db` de produção (admin Orguel + conta pessoal — os hashes antigos vazaram no histórico git antes do sprint-1) e **limpar** dados de teste:
+  ```bash
+  cd ~/escora-ai && ESCORA_DATA_DIR=~/escora-data .venv/bin/python -c "
+  from src.auth.registry import update_password
+  from src.auth.branches import hash_password
+  update_password('admin', hash_password('NOVA_SENHA_FORTE'))"
+  ```
 - [ ] `launchctl list | grep escora` mostra engine + tunnel ativos
-- [ ] CORS allowlist + rate-limit de login (PR #1) aplicados
+- [x] CORS allowlist + rate-limit de login aplicados (sprint-1-security). Origins extras via env `ESCORA_CORS_ORIGINS` (CSV); rate-limit usa `CF-Connecting-IP` atrás do tunnel e desliga com `ESCORA_RATE_LIMIT_DISABLED=1`
+
+> **Nota (sprint-1):** `data/locadoras.json` saiu do repositório (segredos versionados).
+> O seed inicial agora usa `data/locadoras.example.json` como template — copie para o
+> caminho de `ESCORA_LOCADORAS_FILE` com hashes reais. Produção não é afetada: o
+> `registry.db` existente continua sendo a fonte de verdade.

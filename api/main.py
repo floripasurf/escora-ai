@@ -1,6 +1,7 @@
 """FastAPI application — Escora.AI SaaS MVP."""
 
 import logging
+import os
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -22,11 +23,20 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Escora.AI", version="0.3.0")
 
+# The production frontend (https://estrutura.app) calls the engine
+# cross-origin; pages served by the engine itself are same-origin.
+_DEFAULT_CORS_ORIGINS = (
+    "https://estrutura.app,http://localhost:8020,http://127.0.0.1:8020"
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[
+        o.strip()
+        for o in os.environ.get("ESCORA_CORS_ORIGINS", _DEFAULT_CORS_ORIGINS).split(",")
+        if o.strip()
+    ],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    allow_headers=["Authorization", "X-Branch-Id", "Content-Type"],
 )
 
 app.include_router(auth_router)

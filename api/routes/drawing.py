@@ -5,9 +5,10 @@ import tempfile
 from pathlib import Path
 from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 
 from src.drawing import TechnicalSheet, NBR
 from src.drawing.nbr import HatchMaterial, ProjectionSystem
@@ -17,10 +18,31 @@ from src.drawing.perspectives import (
     draw_cavaleira_box, CavaleiraConfig, draw_elevation,
 )
 from src.drawing.views import SectionCut, generate_section_from_walls
+from api.deps import get_current_user
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/drawing", tags=["drawing"])
+# Stateless generation endpoints: session required, no X-Branch-Id needed.
+router = APIRouter(
+    prefix="/api/v1/drawing",
+    tags=["drawing"],
+    dependencies=[Depends(get_current_user)],
+)
+
+
+def _unlink_quiet(path: str) -> None:
+    Path(path).unlink(missing_ok=True)
+
+
+def _save_sheet_tempfile(sheet: "TechnicalSheet") -> str:
+    """Save the sheet to a tempfile; unlink it if the save itself fails."""
+    with tempfile.NamedTemporaryFile(suffix=".dxf", delete=False) as f:
+        tmp_path = f.name
+    try:
+        return sheet.save(tmp_path)
+    except Exception:
+        _unlink_quiet(tmp_path)
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -191,14 +213,14 @@ async def generate_floor_plan(request: FloorPlanRequest):
                 tuple(s.start), tuple(s.end), label=s.label,
             )
 
-        # Save to temp file
-        with tempfile.NamedTemporaryFile(suffix=".dxf", delete=False) as f:
-            path = sheet.save(f.name)
+        # Save to temp file, removed after the response is sent
+        path = _save_sheet_tempfile(sheet)
 
         return FileResponse(
             path,
             media_type="application/dxf",
             filename="planta_baixa.dxf",
+            background=BackgroundTask(_unlink_quiet, path),
         )
 
     except Exception as e:
@@ -246,13 +268,13 @@ async def generate_section(request: FloorPlanRequest):
                 origin=(0.05, 0.05 + origin_y),
             )
 
-        with tempfile.NamedTemporaryFile(suffix=".dxf", delete=False) as f:
-            path = sheet.save(f.name)
+        path = _save_sheet_tempfile(sheet)
 
         return FileResponse(
             path,
             media_type="application/dxf",
             filename="corte.dxf",
+            background=BackgroundTask(_unlink_quiet, path),
         )
 
     except HTTPException:
@@ -300,13 +322,13 @@ async def generate_perspective(request: FloorPlanRequest):
                     w.thickness, abs(dy), w.height,
                 )
 
-        with tempfile.NamedTemporaryFile(suffix=".dxf", delete=False) as f:
-            path = sheet.save(f.name)
+        path = _save_sheet_tempfile(sheet)
 
         return FileResponse(
             path,
             media_type="application/dxf",
             filename="perspectiva.dxf",
+            background=BackgroundTask(_unlink_quiet, path),
         )
 
     except Exception as e:
