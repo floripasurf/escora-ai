@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "updated_at": "2026-07-02",
+  "_comment": "Template para o seed inicial do registry. Copie para o caminho apontado por ESCORA_LOCADORAS_FILE (ou data/locadoras.json em dev) e gere o hash com: python -c \"import hashlib,secrets; salt=secrets.token_hex(8); print(f'pbkdf2:sha256:100000${salt}$'+hashlib.pbkdf2_hmac('sha256', b'SUA_SENHA', salt.encode(), 100000).hex())\"",
+  "locadoras": [
+    {
+      "id": "exemplo",
+      "name": "Locadora Exemplo",
+      "metodologia": {
+        "laje_layout": "line_first"
+      },
+      "branches": [
+        {
+          "id": "exemplo-sede",
+          "branch_name": "Sede",
+          "inventory_name": "orguel_sjc"
+        }
+      ],
+      "users": [
+        {
+          "username": "admin@exemplo.com.br",
+          "name": "Admin Exemplo",
+          "password_hash": "pbkdf2:sha256:100000$TROQUE_ESTE_SALT$TROQUE_ESTE_HASH"
+        }
+      ]
+    }
+  ]
+}

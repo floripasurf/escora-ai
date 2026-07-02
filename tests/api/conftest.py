@@ -71,11 +71,16 @@ def _isolated_data(tmp_path_factory, monkeypatch):
 
     monkeypatch.setenv("ESCORA_DATA_DIR", str(data_dir))
     monkeypatch.setenv("ESCORA_LOCADORAS_FILE", str(loc_file))
+    # Every test shares the TestClient "IP"; the limiter is tested explicitly
+    # in test_ratelimit.py, which unsets this.
+    monkeypatch.setenv("ESCORA_RATE_LIMIT_DISABLED", "1")
 
     from src.auth.branches import clear_sessions
     from api.services.job_service import _reset_for_tests
+    from api import ratelimit
     clear_sessions()
     _reset_for_tests()
+    ratelimit.reset()
     yield
     clear_sessions()
 

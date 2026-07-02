@@ -25,6 +25,7 @@ from src.auth.branches import (
 )
 from src.models.methodology import load_methodology
 from api.deps import get_current_branch
+from api.ratelimit import rate_limit
 from api.services.methodology_view import serialize_profile
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
@@ -98,7 +99,11 @@ class LoginResponse(BaseModel):
     branches: list[BranchDTO]
 
 
-@router.post("/login", response_model=LoginResponse)
+@router.post(
+    "/login",
+    response_model=LoginResponse,
+    dependencies=[Depends(rate_limit("login", max_calls=5, window_s=60))],
+)
 async def login(body: LoginRequest):
     user = authenticate_user(body.username.strip().lower(), body.password)
     if user is None:
@@ -124,7 +129,10 @@ async def login(body: LoginRequest):
     )
 
 
-@router.post("/signup")
+@router.post(
+    "/signup",
+    dependencies=[Depends(rate_limit("signup", max_calls=3, window_s=60))],
+)
 async def signup(body: SignupRequest):
     if not body.name or not body.email or not body.password:
         raise HTTPException(status_code=400, detail="Nome, email e senha são obrigatórios")

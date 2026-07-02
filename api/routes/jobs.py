@@ -624,7 +624,10 @@ async def upload_revision(
 
     # Save revision (streamed to disk, never buffered in RAM)
     revision_path = await storage.save_upload_stream(
-        file, f"revisao_{file.filename}", job_id, max_bytes=MAX_FILE_SIZE
+        file,
+        f"revisao_{storage.sanitize_filename(file.filename)}",
+        job_id,
+        max_bytes=MAX_FILE_SIZE,
     )
     job_service.update_job(job_id, revision_path=revision_path)
 
