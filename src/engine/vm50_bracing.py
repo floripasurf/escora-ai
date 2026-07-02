@@ -32,7 +32,7 @@ separadamente `pilar_barras_ancoragem` (peça diferente).
 
 from dataclasses import dataclass, field
 from math import ceil, floor
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List
 
 from src.models.calculation_models import BeamShoringResult
 

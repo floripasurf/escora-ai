@@ -9,7 +9,6 @@ Fix: conectar apenas torres consecutivas da mesma linha, com segmento
 interrompido quando o gap entre torres ultrapassa 1.5× o grid
 (indicando pilar no meio).
 """
-from pathlib import Path
 
 import ezdxf
 import pytest

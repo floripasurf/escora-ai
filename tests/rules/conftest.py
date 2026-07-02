@@ -3,7 +3,6 @@
 Provides factory functions to create synthetic RuleProject instances
 with minimal data for targeted rule testing.
 """
-import pytest
 from shapely.geometry import Polygon, box
 
 from src.rules.project import (

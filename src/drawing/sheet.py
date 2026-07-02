@@ -7,21 +7,19 @@ and delegates to primitives for actual geometry.
 
 import math
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import ezdxf
-from ezdxf.document import Drawing
 
 from .nbr import (
-    SheetFormat, LineType, Scale, LetteringStyle,
-    HatchMaterial, ProjectionSystem, ViewArrangement,
-    mm_to_lineweight, LINE_WIDTH_PRESETS, ACI_COLORS,
+    SheetFormat, LineType, Scale, HatchMaterial, ProjectionSystem, ViewArrangement,
+    mm_to_lineweight,
 )
 from .primitives import (
     DimensionStyle, HatchPattern, setup_dim_style,
-    add_linear_dimension, add_aligned_dimension, add_chain_dimensions,
+    add_linear_dimension, add_chain_dimensions,
     add_radius_dimension, add_diameter_dimension,
     add_hatch, add_section_hatch, add_text, add_room_label,
     add_leader, add_cutting_plane,

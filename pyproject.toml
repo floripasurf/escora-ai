@@ -33,6 +33,8 @@ dev = [
     "pytest-cov>=4.0",
     "pytest-timeout>=2.0",
     "httpx>=0.27",
+    "ruff>=0.4",
+    "mypy>=1.10",
 ]
 # Observabilidade opcional em produção (ativada por SENTRY_DSN no plist)
 ops = [
@@ -56,6 +58,52 @@ timeout_method = "thread"
 markers = [
     "slow: testes de regressao lentos com DXFs reais (rodar com -m slow)",
 ]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+# Baseline mínimo (codebase nunca foi lintado): erros de sintaxe/import/
+# nomes indefinidos + import hygiene. Expandir gradualmente (ratchet).
+select = ["E4", "E7", "E9", "F"]
+ignore = [
+    "E741",  # ambiguous variable name (l/I/O) — comum em geometria (l = length)
+    "F841",  # unused variable — 28 casos legados (unpacking intencional); ratchet futuro
+]
+
+[tool.ruff.lint.per-file-ignores]
+# __init__.py de verifiers importa módulos pelo efeito colateral (REGISTRY.register)
+"src/rules/verifiers/__init__.py" = ["F401"]
+# imports tardios deliberados (evitar circular / custo de import)
+"api/routes/jobs.py" = ["E402"]
+"src/engine/shore_reviewer.py" = ["E402"]
+
+[tool.mypy]
+# Escopo incremental: módulos já bem tipados. Expandir por diretório (ratchet).
+# follow_imports=silent: só reporta erros nos arquivos do escopo, sem exigir
+# que o resto do codebase (stage_calculate etc.) esteja limpo antes.
+files = ["api", "src/rules", "src/utils", "src/auth"]
+follow_imports = "silent"
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
+check_untyped_defs = false
+
+# Dívida tipada conhecida (27 erros em 2026-07) — ratchet: remover módulos
+# desta lista conforme forem limpos; NÃO adicionar novos.
+[[tool.mypy.overrides]]
+module = [
+    "api.models.db",
+    "api.services.pipeline_service",
+    "api.services.inventory_service",
+    "api.routes.jobs",
+    "api.routes.projects",
+    "api.routes.drawing",
+    "api.routes.design",
+    "api.routes.auth",
+    "api.routes.admin",
+]
+ignore_errors = true
 
 [tool.setuptools.packages.find]
 include = ["src*"]

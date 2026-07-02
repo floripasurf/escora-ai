@@ -1,8 +1,6 @@
 """Testes da aba `Volumes` no Excel e do breakdown no ReportData."""
 
-import os
 
-import pytest
 from openpyxl import load_workbook
 
 from src.models.calculation_models import (
@@ -10,7 +8,7 @@ from src.models.calculation_models import (
 )
 from src.output.excel_generator import generate_excel
 from src.output.report_data import (
-    ReportData, ReportMetadata, SummaryData, VolumeRow, build_report_data,
+    ReportMetadata, build_report_data,
 )
 
 

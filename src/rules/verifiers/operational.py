@@ -264,7 +264,7 @@ def _verify_op_012(project: "RuleProject") -> list[Violation]:
                 "length_m": beam.length_m,
                 "decision_rule": rule,
             },
-            limit_value=f"<=30x60cm e <=3.00m (ou torre/estaiamento)",
+            limit_value="<=30x60cm e <=3.00m (ou torre/estaiamento)",
         ))
     return violations
 

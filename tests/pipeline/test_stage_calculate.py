@@ -1,6 +1,5 @@
 """Tests for the calculation pipeline bridge."""
 
-import pytest
 from src.pipeline.stage_calculate import (
     associate_beams_pillars,
     run_calculation,

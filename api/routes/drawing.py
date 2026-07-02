@@ -11,11 +11,10 @@ from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
 from src.drawing import TechnicalSheet, NBR
-from src.drawing.nbr import HatchMaterial, ProjectionSystem
+from src.drawing.nbr import HatchMaterial
 from src.drawing.sheet import TitleBlockInfo
 from src.drawing.perspectives import (
-    draw_isometric_box, draw_isometric_from_walls,
-    draw_cavaleira_box, CavaleiraConfig, draw_elevation,
+    draw_isometric_box,
 )
 from src.drawing.views import SectionCut, generate_section_from_walls
 from api.deps import get_current_user

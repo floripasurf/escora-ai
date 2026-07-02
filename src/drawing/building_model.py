@@ -34,7 +34,6 @@ from .materials import (
     StructuralMember,
     get_wall_material, get_slab_material, get_foundation_material,
     get_roof_material,
-    WALL_MATERIALS, SLAB_MATERIALS,
 )
 from .nbr import HatchMaterial
 

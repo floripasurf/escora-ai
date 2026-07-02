@@ -401,7 +401,7 @@ def manual(
     if load_per_shore > shore.load_capacity_kn:
         shore = select_shore(catalog, altura, load_per_shore)
         if shore is None:
-            console.print(f"[red]Erro: carga por escora excede todos os modelos[/red]")
+            console.print("[red]Erro: carga por escora excede todos os modelos[/red]")
             raise typer.Exit(1)
         shores, nx, ny, sx, sy = distribute_shores(slab, shore, total_load, espacamento_max)
         load_per_shore = total_load / len(shores)

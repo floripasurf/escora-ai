@@ -11,15 +11,12 @@ Models are saved as joblib files for inference in the pipeline.
 
 import json
 import logging
-import os
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional
 
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, GradientBoostingRegressor
 from sklearn.model_selection import cross_val_score, LeaveOneGroupOut
-from sklearn.metrics import classification_report, confusion_matrix
-from sklearn.preprocessing import StandardScaler
 
 try:
     import joblib
@@ -27,7 +24,7 @@ except ImportError:
     from sklearn.externals import joblib
 
 from src.ml.feature_extractor import (
-    extract_training_data, examples_to_arrays, TrainingExample,
+    extract_training_data, examples_to_arrays,
 )
 
 logger = logging.getLogger(__name__)

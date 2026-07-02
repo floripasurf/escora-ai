@@ -100,17 +100,72 @@ _LOAD_003 = Rule(
 )
 
 
+# O engine aplica 10/8 (=1.25) na escora mais proxima do apoio central para
+# vigas com EXATAMENTE 3 apoios (beam_calculator, escopo confirmado com o
+# engenheiro). O verificador usa 1.20 como piso — folga para ruido de
+# posicionamento/arredondamento sem deixar passar a ausencia do fator.
+# Vigas com >=4 apoios ficam fora do escopo (o engine tambem nao amplifica).
+HYPERSTATIC_MIN_RATIO = 1.20
+
+
 def _verify_hyperestaticity(project: "RuleProject") -> list[Violation]:
+    import math
+
     violations = []
     for beam in project.beams:
-        n_supports = len(beam.support_positions)
-        if n_supports >= 3:
-            # Check that the beam's decision_rule or load reflects
-            # the +25% factor. If the beam uses towers at center,
-            # it implicitly handles this. We verify the load value.
-            # This is a structural verification — the pipeline should
-            # apply the +25% factor. We flag if it doesn't appear to.
-            pass  # TODO: needs access to per-support reaction values
+        if len(beam.support_positions) != 3 or len(beam.shores) < 3:
+            continue
+        if not beam.centerline or len(beam.centerline) < 2:
+            continue
+
+        (x0, y0) = beam.centerline[0]
+        (x1, y1) = beam.centerline[-1]
+        dx, dy = x1 - x0, y1 - y0
+        length = math.hypot(dx, dy)
+        if length <= 1e-6:
+            continue
+
+        central_pos = sorted(
+            max(0.0, min(length, sp)) for sp in beam.support_positions
+        )[1]
+
+        def _axis_pos(shore) -> float:
+            return ((shore.x - x0) * dx + (shore.y - y0) * dy) / length
+
+        loads = [s.load_kn for s in beam.shores]
+        central_idx = min(
+            range(len(beam.shores)),
+            key=lambda i: abs(_axis_pos(beam.shores[i]) - central_pos),
+        )
+        others = sorted(
+            load for i, load in enumerate(loads)
+            if i != central_idx and load > 0
+        )
+        if not others:
+            continue
+        median_other = others[len(others) // 2]
+        central_load = loads[central_idx]
+
+        if central_load < HYPERSTATIC_MIN_RATIO * median_other - 1e-6:
+            violations.append(Violation(
+                rule_id="LOAD-003",
+                severity="error",
+                message=(
+                    f"Viga {beam.label or '?'} (3 apoios): escora do apoio "
+                    f"central com {central_load:.1f} kN vs mediana "
+                    f"{median_other:.1f} kN das demais — acréscimo de 25% "
+                    f"(10/8 q·L, Orguel p.109 regra 14) não aplicado"
+                ),
+                element_id=beam.label or None,
+                actual_value=round(
+                    central_load / median_other if median_other else 0.0, 3
+                ),
+                limit_value=HYPERSTATIC_MIN_RATIO,
+                location=(
+                    beam.shores[central_idx].x,
+                    beam.shores[central_idx].y,
+                ),
+            ))
     return violations
 
 

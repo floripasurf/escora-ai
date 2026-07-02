@@ -11,7 +11,6 @@ from __future__ import annotations
 import pytest
 
 from src.engine.vm_grid_builder import (
-    DEFAULT_VM_LENGTHS_MM,
     ShorePoint,
     VMGrid,
     VMSegment,
@@ -19,7 +18,7 @@ from src.engine.vm_grid_builder import (
     select_vm_length_mm,
     vm_grid_bom_summary,
 )
-from src.models.plywood import PlywoodSpec, default_plywood_spec
+from src.models.plywood import PlywoodSpec
 
 
 class TestSelectVMLength:

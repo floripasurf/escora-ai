@@ -1,6 +1,5 @@
 """Tests for the pipeline_service helper layer (regeneration from revision)."""
 
-import tempfile
 from pathlib import Path
 from unittest.mock import patch
 

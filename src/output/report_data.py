@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
-from collections import Counter, defaultdict
+from collections import defaultdict
 
 from src.models.calculation_models import CalculationResult
 from src.utils.constants import ESPESSURA_DEFAULT

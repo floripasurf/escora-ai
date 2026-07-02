@@ -46,6 +46,16 @@ ESFORCO_HORIZONTAL_FRACAO = 0.05  # 5%
 # psi0 = 1.0 em todas as variaveis). Manual §3.
 GAMMA_F = 1.4
 
+# Carga de projeto FALLBACK para laje sem area/carga calculavel (kN/m²).
+# Derivacao (laje macica default de 12 cm):
+#   (0.12 · GAMMA_CONCRETO + Q_FORMA_DEFAULT + Q_SOBRECARGA_DEFAULT) · GAMMA_F
+#   = (0.12 · 25 + 0.5 + 2.0) · 1.4 = 7.7
+# NBR 15696:2009 §4.2 (cargas) + §4.3.1 (gamma_f). So deve ser usado quando
+# area_m2 == 0 — caminho que tambem gera warning no resultado.
+Q_PROJETO_FALLBACK_LAJE_KN_M2 = (
+    (0.12 * GAMMA_CONCRETO + Q_FORMA_DEFAULT + Q_SOBRECARGA_DEFAULT) * GAMMA_F
+)
+
 # Coeficiente de ponderacao do MATERIAL de escoras/torres em compressao/
 # flambagem — NBR 15696:2009 §4.3.1.2 (manual §3, corrigido 2026-06-11;
 # pendencia 27). MINORA a RESISTENCIA: Rd = Rk / 1.5. Aplica-se

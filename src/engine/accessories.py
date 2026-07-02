@@ -21,8 +21,8 @@ Implementa as pendências 23 e 26 do manual (§21):
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
-from typing import Iterable, List, Sequence, Tuple
+from dataclasses import dataclass
+from typing import List, Sequence, Tuple
 
 # --- Tripés (manual §14 / JAU pág. 70) -------------------------------------
 

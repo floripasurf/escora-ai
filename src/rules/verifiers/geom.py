@@ -269,3 +269,49 @@ def _verify_barrote_edge_offset(project: "RuleProject") -> list[Violation]:
 
 
 REGISTRY.register(_GEOM_007, _verify_barrote_edge_offset)
+
+
+# --- GEOM-008: Escala de coordenadas por fallback (não confiável) ---
+# A escala multiplica TODA a geometria (áreas → cargas → seleção de escora).
+# Quando nenhum método confiável ($INSUNITS, calibração por DIMENSION, faixa
+# de coordenadas) determinou a escala, o resultado inteiro está condicionado
+# a um chute — precisa de confirmação humana da unidade do DXF.
+
+_GEOM_008 = Rule(
+    id="GEOM-008",
+    category="GEOM",
+    source=Source(type="dxf_pattern", ref="AGENTS.md Hard Rule #5 (no silent fallbacks)"),
+    description_pt=(
+        "Escala coordenadas→metros determinada por fallback (anotação de "
+        "texto ou default) — confirmar unidade do DXF antes do uso"
+    ),
+    severity="error",
+)
+
+_UNRELIABLE_SCALE_METHODS = {"text", "default"}
+
+
+def _verify_scale_method(project: "RuleProject") -> list[Violation]:
+    method = getattr(project, "scale_method", "")
+    if method not in _UNRELIABLE_SCALE_METHODS:
+        return []
+    origem = (
+        "anotação de escala em texto (ex.: 'ESC 1:50')"
+        if method == "text"
+        else "valor default do sistema"
+    )
+    return [Violation(
+        rule_id="GEOM-008",
+        severity="error",
+        message=(
+            f"Escala do desenho determinada por {origem}, não por método "
+            "confiável ($INSUNITS, cotas ou faixa de coordenadas). Todas as "
+            "áreas e cargas dependem dela — confirme a unidade do DXF "
+            "(m/cm/mm) e reenvie com escala explícita se necessário."
+        ),
+        actual_value=None,
+        limit_value=None,
+    )]
+
+
+REGISTRY.register(_GEOM_008, _verify_scale_method)

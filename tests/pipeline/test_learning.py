@@ -1,9 +1,7 @@
 """Tests for the learning system (Stage 6)."""
 
-import json
 import pytest
-from pathlib import Path
-from src.pipeline.learning_store import LearningStore, LearningRecord
+from src.pipeline.learning_store import LearningStore
 from src.pipeline.stage_learn import extract_learning
 from src.models.pipeline_models import (
     PipelineResult, LevelGroup, ClassifiedElement, ElementType,

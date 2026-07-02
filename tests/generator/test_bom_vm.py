@@ -1,7 +1,6 @@
 """Testes do BOM de VMs (vigas metalicas) - manual §28."""
 from __future__ import annotations
 
-from pathlib import Path
 
 import pytest
 

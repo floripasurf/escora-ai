@@ -6,11 +6,11 @@ Uses layer classification to filter noise (dimension lines, hatching, etc.).
 """
 
 import math
-from typing import List, Set, Dict, Optional
+from typing import List, Dict, Optional
 from src.pipeline.stage_segment import LevelSegment
 from src.pipeline.stage_parse import TextEntity
 from src.parser.segment_classifier import (
-    find_beam_candidates, find_centerline_beam_candidates, find_pillar_candidates,
+    find_beam_candidates, find_pillar_candidates,
 )
 from src.parser.text_classifier import classify_text, extract_section, TextClassification
 from src.models.pipeline_models import ClassifiedElement, ElementType
@@ -142,7 +142,7 @@ def _classify_layers(
 
     Returns a map of layer_name -> ElementType for structural layers.
     """
-    from collections import Counter, defaultdict
+    from collections import defaultdict
 
     known_beam_layers = known_beam_layers or {}
     known_pillar_layers = known_pillar_layers or {}

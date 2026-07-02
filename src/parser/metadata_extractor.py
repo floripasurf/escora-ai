@@ -1,7 +1,6 @@
 """Extração de metadados de layers e entidades DXF."""
 
 import re
-from typing import Optional
 from src.utils.constants import ESPESSURA_DEFAULT
 
 

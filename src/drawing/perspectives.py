@@ -11,7 +11,7 @@ import logging
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from .nbr import LineType, HatchMaterial, Scale
+from .nbr import LineType
 from .sheet import TechnicalSheet, Point2D
 
 logger = logging.getLogger(__name__)

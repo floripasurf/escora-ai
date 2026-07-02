@@ -1,5 +1,4 @@
 """Tests for equipment rules EQUIP-001 through EQUIP-005."""
-import pytest
 
 from src.rules.verifiers.equip import (
     _verify_no_telescopics_above_limit,

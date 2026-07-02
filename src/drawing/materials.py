@@ -8,9 +8,8 @@ Sources: NBR 6120 (cargas), NBR 15961 (alvenaria estrutural),
          NBR 6118 (concreto armado), tabelas de fabricantes.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
 
 from .nbr import HatchMaterial
 

@@ -12,7 +12,7 @@ Design principles:
 from __future__ import annotations
 
 import re
-from typing import Any, Callable, Literal, Optional, Protocol, TYPE_CHECKING
+from typing import Any, Literal, Optional, Protocol, TYPE_CHECKING
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 

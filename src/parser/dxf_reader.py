@@ -3,7 +3,7 @@
 import ezdxf
 from ezdxf.document import Drawing
 from ezdxf.entities import DXFEntity
-from typing import List, Dict, Optional
+from typing import List, Dict
 
 
 def read_dxf(filepath: str) -> Drawing:

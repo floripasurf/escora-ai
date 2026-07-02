@@ -1,6 +1,5 @@
 """Smoke tests for PDF report generation."""
 
-import pytest
 import os
 from src.output.pdf_generator import generate_pdf
 from src.output.report_data import (

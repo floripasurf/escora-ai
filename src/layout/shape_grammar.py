@@ -37,13 +37,8 @@ Cozinha separada: coluna própria (não empilhada no wet core).
 """
 
 import logging
-import math
-from typing import Dict, List, Any, Tuple
+from typing import Dict, Any
 
-from src.utils.masonry_constants import (
-    MIN_ROOM_AREAS, MIN_ROOM_DIMENSION, MAX_ROOM_AREAS,
-    MAX_ASPECT_RATIO, TARGET_AREA_RATIO,
-)
 
 logger = logging.getLogger(__name__)
 

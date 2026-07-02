@@ -8,9 +8,9 @@ Pipeline:
 
 import logging
 import copy
-from typing import Dict, Any, Optional
+from typing import Optional
 
-from ._base import TemplateV2, Zone
+from ._base import TemplateV2
 
 logger = logging.getLogger(__name__)
 

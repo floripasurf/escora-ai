@@ -16,16 +16,18 @@ from __future__ import annotations
 
 import logging
 import math
-import time
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, List, Optional, Sequence, Tuple
 
 import ifcopenshell
 import ifcopenshell.api
 
 from src.models.calculation_models import CalculationResult
-from src.models.pipeline_models import ClassifiedElement, ElementType, PipelineResult
+from src.models.pipeline_models import ElementType, PipelineResult
 from src.models.shore import SupportType
+
+if TYPE_CHECKING:
+    from src.models.masonry import MasonryProject
 
 logger = logging.getLogger(__name__)
 
@@ -475,7 +477,7 @@ def generate_masonry_ifc(
 
     Returns the output path on success.
     """
-    from src.models.masonry import MasonryProject, FoundationType
+    from src.models.masonry import FoundationType
 
     input_data = project.input
     stem = project_name or f"Alvenaria_{input_data.bedrooms}q_{int(input_data.target_area_m2)}m2"

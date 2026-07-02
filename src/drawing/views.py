@@ -7,14 +7,14 @@ from a 3D model or from 2D floor plan data, following 1st diedro conventions.
 import math
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 from .nbr import (
     ProjectionSystem, ViewArrangement, SectionType,
-    LineType, HatchMaterial, Scale,
+    LineType, HatchMaterial,
 )
 from .sheet import TechnicalSheet, Point2D
-from .primitives import add_text, add_cutting_plane, add_section_hatch
+from .primitives import add_section_hatch
 
 logger = logging.getLogger(__name__)
 

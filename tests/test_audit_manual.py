@@ -12,7 +12,6 @@ Covers:
 """
 
 import math
-import pytest
 
 from src.parser.region_filter import (
     _find_gap_splits, _is_in_detail_zone, DETAIL_EXCLUSION_RADIUS,

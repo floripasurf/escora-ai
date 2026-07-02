@@ -2,8 +2,7 @@
 
 import pytest
 from src.output.report_data import (
-    ReportMetadata, ReportData, SummaryData,
-    BeamRow, SlabRow, BomRow, build_report_data,
+    ReportMetadata, ReportData, build_report_data,
 )
 from src.models.calculation_models import (
     CalculationResult, BeamShoringResult, SlabShoringResult,

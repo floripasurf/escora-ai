@@ -1,6 +1,5 @@
-import pytest
 from src.models.pipeline_models import (
-    RawEntity, ClassifiedElement, ElementType, LevelGroup, PipelineResult
+    RawEntity, ClassifiedElement, ElementType
 )
 
 

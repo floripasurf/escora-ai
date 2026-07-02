@@ -1,16 +1,14 @@
 """Tests for grid_distributor — corridor detection and linear distribution."""
 
-import math
-import pytest
 from shapely.geometry import Polygon
 
-from src.models.slab import Slab, BoundingBox
+from src.models.slab import Slab
 from src.engine.grid_distributor import (
     _is_narrow_corridor,
     _distribute_linear,
     distribute_shores,
 )
-from src.models.shore import ShoreCatalogEntry, PositionedShore
+from src.models.shore import ShoreCatalogEntry
 
 
 def _make_slab(coords, thickness=0.12):

@@ -26,16 +26,12 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable,
-    PageBreak, KeepTogether,
 )
 
-from src.models.masonry import MasonryProject, FloorPlan
+from src.models.masonry import MasonryProject
 from src.utils.masonry_constants import (
     GAMMA_ALVENARIA, GAMMA_F, GAMMA_M, ETA_PRISMA,
-    Q_RESIDENCIAL, PP_COBERTURA_CERAMICA, PP_REVESTIMENTO,
-    PP_CONTRAPISO, PP_LAJE_PRE,
-    WALL_CAPACITY_KN_PER_M, BLOCK_STRENGTHS_MPA,
-    MIN_ROOM_AREAS,
+    WALL_CAPACITY_KN_PER_M, MIN_ROOM_AREAS,
 )
 
 logger = logging.getLogger(__name__)

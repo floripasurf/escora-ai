@@ -8,7 +8,7 @@ Os diagramas são strings Mermaid puras, prontas para renderização via
 mermaid.js no frontend ou inclusão em relatórios markdown/HTML.
 """
 
-from typing import Dict, List, Optional
+from typing import Dict
 from src.models.calculation_models import CalculationResult
 
 

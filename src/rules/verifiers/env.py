@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from src.rules.schema import REGISTRY, Rule, Source, Violation
+from src.rules.schema import Rule, Source, Violation
 
 if TYPE_CHECKING:
     from src.rules.project import RuleProject

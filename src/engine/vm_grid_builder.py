@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Iterable, List, Literal, Optional, Sequence, Tuple
+from typing import List, Literal, Optional, Sequence, Tuple
 
 from src.engine.vm_checks import (
     check_shear,
@@ -30,7 +30,6 @@ from src.engine.vm_checks import (
     compute_segment_load_and_moment as _compute_segment_load_and_moment,
 )
 from src.models.plywood import (
-    DEFAULT_PLYWOOD_FORMAT_MM,
     PlywoodSpec,
     default_plywood_spec,
 )

@@ -29,7 +29,6 @@ from src.auth.branches import (
 )
 from src.auth.registry import update_password
 from src.models.methodology import load_methodology
-from api.deps import get_current_branch
 from api.ratelimit import rate_limit
 from api.services.methodology_view import serialize_profile
 

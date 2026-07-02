@@ -5,7 +5,7 @@ grid gerado por src/engine/vm_grid_builder.py para o BOM final.
 """
 
 import csv
-from typing import Any, Dict, Iterable, List, Sequence
+from typing import Any, Dict, Iterable, List
 from src.models.project import ShoringResult
 
 

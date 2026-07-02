@@ -1,5 +1,4 @@
 """Tests for envelope rules ENV-001."""
-import pytest
 
 from src.rules.verifiers.env import _verify_kg_m3_envelope
 from tests.rules.conftest import make_project

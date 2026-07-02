@@ -5,7 +5,7 @@ from typing import List, Optional, Tuple
 from src.models.shore import ShoreCatalogEntry, PositionedShore
 from src.utils.constants import (
     GAMMA_CONCRETO, Q_SOBRECARGA_DEFAULT, Q_FORMA_DEFAULT, GAMMA_F,
-    ESPACAMENTO_MIN, ESPACAMENTO_MAX_VIGA, CONTRA_FLECHA,
+    ESPACAMENTO_MIN, ESPACAMENTO_MAX_VIGA,
 )
 
 

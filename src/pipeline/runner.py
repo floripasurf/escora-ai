@@ -21,7 +21,7 @@ from src.pipeline.stage_calculate import run_calculation
 from src.pipeline.stage_learn import learn_and_save
 from src.pipeline.learning_store import LearningStore
 from src.parser.region_filter import filter_main_plan
-from src.parser.construction_classifier import classify_construction, ConstructionType
+from src.parser.construction_classifier import classify_construction
 from src.parser.structural_system import (
     detect_structural_system, SystemRouting, routing_requires_review,
 )
@@ -118,7 +118,7 @@ _INSUNITS_TO_METERS = {
 }
 
 
-def _detect_coordinate_scale(parse) -> float:
+def _detect_coordinate_scale(parse) -> tuple:
     """Auto-detect coordinate-to-meters multiplier using three methods.
 
     Priority:
@@ -126,7 +126,11 @@ def _detect_coordinate_scale(parse) -> float:
     2. Dimension entity calibration (compare measurement vs coordinate distance)
     3. Coordinate range heuristic (improved to handle cm-scale files)
 
-    Returns a float multiplier: coordinates * scale = meters.
+    Returns ``(scale, method)``: multiplier (coordinates * scale = meters) e o
+    metodo que o determinou. Methods "insunits"/"dimension"/"range" sao
+    confiaveis; "text" (anotacao de escala) e "default" (chute DEFAULT_SCALE)
+    sao FALLBACKS — a escala multiplica toda a geometria (areas -> cargas ->
+    selecao de escora), entao esses caminhos geram violation GEOM no registry.
     """
     import math
 
@@ -137,7 +141,7 @@ def _detect_coordinate_scale(parse) -> float:
             f"Scale detection: $INSUNITS={parse.insunits} → scale={scale} "
             f"(method: DXF header)"
         )
-        return scale
+        return scale, "insunits"
 
     # Collect coordinate ranges (needed for methods 2 and 3)
     all_y = [s.y for s in parse.segments if s.type == "H"]
@@ -149,7 +153,9 @@ def _detect_coordinate_scale(parse) -> float:
 
     if not all_x or not all_y:
         logger.info("Scale detection: no segments found, using text scale or default")
-        return parse.detected_scale or DEFAULT_SCALE
+        if parse.detected_scale:
+            return parse.detected_scale, "text"
+        return DEFAULT_SCALE, "default"
 
     x_range = max(all_x) - min(all_x)
     y_range = max(all_y) - min(all_y)
@@ -197,7 +203,7 @@ def _detect_coordinate_scale(parse) -> float:
                     f"({len(ratios)} dims) → scale=0.01 (method: dimension calibration, "
                     f"coords in cm)"
                 )
-                return 0.01
+                return 0.01, "dimension"
             elif 0.0005 < median_ratio < 0.005:
                 # measurement ≈ coord / 1000 → coords are mm, measurements are m
                 logger.info(
@@ -205,7 +211,7 @@ def _detect_coordinate_scale(parse) -> float:
                     f"({len(ratios)} dims) → scale=0.001 (method: dimension calibration, "
                     f"coords in mm)"
                 )
-                return 0.001
+                return 0.001, "dimension"
             elif 0.5 < median_ratio < 2.0:
                 # ratio ≈ 1.0 → coords and measurements in same unit.
                 # Determine which unit by examining measurement values:
@@ -220,19 +226,19 @@ def _detect_coordinate_scale(parse) -> float:
                         f"Scale detection: ratio≈1.0, median_meas={median_meas:.1f} "
                         f"→ scale=0.01 (method: dimension calibration, coords in cm)"
                     )
-                    return 0.01
+                    return 0.01, "dimension"
                 elif median_meas >= 200:
                     logger.info(
                         f"Scale detection: ratio≈1.0, median_meas={median_meas:.1f} "
                         f"→ scale=0.001 (method: dimension calibration, coords in mm)"
                     )
-                    return 0.001
+                    return 0.001, "dimension"
                 else:
                     logger.info(
                         f"Scale detection: ratio≈1.0, median_meas={median_meas:.2f} "
                         f"→ scale=1.0 (method: dimension calibration, coords in m)"
                     )
-                    return 1.0
+                    return 1.0, "dimension"
 
     # --- Method 3: Coordinate range heuristic (improved) ---
     # Use the shorter dimension (Y typically) to avoid multi-view X inflation
@@ -254,20 +260,20 @@ def _detect_coordinate_scale(parse) -> float:
                 f"Scale detection: min_range={min_range:.1f} in 500-5000 → scale=0.01 "
                 f"(method: range heuristic, likely cm)"
             )
-        return scale
+        return scale, "range"
     elif coord_range > 5.0:
         logger.info(
             f"Scale detection: coord_range={coord_range:.1f} > 5.0 → scale=1.0 "
             f"(method: range heuristic, likely meters)"
         )
-        return 1.0
+        return 1.0, "range"
     else:
         scale = parse.detected_scale or DEFAULT_SCALE
         logger.info(
             f"Scale detection: coord_range={coord_range:.1f} <= 5.0 → scale={scale} "
             f"(method: text scale / default)"
         )
-        return scale
+        return scale, ("text" if parse.detected_scale else "default")
 
 
 def consumption_diagnostics(calculation) -> dict:
@@ -427,7 +433,10 @@ def run_pipeline(
     # Stage 1: Parse
     parse = parse_dxf(filepath)
 
-    scale = scale_override or _detect_coordinate_scale(parse)
+    if scale_override:
+        scale, scale_method = scale_override, "override"
+    else:
+        scale, scale_method = _detect_coordinate_scale(parse)
 
     # Stage 1.5: Region filter — remove detail views, sections, title blocks
     (
@@ -693,6 +702,7 @@ def run_pipeline(
     result = PipelineResult(
         filename=parse.filename,
         scale=scale,
+        scale_method=scale_method,
         construction_type=classification.construction_type.value,
         slab_type=classification.slab_type.value,
         levels=levels,
@@ -733,6 +743,19 @@ def run_pipeline(
     if _empty_reason:
         result.requires_review = True
         result.review_reasons.append(_empty_reason)
+
+    # Pendencias de capacidade (AGENTS.md "no silent fallbacks"): quando o
+    # calculo usou capacidade NOMINAL sem derate por altura, o resultado nao
+    # pode sair como "concluido" comum — exige revisao de engenharia.
+    if result.calculation is not None:
+        from src.pipeline.stage_calculate import CAPACITY_PENDENCY_PREFIX
+        _cap_pendencies = [
+            w for w in result.calculation.warnings
+            if w.startswith(CAPACITY_PENDENCY_PREFIX)
+        ]
+        if _cap_pendencies:
+            result.requires_review = True
+            result.review_reasons.extend(_cap_pendencies)
 
     # Rastreabilidade (§28.9): registra qual metodologia gerou este resultado.
     # Inclui o perfil cru + os parametros EFETIVOS aplicados no calculo e a

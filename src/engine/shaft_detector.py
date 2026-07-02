@@ -13,9 +13,9 @@ slab shores from being placed inside them.
 
 import math
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Tuple, Optional
-from shapely.geometry import Polygon, Point, box
+from shapely.geometry import Polygon, box
 
 logger = logging.getLogger(__name__)
 

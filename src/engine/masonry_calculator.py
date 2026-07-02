@@ -10,15 +10,13 @@ Referências:
 """
 
 import logging
-import math
 from typing import List, Tuple
 
 from src.models.masonry import (
-    Wall, WallOpening, Lintel, TieBeam, FloorPlan, ProjectInput, MasonryProject,
+    Wall, WallOpening, Lintel, TieBeam, FloorPlan, ProjectInput,
 )
 from src.utils.masonry_constants import (
-    GAMMA_ALVENARIA, GAMMA_GRAUTE, GAMMA_F, GAMMA_M, ETA_PRISMA,
-    BLOCK_STRENGTHS_MPA, WALL_CAPACITY_KN_PER_M,
+    GAMMA_ALVENARIA, GAMMA_F, BLOCK_STRENGTHS_MPA, WALL_CAPACITY_KN_PER_M,
     PP_COBERTURA_CERAMICA, Q_COBERTURA, Q_RESIDENCIAL,
     PP_REVESTIMENTO, PP_CONTRAPISO, PP_LAJE_POR_CM,
     LAJE_PRE_ESPESSURA, PP_LAJE_PRE,

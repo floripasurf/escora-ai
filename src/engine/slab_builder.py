@@ -18,7 +18,7 @@ import logging
 import re
 from typing import List, Tuple, Dict, Any, Sequence
 from shapely.geometry import LineString, Point, MultiPoint
-from shapely.ops import polygonize, unary_union, snap
+from shapely.ops import polygonize, unary_union
 from shapely.geometry.polygon import Polygon
 from shapely.validation import make_valid
 from src.models.pipeline_models import ClassifiedElement, ElementType

@@ -4,9 +4,9 @@ Valida templates TemplateV2 antes e depois da adaptação.
 """
 
 import logging
-from typing import List, Tuple
+from typing import List
 
-from ._base import TemplateV2, Zone, RoomDef
+from ._base import TemplateV2
 
 logger = logging.getLogger(__name__)
 
@@ -173,7 +173,7 @@ def validate_privacy(template: TemplateV2) -> List[str]:
         for bi in bedroom_idxs:
             if bi < living_idx:
                 issues.append(
-                    f"Privacidade: quarto antes da sala no gradiente"
+                    "Privacidade: quarto antes da sala no gradiente"
                 )
 
     # Check physical position: bedrooms should be at higher Y than living
@@ -194,7 +194,7 @@ def validate_privacy(template: TemplateV2) -> List[str]:
 
         if bedroom_min_y < living_max_y - 0.5:
             issues.append(
-                f"Privacidade: quartos mais próximos da rua que a sala"
+                "Privacidade: quartos mais próximos da rua que a sala"
             )
 
     return issues

@@ -3,7 +3,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.rules.schema import (
-    REGISTRY, Rule, RuleRegistry, Source, Violation,
+    Rule, RuleRegistry, Source, Violation,
 )
 
 

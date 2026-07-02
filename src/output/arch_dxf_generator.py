@@ -16,7 +16,6 @@ import math
 import ezdxf
 import logging
 from pathlib import Path
-from typing import List, Optional
 
 from src.models.masonry import FloorPlan, Wall, WallOpening, Room, OpeningType
 

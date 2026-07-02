@@ -4,7 +4,6 @@ Locadora rule (Q5): "Em vigas, o conjunto escora+cruzeta é distribuído a
 cada 80 cm sob a viga". So for vigas we use beam length / 0.80 (ceil),
 NOT the 0.25 global ratio. Lajes keep the 0.25 calibrated ratio.
 """
-import pytest
 
 from src.engine.tower_selector import (
     compute_cruzeta_bom,
