@@ -60,6 +60,8 @@ class JobStatusResponse(BaseModel):
     status: str
     filename: str
     error_message: Optional[str] = None
+    # Estágio corrente do pipeline enquanto status == "processing"
+    status_detail: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     # Results (filled when status == "done")
@@ -87,4 +89,6 @@ class JobStatusResponse(BaseModel):
     review_reasons: Optional[List[str]] = None
     diagnostics: Optional[DiagnosticsData] = None
     consumption_summary: Optional[List[ConsumptionSummaryRow]] = None
+    # Geometria simplificada p/ preview SVG 2D ({slabs, beams, bbox, truncated})
+    preview: Optional[dict] = None
 

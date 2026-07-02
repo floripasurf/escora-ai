@@ -1324,7 +1324,6 @@
             <span>estrutura</span><span class="dot"></span><span class="tld">.app</span>
         </div>
         <div class="hdr-right">
-            <a href="/en" class="pill" style="text-decoration:none;cursor:pointer">EN</a>
             <span class="pill" id="hdrClock">&mdash;</span>
         </div>
     </header>
@@ -1528,15 +1527,15 @@
                     <h2>Criar conta</h2>
                     <p class="lede">Preencha seus dados para comecar.</p>
                     <div class="card-stack">
-                        <input id="signupName" type="text" placeholder="Nome completo">
-                        <input id="signupEmail" type="email" placeholder="Email">
-                        <input id="signupCompany" type="text" placeholder="Empresa / Locadora">
-                        <input id="signupBranch" type="text" placeholder="Primeira unidade" value="Sede">
-                        <input id="signupInventory" type="text" placeholder="Nome do inventário (opcional)">
-                        <input id="signupPhone" type="tel" placeholder="Telefone">
-                        <input id="signupPass" type="password" placeholder="Senha">
-                        <input id="signupPass2" type="password" placeholder="Confirmar senha">
-                        <input id="signupInvite" type="text" placeholder="Código de convite (beta)">
+                        <input aria-label="Nome completo" id="signupName" type="text" placeholder="Nome completo">
+                        <input aria-label="Email" id="signupEmail" type="email" placeholder="Email">
+                        <input aria-label="Empresa / Locadora" id="signupCompany" type="text" placeholder="Empresa / Locadora">
+                        <input aria-label="Primeira unidade" id="signupBranch" type="text" placeholder="Primeira unidade" value="Sede">
+                        <input aria-label="Nome do inventário (opcional)" id="signupInventory" type="text" placeholder="Nome do inventário (opcional)">
+                        <input aria-label="Telefone" id="signupPhone" type="tel" placeholder="Telefone">
+                        <input aria-label="Senha" id="signupPass" type="password" placeholder="Senha">
+                        <input aria-label="Confirmar senha" id="signupPass2" type="password" placeholder="Confirmar senha">
+                        <input aria-label="Código de convite (beta)" id="signupInvite" type="text" placeholder="Código de convite (beta)">
                         <label style="display:flex;align-items:flex-start;gap:8px;font-size:0.82rem;color:var(--fg-dim);text-align:left;margin:4px 0;cursor:pointer;">
                             <input id="signupTerms" type="checkbox" style="margin-top:3px;">
                             <span>Li e aceito os termos de uso. Entendo que os resultados são um rascunho auditável e exigem validação de um engenheiro responsável (ART/RRT) antes de qualquer uso em obra.</span>
@@ -1557,8 +1556,8 @@
                     <h2>Entrar</h2>
                     <p class="lede">Acesse sua conta para comecar.</p>
                     <div class="card-stack">
-                        <input id="loginUser" placeholder="usuario">
-                        <input id="loginPass" type="password" placeholder="senha">
+                        <input aria-label="usuario" id="loginUser" placeholder="usuario">
+                        <input aria-label="senha" id="loginPass" type="password" placeholder="senha">
                         <button class="btn btn-primary" onclick="doLogin()">Entrar</button>
                         <div id="loginError" class="msg-line"></div>
                     </div>
@@ -1586,9 +1585,9 @@
                     <h2>Trocar senha</h2>
                     <p class="lede">Escolha uma senha de no minimo 6 caracteres.</p>
                     <div class="card-stack">
-                        <input id="pwdOld" type="password" placeholder="senha atual">
-                        <input id="pwdNew" type="password" placeholder="nova senha">
-                        <input id="pwdNew2" type="password" placeholder="confirme a nova senha">
+                        <input aria-label="senha atual" id="pwdOld" type="password" placeholder="senha atual">
+                        <input aria-label="nova senha" id="pwdNew" type="password" placeholder="nova senha">
+                        <input aria-label="confirme a nova senha" id="pwdNew2" type="password" placeholder="confirme a nova senha">
                         <button class="btn btn-primary" onclick="doChangePassword()">Salvar</button>
                         <button class="btn" onclick="show('appCard')">Cancelar</button>
                         <div id="pwdMsg" class="msg-line"></div>
@@ -1621,12 +1620,12 @@
                     <div class="icon">&uarr;</div>
                     <h2>Arraste ou selecione seu projeto estrutural</h2>
                     <p>.dxf &middot; .dwg &middot; ate 200 MB</p>
-                    <input type="file" id="fileInput" accept=".dxf,.dwg">
+                    <input type="file" id="fileInput" accept=".dxf,.dwg" aria-label="Arquivo DXF ou DWG do projeto">
                 </div>
 
                 <div id="optModeRow" style="margin:6px 2px 2px;font-size:0.88rem;color:var(--fg-dim);display:flex;align-items:center;gap:8px;">
                     <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-                        <input type="checkbox" id="inventoryModeToggle">
+                        <input type="checkbox" id="inventoryModeToggle" aria-label="Calcular com o estoque da unidade">
                         Calcular usando o estoque da minha unidade (modo inventário)
                     </label>
                 </div>
@@ -1659,20 +1658,20 @@
                     <div id="inventoryImportPreview" class="inventory-import-preview" style="display:none;"></div>
                     <div id="inventoryEditor" class="inventory-editor">
                         <div class="inventory-editor-grid">
-                            <input id="invModel" type="text" placeholder="Modelo">
-                            <select id="invSection">
+                            <input aria-label="Modelo" id="invModel" type="text" placeholder="Modelo">
+                            <select id="invSection" aria-label="Seção do inventário">
                                 <option value="telescopic_shores">Escora metalica</option>
                                 <option value="tower_modules">Torre de escoramento</option>
                                 <option value="distribution_beams">Viga de distribuicao</option>
                                 <option value="accessories">Acessório</option>
                             </select>
-                            <input id="invQty" type="number" min="0" step="1" placeholder="Qtd">
-                            <input id="invCapacity" type="number" min="0" step="0.01" placeholder="kN">
-                            <input id="invHeightMin" type="number" min="0" step="0.01" placeholder="Alt. min">
-                            <input id="invHeightMax" type="number" min="0" step="0.01" placeholder="Alt. max">
+                            <input aria-label="Qtd" id="invQty" type="number" min="0" step="1" placeholder="Qtd">
+                            <input aria-label="kN" id="invCapacity" type="number" min="0" step="0.01" placeholder="kN">
+                            <input aria-label="Alt. min" id="invHeightMin" type="number" min="0" step="0.01" placeholder="Alt. min">
+                            <input aria-label="Alt. max" id="invHeightMax" type="number" min="0" step="0.01" placeholder="Alt. max">
                         </div>
-                        <input id="invCurve" type="text" placeholder="Curva altura:capacidade; ex. 1:100;5:88.5" style="margin-top:10px;">
-                        <input id="invNotes" type="text" placeholder="Observações" style="margin-top:10px;">
+                        <input aria-label="Curva altura:capacidade; ex. 1:100;5:88.5" id="invCurve" type="text" placeholder="Curva altura:capacidade; ex. 1:100;5:88.5" style="margin-top:10px;">
+                        <input aria-label="Observações" id="invNotes" type="text" placeholder="Observações" style="margin-top:10px;">
                         <div class="inventory-editor-actions">
                             <button class="btn" onclick="closeInventoryForm()">Cancelar</button>
                             <button class="btn btn-primary" onclick="saveInventoryItem()">Salvar Item</button>
@@ -1745,8 +1744,8 @@
                                 <h4>Unidades</h4>
                                 <div id="adminBranches" class="admin-list"></div>
                                 <div class="admin-form">
-                                    <input id="adminBranchName" type="text" placeholder="Nome da unidade">
-                                    <input id="adminInventoryName" type="text" placeholder="Inventário (opcional)">
+                                    <input aria-label="Nome da unidade" id="adminBranchName" type="text" placeholder="Nome da unidade">
+                                    <input aria-label="Inventário (opcional)" id="adminInventoryName" type="text" placeholder="Inventário (opcional)">
                                     <button class="btn btn-primary" onclick="createAdminBranch()">Criar unidade</button>
                                 </div>
                             </div>
@@ -1754,10 +1753,10 @@
                                 <h4>Usuários</h4>
                                 <div id="adminUsers" class="admin-list"></div>
                                 <div class="admin-form">
-                                    <input id="adminUserEmail" type="text" placeholder="email">
-                                    <input id="adminUserName" type="text" placeholder="nome">
-                                    <input id="adminUserPassword" type="password" placeholder="senha inicial">
-                                    <select id="adminUserRole">
+                                    <input aria-label="email" id="adminUserEmail" type="text" placeholder="email">
+                                    <input aria-label="nome" id="adminUserName" type="text" placeholder="nome">
+                                    <input aria-label="senha inicial" id="adminUserPassword" type="password" placeholder="senha inicial">
+                                    <select id="adminUserRole" aria-label="Papel do usuário">
                                         <option value="operator">Operator</option>
                                         <option value="admin">Admin</option>
                                         <option value="viewer">Viewer</option>
@@ -1773,9 +1772,9 @@
                     <h3>Alterar senha</h3>
                     <div class="account-pwd-form">
                         <div class="card-stack">
-                            <input id="acctPwdOld" type="password" placeholder="Senha atual">
-                            <input id="acctPwdNew" type="password" placeholder="Nova senha">
-                            <input id="acctPwdNew2" type="password" placeholder="Confirmar nova senha">
+                            <input aria-label="Senha atual" id="acctPwdOld" type="password" placeholder="Senha atual">
+                            <input aria-label="Nova senha" id="acctPwdNew" type="password" placeholder="Nova senha">
+                            <input aria-label="Confirmar nova senha" id="acctPwdNew2" type="password" placeholder="Confirmar nova senha">
                             <button class="btn btn-primary" onclick="doAccountChangePassword()">Salvar senha</button>
                             <div id="acctPwdMsg" class="msg-line"></div>
                         </div>
@@ -1894,6 +1893,45 @@
             return h;
         }
 
+        // Toasts acessíveis (aria-live) no lugar de alert() bloqueante.
+        function toast(msg, kind = 'info', ms = 6000) {
+            let region = document.getElementById('toastRegion');
+            if (!region) {
+                region = document.createElement('div');
+                region.id = 'toastRegion';
+                region.setAttribute('role', 'status');
+                region.setAttribute('aria-live', 'polite');
+                region.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px;max-width:380px';
+                document.body.appendChild(region);
+            }
+            const colors = { info: 'var(--accent)', warn: '#FBBF24', error: 'var(--err, #F87171)' };
+            const el = document.createElement('div');
+            el.style.cssText = `background:var(--bg-2,#17171C);color:var(--fg,#F5F5F7);border:1px solid ${colors[kind] || colors.info};border-left-width:4px;border-radius:8px;padding:10px 14px;font-size:0.85rem;box-shadow:0 4px 16px rgba(0,0,0,0.4)`;
+            el.textContent = msg;
+            region.appendChild(el);
+            setTimeout(() => el.remove(), ms);
+        }
+
+        // Wrapper central: injeta auth e trata sessão expirada (401) em um
+        // lugar só — antes, cada chamada mostrava um alert críptico.
+        async function apiFetch(path, opts = {}) {
+            const res = await fetch(`${API}${path}`, {
+                ...opts,
+                headers: authHeaders(opts.headers || {}),
+            });
+            if (res.status === 401 && TOKEN) {
+                TOKEN = '';
+                BRANCH_ID = '';
+                SESSION = null;
+                localStorage.removeItem('escora_token');
+                localStorage.removeItem('escora_branch_id');
+                show('loginCard');
+                toast('Sessão expirada — entre novamente.', 'warn');
+                throw new Error('sessao-expirada');
+            }
+            return res;
+        }
+
         function show(id) {
             ['landingPage', 'signupCard', 'loginCard', 'branchCard', 'appCard', 'pwdCard'].forEach(k => {
                 const el = document.getElementById(k);
@@ -1965,7 +2003,7 @@
         }
 
         async function refreshSession() {
-            const res = await fetch(`${API}/auth/me`, { headers: authHeaders() });
+            const res = await apiFetch(`/auth/me`, { headers: authHeaders() });
             if (!res.ok) throw new Error(await safeErrorMessage(res));
             SESSION = await res.json();
             renderHeaderBadge();
@@ -1982,7 +2020,7 @@
         async function loadAdminPanel() {
             if (!canManageTenant()) return;
             try {
-                const res = await fetch(`${API}/admin/locadora`, { headers: authHeaders() });
+                const res = await apiFetch(`/admin/locadora`, { headers: authHeaders() });
                 if (!res.ok) {
                     adminMsg(await safeErrorMessage(res));
                     return;
@@ -2000,7 +2038,7 @@
             const box = document.getElementById('adminUsage');
             if (!box) return;
             try {
-                const res = await fetch(`${API}/admin/usage`, { headers: authHeaders() });
+                const res = await apiFetch(`/admin/usage`, { headers: authHeaders() });
                 if (!res.ok) { box.innerHTML = ''; return; }
                 const data = await res.json();
                 const s = data.summary || {};
@@ -2053,7 +2091,7 @@
             const inventoryName = document.getElementById('adminInventoryName').value.trim();
             if (!branchName) { adminMsg('Informe o nome da unidade.'); return; }
             try {
-                const res = await fetch(`${API}/admin/branches`, {
+                const res = await apiFetch(`/admin/branches`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...authHeaders() },
                     body: JSON.stringify({
@@ -2081,7 +2119,7 @@
             const branchName = nextName.trim();
             if (!branchName) { adminMsg('Informe o nome da unidade.'); return; }
             try {
-                const res = await fetch(`${API}/admin/branches/${encodeURIComponent(branchId)}`, {
+                const res = await apiFetch(`/admin/branches/${encodeURIComponent(branchId)}`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json', ...authHeaders() },
                     body: JSON.stringify({ branch_name: branchName }),
@@ -2101,7 +2139,7 @@
         async function deleteAdminBranch(branchId) {
             if (!confirm('Remover esta unidade? O arquivo de inventario nao sera apagado.')) return;
             try {
-                const res = await fetch(`${API}/admin/branches/${encodeURIComponent(branchId)}`, {
+                const res = await apiFetch(`/admin/branches/${encodeURIComponent(branchId)}`, {
                     method: 'DELETE',
                     headers: authHeaders(),
                 });
@@ -2130,7 +2168,7 @@
                 return;
             }
             try {
-                const res = await fetch(`${API}/admin/users`, {
+                const res = await apiFetch(`/admin/users`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...authHeaders() },
                     body: JSON.stringify({ username, name, password, role }),
@@ -2152,7 +2190,7 @@
         async function deleteAdminUser(username) {
             if (!confirm(`Remover o usuario ${username}?`)) return;
             try {
-                const res = await fetch(`${API}/admin/users/${encodeURIComponent(username)}`, {
+                const res = await apiFetch(`/admin/users/${encodeURIComponent(username)}`, {
                     method: 'DELETE',
                     headers: authHeaders(),
                 });
@@ -2187,7 +2225,7 @@
             if (newP.length < 6) { msg.textContent = 'Nova senha precisa ter ao menos 6 caracteres'; return; }
             if (newP !== newP2) { msg.textContent = 'Confirmação não confere'; return; }
             try {
-                const res = await fetch(`${API}/auth/change-password`, {
+                const res = await apiFetch(`/auth/change-password`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...authHeaders() },
                     body: JSON.stringify({ old_password: oldP, new_password: newP }),
@@ -2214,7 +2252,7 @@
             if (newP.length < 6) { msg.textContent = 'Nova senha precisa ter ao menos 6 caracteres'; return; }
             if (newP !== newP2) { msg.textContent = 'Confirmação não confere'; return; }
             try {
-                const res = await fetch(`${API}/auth/change-password`, {
+                const res = await apiFetch(`/auth/change-password`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...authHeaders() },
                     body: JSON.stringify({ old_password: oldP, new_password: newP }),
@@ -2403,7 +2441,7 @@
         async function bootstrap() {
             if (!TOKEN) { show('landingPage'); return; }
             try {
-                const res = await fetch(`${API}/auth/me`, { headers: authHeaders() });
+                const res = await apiFetch(`/auth/me`, { headers: authHeaders() });
                 if (!res.ok) { await logout(); show('landingPage'); return; }
                 SESSION = await res.json();
                 if (BRANCH_ID && SESSION.branches.some(b => b.id === BRANCH_ID)) {
@@ -2438,8 +2476,8 @@
 
         async function downloadFile(path, suggestedName) {
             try {
-                const res = await fetch(`${API}${path}`, { headers: authHeaders() });
-                if (!res.ok) { alert('Erro ao baixar arquivo'); return; }
+                const res = await apiFetch(path);
+                if (!res.ok) { toast('Erro ao baixar arquivo', 'error'); return; }
                 const blob = await res.blob();
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -2450,13 +2488,13 @@
                 a.remove();
                 URL.revokeObjectURL(url);
             } catch (e) {
-                alert('Erro no download: ' + e.message);
+                toast('Erro no download: ' + e.message);
             }
         }
 
         async function refreshJobsList() {
             try {
-                const res = await fetch(`${API}/jobs`, { headers: authHeaders() });
+                const res = await apiFetch(`/jobs`, { headers: authHeaders() });
                 if (!res.ok) return;
                 const list = await res.json();
                 list.forEach(j => { if (!jobs[j.id]) jobs[j.id] = j; });
@@ -2472,7 +2510,7 @@
             const meta = document.getElementById('inventoryMeta');
             if (meta) meta.textContent = 'Carregando inventario...';
             try {
-                const res = await fetch(`${API}/inventory`, { headers: authHeaders() });
+                const res = await apiFetch(`/inventory`, { headers: authHeaders() });
                 if (!res.ok) {
                     if (meta) meta.textContent = await safeErrorMessage(res);
                     return;
@@ -2628,7 +2666,7 @@
             if (curve) body.capacity_curve = curve;
 
             try {
-                const res = await fetch(`${API}/inventory/items/${encodeURIComponent(model)}`, {
+                const res = await apiFetch(`/inventory/items/${encodeURIComponent(model)}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', ...authHeaders() },
                     body: JSON.stringify(body),
@@ -2649,7 +2687,7 @@
             if (!canManageInventory()) { inventoryMsg('Seu papel permite apenas consultar o inventario.'); return; }
             if (!confirm(`Remover ${model} do inventario desta unidade?`)) return;
             try {
-                const res = await fetch(`${API}/inventory/items/${encodeURIComponent(model)}`, {
+                const res = await apiFetch(`/inventory/items/${encodeURIComponent(model)}`, {
                     method: 'DELETE',
                     headers: authHeaders(),
                 });
@@ -2676,7 +2714,7 @@
             const formData = new FormData();
             formData.append('file', file);
             try {
-                const res = await fetch(`${API}/inventory/import-preview`, {
+                const res = await apiFetch(`/inventory/import-preview`, {
                     method: 'POST',
                     headers: authHeaders(),
                     body: formData,
@@ -2734,7 +2772,7 @@
             const formData = new FormData();
             formData.append('file', PENDING_INVENTORY_FILE);
             try {
-                const res = await fetch(`${API}/inventory/import-csv?mode=${encodeURIComponent(mode)}`, {
+                const res = await apiFetch(`/inventory/import-csv?mode=${encodeURIComponent(mode)}`, {
                     method: 'POST',
                     headers: authHeaders(),
                     body: formData,
@@ -2759,7 +2797,7 @@
             const target = document.getElementById('inventoryHistory');
             if (!target) return;
             try {
-                const res = await fetch(`${API}/inventory/history`, { headers: authHeaders() });
+                const res = await apiFetch(`/inventory/history`, { headers: authHeaders() });
                 if (!res.ok) {
                     target.textContent = await safeErrorMessage(res);
                     return;
@@ -2797,7 +2835,7 @@
         async function restoreInventoryHistory(entryId) {
             if (!confirm('Restaurar o inventario para o estado anterior desta alteração?')) return;
             try {
-                const res = await fetch(`${API}/inventory/history/${encodeURIComponent(entryId)}/restore`, {
+                const res = await apiFetch(`/inventory/history/${encodeURIComponent(entryId)}/restore`, {
                     method: 'POST',
                     headers: authHeaders(),
                 });
@@ -2856,7 +2894,7 @@
 
         function openProjectUpload() {
             if (!canRunProjects()) {
-                alert('Seu papel permite apenas visualizar resultados.');
+                toast('Seu papel permite apenas visualizar resultados.', 'warn');
                 return;
             }
             document.getElementById('fileInput').click();
@@ -2874,21 +2912,21 @@
 
         async function uploadFile(file) {
             if (!TOKEN || !BRANCH_ID) { show('loginCard'); return; }
-            if (!canRunProjects()) { alert('Seu papel permite apenas visualizar resultados.'); return; }
+            if (!canRunProjects()) { toast('Seu papel permite apenas visualizar resultados.', 'warn'); return; }
             const formData = new FormData();
             formData.append('file', file);
             const useInventory = document.getElementById('inventoryModeToggle')?.checked;
             formData.append('optimization_mode', useInventory ? 'inventory' : 'price');
 
             try {
-                const res = await fetch(`${API}/jobs`, {
+                const res = await apiFetch(`/jobs`, {
                     method: 'POST',
                     body: formData,
                     headers: authHeaders(),
                 });
                 if (!res.ok) {
                     const msg = await safeErrorMessage(res);
-                    alert(msg || 'Erro no upload');
+                    toast(msg || 'Erro no upload', 'error');
                     return;
                 }
                 const data = await res.json();
@@ -2896,7 +2934,7 @@
                 renderJobs();
                 pollJob(data.id);
             } catch (e) {
-                alert('Erro de conexão: ' + e.message);
+                toast('Erro de conexão: ' + e.message);
             }
         }
 
@@ -2915,17 +2953,41 @@
         }
 
         async function pollJob(jobId) {
+            // Teto de 15 min (450 × 2s), alinhado com o pipeline_timeout do
+            // backend — antes o polling era infinito e um job travado deixava
+            // o cliente esperando para sempre. Erros de rede: 5 consecutivos.
+            const MAX_ATTEMPTS = 450;
+            const MAX_NET_ERRORS = 5;
+            let attempts = 0;
+            let netErrors = 0;
+            const giveUp = (msg) => {
+                if (jobs[jobId] && ['processing', 'pending'].includes(jobs[jobId].status)) {
+                    jobs[jobId].status = 'error';
+                    jobs[jobId].error_message = msg;
+                    renderJobs();
+                }
+            };
             const poll = async () => {
+                if (++attempts > MAX_ATTEMPTS) {
+                    giveUp('Tempo limite de acompanhamento excedido. Recarregue a página para ver o estado atual do job.');
+                    return;
+                }
                 try {
-                    const res = await fetch(`${API}/jobs/${jobId}/status`, { headers: authHeaders() });
+                    const res = await apiFetch(`/jobs/${jobId}/status`);
                     const data = await res.json();
+                    netErrors = 0;
                     jobs[jobId] = data;
                     renderJobs();
                     if (data.status === 'processing' || data.status === 'pending') {
                         setTimeout(poll, 2000);
                     }
                 } catch (e) {
+                    if (e.message === 'sessao-expirada') return;
                     console.error('Poll error:', e);
+                    if (++netErrors >= MAX_NET_ERRORS) {
+                        giveUp('Conexão perdida com o servidor. Verifique sua internet e recarregue a página.');
+                        return;
+                    }
                     setTimeout(poll, 5000);
                 }
             };
@@ -2933,7 +2995,7 @@
         }
 
         async function uploadRevision(jobId) {
-            if (!canRunProjects()) { alert('Seu papel permite apenas visualizar resultados.'); return; }
+            if (!canRunProjects()) { toast('Seu papel permite apenas visualizar resultados.', 'warn'); return; }
             const input = document.getElementById(`rev-${jobId}`);
             input.click();
             input.onchange = async () => {
@@ -2942,7 +3004,7 @@
                 const formData = new FormData();
                 formData.append('file', file);
                 try {
-                    const res = await fetch(`${API}/jobs/${jobId}/revision`, {
+                    const res = await apiFetch(`/jobs/${jobId}/revision`, {
                         method: 'POST',
                         body: formData,
                         headers: authHeaders(),
@@ -2955,26 +3017,72 @@
                     }
                     renderJobs();
                 } catch (e) {
-                    alert('Erro no upload da revisão: ' + e.message);
+                    toast('Erro no upload da revisão: ' + e.message);
                 }
                 input.value = '';
             };
         }
 
         async function deleteJob(jobId) {
-            if (!canRunProjects()) { alert('Seu papel permite apenas visualizar resultados.'); return; }
+            if (!canRunProjects()) { toast('Seu papel permite apenas visualizar resultados.', 'warn'); return; }
             if (!confirm('Remover este projeto?')) return;
             try {
-                const res = await fetch(`${API}/jobs/${jobId}`, { method: 'DELETE', headers: authHeaders() });
+                const res = await apiFetch(`/jobs/${jobId}`, { method: 'DELETE', headers: authHeaders() });
                 if (res.ok) {
                     delete jobs[jobId];
                     renderJobs();
                 } else {
-                    alert('Erro ao remover');
+                    toast('Erro ao remover');
                 }
             } catch (e) {
-                alert('Erro: ' + e.message);
+                toast('Erro: ' + e.message);
             }
+        }
+
+        // Preview 2D do escoramento (P14): lajes + escoras/torres em SVG,
+        // coordenadas em metros vindas do backend (results_data.preview).
+        function renderShoringPreview(preview) {
+            const [minX, minY, maxX, maxY] = preview.bbox || [0, 0, 1, 1];
+            const W = maxX - minX, H = maxY - minY;
+            if (W <= 0 || H <= 0) return '';
+            const VIEW = 460;
+            const scale = VIEW / Math.max(W, H);
+            const w = Math.round(W * scale), h = Math.round(H * scale);
+            const px = (x) => ((x - minX) * scale).toFixed(1);
+            const py = (y) => ((maxY - y) * scale).toFixed(1);  // flip Y
+
+            let svg = '';
+            (preview.slabs || []).forEach(s => {
+                if (s.outline && s.outline.length > 2) {
+                    const pts = s.outline.map(p => `${px(p[0])},${py(p[1])}`).join(' ');
+                    svg += `<polygon points="${pts}" fill="var(--accent)" fill-opacity="0.07" stroke="var(--fg-mute)" stroke-width="1"/>`;
+                }
+            });
+            (preview.beams || []).forEach(b => {
+                if (b.line && b.line.length === 2) {
+                    svg += `<line x1="${px(b.line[0][0])}" y1="${py(b.line[0][1])}" x2="${px(b.line[1][0])}" y2="${py(b.line[1][1])}" stroke="var(--fg-dim)" stroke-width="2"/>`;
+                }
+            });
+            const drawShores = (shores) => (shores || []).forEach(pt => {
+                if (pt[2] === 'tower') {
+                    svg += `<rect x="${(Number(px(pt[0])) - 3).toFixed(1)}" y="${(Number(py(pt[1])) - 3).toFixed(1)}" width="6" height="6" fill="#FBBF24"/>`;
+                } else {
+                    svg += `<circle cx="${px(pt[0])}" cy="${py(pt[1])}" r="2" fill="var(--accent)"/>`;
+                }
+            });
+            (preview.slabs || []).forEach(s => drawShores(s.shores));
+            (preview.beams || []).forEach(b => drawShores(b.shores));
+
+            const note = preview.truncated
+                ? '<div class="history-meta" style="margin-top:4px">Preview parcial (projeto muito grande) — o DXF contém o layout completo.</div>'
+                : '';
+            return `
+                <div style="margin-top:12px">
+                    <div class="history-meta" style="margin-bottom:4px">Preview do layout — <span style="color:var(--accent)">●</span> escora &nbsp; <span style="color:#FBBF24">■</span> torre (aproximado; use o DXF para execução)</div>
+                    <svg viewBox="0 0 ${w} ${h}" width="100%" style="max-width:${VIEW}px;background:var(--bg-1,#111114);border:1px solid var(--line,#26262E);border-radius:8px" role="img" aria-label="Preview 2D do layout de escoramento">${svg}</svg>
+                    ${note}
+                </div>
+            `;
         }
 
         function renderJobs() {
@@ -3006,7 +3114,8 @@
                 let content = '';
 
                 if (job.status === 'processing') {
-                    content = '<div style="margin-top:0.9rem;font-family:var(--mono);font-size:0.78rem;color:var(--fg-dim)"><span class="spinner"></span> processando pipeline\u2026</div>';
+                    const stage = job.status_detail || 'processando pipeline\u2026';
+                    content = `<div style="margin-top:0.9rem;font-family:var(--mono);font-size:0.78rem;color:var(--fg-dim)" aria-live="polite"><span class="spinner"></span> ${esc(stage)}</div>`;
                 }
 
                 if (job.status === 'error') {
@@ -3044,6 +3153,10 @@
                             </div>
                         </div>
                     `;
+
+                    if (job.preview) {
+                        content += renderShoringPreview(job.preview);
+                    }
 
                     const stem = stemOf(job.filename);
                     const branch = currentBranch();

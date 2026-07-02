@@ -246,6 +246,7 @@ async def get_status(
         "status": job["status"],
         "filename": job["filename"],
         "error_message": job.get("error_message"),
+        "status_detail": job.get("status_detail"),
         "created_at": job["created_at"],
         "updated_at": job["updated_at"],
         "has_output_dxf": job.get("output_dxf_path") is not None,
@@ -276,6 +277,7 @@ async def get_status(
             "diagnostics": _sanitize_diagnostics(results.get("diagnostics")),
             "has_dwg": job.get("dwg_path") is not None,
             "consumption_summary": results.get("consumption_summary"),
+            "preview": results.get("preview"),
         })
 
     revision = job.get("revision_data")
