@@ -1561,8 +1561,26 @@
                         <button class="btn btn-primary" onclick="doLogin()">Entrar</button>
                         <div id="loginError" class="msg-line"></div>
                     </div>
+                    <div class="auth-link" onclick="requestPasswordReset()">Esqueci minha senha</div>
                     <div class="auth-link" onclick="show('signupCard')">Não tem conta? Crie aqui</div>
                     <div class="auth-link auth-link-back" onclick="show('landingPage')">&larr; Voltar</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Password reset (via link do e-mail: /?reset=TOKEN) -->
+        <div id="resetCard" style="display:none;">
+            <div class="auth-wrap">
+                <div class="card">
+                    <h2>Nova senha</h2>
+                    <p class="lede">Escolha uma senha de no mínimo 6 caracteres.</p>
+                    <div class="card-stack">
+                        <input aria-label="nova senha" id="resetPass" type="password" placeholder="nova senha">
+                        <input aria-label="confirme a nova senha" id="resetPass2" type="password" placeholder="confirme a nova senha">
+                        <button class="btn btn-primary" onclick="doResetPassword()">Salvar nova senha</button>
+                        <div id="resetMsg" class="msg-line"></div>
+                    </div>
+                    <div class="auth-link auth-link-back" onclick="show('loginCard')">&larr; Voltar ao login</div>
                 </div>
             </div>
         </div>
@@ -1629,6 +1647,26 @@
                         Calcular usando o estoque da minha unidade (modo inventário)
                     </label>
                 </div>
+
+                <!-- Bloco opcional de reescoramento/desforma (manual §26 items 9 e 10;
+                     spec: docs/ux/reescoramento_input_block.md). Habilita DECIDE-001/002. -->
+                <details id="reescoBlock" style="margin:10px 2px;font-size:0.88rem;color:var(--fg-dim);border:1px solid var(--line,#26262E);border-radius:8px;padding:10px 14px;">
+                    <summary style="cursor:pointer;font-weight:600;">Reescoramento e Desforma (opcional)</summary>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin-top:12px;">
+                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;grid-column:1/-1;">
+                            <input type="checkbox" id="reescoMulti"> Projeto multi-pavimento (reescoramento entre níveis)
+                        </label>
+                        <input id="reescoNiveis" type="number" min="0" max="6" placeholder="Níveis reescorados (0-6)" aria-label="Níveis reescorados">
+                        <input id="reescoFcj" type="number" min="5" max="80" step="0.5" placeholder="fcj na desforma (MPa)" aria-label="Resistência fcj na desforma em MPa">
+                        <input id="reescoFcjIdade" type="number" min="1" max="90" placeholder="Idade do fcj (dias, ex. 14)" aria-label="Idade do fcj em dias">
+                        <input id="reescoEci" type="number" min="10000" max="60000" step="100" placeholder="Eci na desforma (MPa)" aria-label="Módulo Eci na desforma em MPa">
+                        <input id="reescoCargaFinal" type="number" min="0" max="50" step="0.1" placeholder="Sobrecarga final (kN/m²)" aria-label="Sobrecarga de uso final">
+                        <input id="reescoDesformaDias" type="number" min="1" max="90" value="14" placeholder="Prazo de desforma (dias)" aria-label="Prazo de desforma em dias">
+                        <input id="reescoCalculista" type="text" placeholder="Calculista (nome + CREA/CAU)" aria-label="Aprovação do calculista" style="grid-column:1/-1;">
+                        <textarea id="reescoJust" placeholder="Justificativa técnica (obrigatória se desforma < 14 dias)" aria-label="Justificativa da desforma antecipada" style="grid-column:1/-1;min-height:56px;background:var(--bg-2,#17171C);color:var(--fg,#F5F5F7);border:1px solid var(--line,#26262E);border-radius:6px;padding:8px 10px;font-family:inherit;font-size:0.85rem;"></textarea>
+                    </div>
+                    <div class="history-meta" style="margin-top:8px;">Preencha para habilitar as verificações DECIDE-001/002 (alfa Doka e prazo de desforma NBR 14931). Campos vazios = verificação emite pendência informativa.</div>
+                </details>
 
                 <div class="methodology-badge" id="methodologyBadge" style="display:none;"></div>
 
@@ -1932,14 +1970,65 @@
             return res;
         }
 
+        let RESET_TOKEN = null;
+
+        async function requestPasswordReset() {
+            const email = (document.getElementById('loginUser').value || '').trim();
+            if (!email || !email.includes('@')) {
+                toast('Digite seu e-mail no campo de usuário e clique de novo em "Esqueci minha senha".', 'warn');
+                return;
+            }
+            try {
+                const res = await fetch(`${API}/auth/request-reset`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email }),
+                });
+                const data = await res.json().catch(() => ({}));
+                toast(data.message || 'Se o e-mail estiver cadastrado, você receberá um link.', 'info', 9000);
+            } catch (e) {
+                toast('Erro de conexão: ' + e.message, 'error');
+            }
+        }
+
+        async function doResetPassword() {
+            const p1 = document.getElementById('resetPass').value;
+            const p2 = document.getElementById('resetPass2').value;
+            const msg = document.getElementById('resetMsg');
+            msg.textContent = '';
+            if (p1.length < 6) { msg.textContent = 'A senha precisa ter ao menos 6 caracteres.'; return; }
+            if (p1 !== p2) { msg.textContent = 'As senhas não coincidem.'; return; }
+            try {
+                const res = await fetch(`${API}/auth/reset`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token: RESET_TOKEN, new_password: p1 }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) { msg.textContent = data.detail || 'Link inválido ou expirado.'; return; }
+                toast('Senha redefinida. Entre com a nova senha.', 'info', 8000);
+                RESET_TOKEN = null;
+                show('loginCard');
+            } catch (e) {
+                msg.textContent = 'Erro de conexão: ' + e.message;
+            }
+        }
+
         function show(id) {
-            ['landingPage', 'signupCard', 'loginCard', 'branchCard', 'appCard', 'pwdCard'].forEach(k => {
+            ['landingPage', 'signupCard', 'loginCard', 'branchCard', 'appCard', 'pwdCard', 'resetCard'].forEach(k => {
                 const el = document.getElementById(k);
                 if (el) el.style.display = (k === id) ? 'block' : 'none';
             });
         }
 
         function goHome() {
+            const resetParam = new URLSearchParams(location.search).get('reset');
+            if (resetParam) {
+                RESET_TOKEN = resetParam;
+                history.replaceState(null, '', location.pathname);  // tira o token da URL
+                show('resetCard');
+                return;
+            }
             if (TOKEN && BRANCH_ID) {
                 show('appCard');
             } else {
@@ -2910,6 +2999,44 @@
                 + encodeURIComponent(subject) + `&body=` + encodeURIComponent(body);
         }
 
+        function buildReescoramentoPayload() {
+            const num = (id) => {
+                const v = document.getElementById(id)?.value;
+                return v === '' || v == null ? null : Number(v);
+            };
+            const multi = document.getElementById('reescoMulti')?.checked || false;
+            const niveis = num('reescoNiveis');
+            const fcj = num('reescoFcj');
+            const fcjIdade = num('reescoFcjIdade');
+            const eci = num('reescoEci');
+            const cargaFinal = num('reescoCargaFinal');
+            const desformaDias = num('reescoDesformaDias');
+            const calculista = (document.getElementById('reescoCalculista')?.value || '').trim();
+            const just = (document.getElementById('reescoJust')?.value || '').trim();
+
+            const touched = multi || niveis != null || fcj != null || eci != null
+                || cargaFinal != null || calculista || just
+                || (desformaDias != null && desformaDias !== 14);
+            if (!touched) return null;
+
+            // Regra do schema (NBR 14931): desforma < 14 exige justificativa + calculista.
+            if (desformaDias != null && desformaDias < 14) {
+                if (!just) { toast('Desforma antes de 14 dias exige justificativa técnica.', 'warn', 8000); return false; }
+                if (calculista.length < 5) { toast('Desforma antes de 14 dias exige a aprovação do calculista (nome + CREA/CAU).', 'warn', 8000); return false; }
+            }
+
+            const payload = { multi_pavimento: multi };
+            if (niveis != null) payload.num_niveis_reescoramento = niveis;
+            if (fcj != null) payload.fcj_aos_dias_mpa = fcj;
+            if (fcjIdade != null) payload.fcj_idade_dias = fcjIdade;
+            if (eci != null) payload.eci_mpa = eci;
+            if (cargaFinal != null) payload.carga_final_kn_m2 = cargaFinal;
+            if (desformaDias != null) payload.desforma_dias = desformaDias;
+            if (calculista) payload.calculista_aprovacao = calculista;
+            if (just) payload.desforma_justificativa = just;
+            return payload;
+        }
+
         async function uploadFile(file) {
             if (!TOKEN || !BRANCH_ID) { show('loginCard'); return; }
             if (!canRunProjects()) { toast('Seu papel permite apenas visualizar resultados.', 'warn'); return; }
@@ -2917,6 +3044,11 @@
             formData.append('file', file);
             const useInventory = document.getElementById('inventoryModeToggle')?.checked;
             formData.append('optimization_mode', useInventory ? 'inventory' : 'price');
+
+            // Bloco de reescoramento (opcional): só envia se algo foi preenchido.
+            const reesco = buildReescoramentoPayload();
+            if (reesco === false) return;  // validação falhou (toast já mostrado)
+            if (reesco) formData.append('reescoramento_json', JSON.stringify(reesco));
 
             try {
                 const res = await apiFetch(`/jobs`, {

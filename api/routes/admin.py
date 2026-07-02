@@ -80,6 +80,16 @@ async def get_usage(user: User = Depends(require_owner_or_admin)):
     for b in locadora.get("branches", []):
         jobs.extend(job_service.list_jobs(branch_id=b["id"]))
     summary = summarize_jobs(jobs)
+
+    # Quota mensal (0 = ilimitado) + uso corrente do mês (UTC)
+    from datetime import datetime, timezone
+    from src.auth.registry import locadora_quota_jobs_mes
+    month_start = datetime.now(timezone.utc).replace(
+        day=1, hour=0, minute=0, second=0, microsecond=0
+    ).replace(tzinfo=None).isoformat()
+    branch_ids = [b["id"] for b in locadora.get("branches", [])]
+    summary["quota_jobs_mes"] = locadora_quota_jobs_mes(user.locadora_id)
+    summary["jobs_este_mes"] = job_service.count_jobs_since(branch_ids, month_start)
     ordered = sorted(
         jobs,
         key=lambda j: j.get("updated_at") or j.get("created_at"),
