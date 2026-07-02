@@ -58,11 +58,14 @@ class DesignPreviewRequest(BaseModel):
 
 
 @router.post("/alternatives")
-async def design_alternatives(request: DesignPreviewRequest):
+def design_alternatives(request: DesignPreviewRequest):
     """Return multiple layout alternatives for the user to choose from.
 
     Returns compact previews (mini SVG data) for 3-6 templates,
     ranked by compatibility with the user's input.
+
+    Handler síncrono de propósito: FastAPI o executa no threadpool, então a
+    geração (CPU-bound) não bloqueia o event loop para os demais clientes.
     """
     try:
         from src.layout.repertoire import select_top_templates
@@ -111,11 +114,14 @@ async def design_alternatives(request: DesignPreviewRequest):
 
 
 @router.post("/preview")
-async def design_preview(request: DesignPreviewRequest):
+def design_preview(request: DesignPreviewRequest):
     """Generate layout preview synchronously for real-time editing.
 
     This endpoint is fast (~10ms) and returns JSON geometry
     for SVG/3D rendering without generating any files.
+
+    Handler síncrono de propósito: FastAPI o executa no threadpool, então a
+    geração (CPU-bound) não bloqueia o event loop para os demais clientes.
     """
     try:
         # Convert to DesignInput (exclude template_id from DesignInput)

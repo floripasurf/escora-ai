@@ -39,19 +39,38 @@ curl -s https://escora.blackcube.dev/api/v1/health      # smoke
 > O uvicorn segura código/estado em memória — **só reinicia via launchd**
 > (`kickstart`), não basta `git pull` (incidente 2026-06-11).
 
-## Gap real a fechar: BACKUPS (não existem hoje)
+## BACKUPS
 
 `data/*.db` (jobs/sessions/registry) + `inventory/ learning/ uploads/ output/`
-vivem só no disco do Mac Mini. Agendar o backup diário:
+vivem só no disco do Mac Mini.
+
+**Agendamento (launchd, diário 03:00):** unit pronto em
+`scripts/ops/com.escora.backup.plist` (substituir USER pelos caminhos reais):
 
 ```bash
-ESCORA_DATA_DIR=~/escora-data \
-BACKUP_DEST=~/escora-backups \
-bash scripts/ops/backup_data.sh
+cp scripts/ops/com.escora.backup.plist ~/Library/LaunchAgents/
+launchctl load -w ~/Library/LaunchAgents/com.escora.backup.plist
+launchctl kickstart gui/$(id -u)/com.escora.backup   # teste imediato
+tail ~/escora-backups/backup.log
 ```
 
-Faz `.backup` consistente dos SQLite (WAL-safe) + tar dos diretórios JSON,
-retenção 14. Sincronize `~/escora-backups` para fora da máquina (rsync/iCloud).
+O script faz `.backup` consistente dos SQLite (WAL-safe) + tar dos diretórios
+JSON, retenção 14. Sincronize `~/escora-backups` para fora da máquina
+(rsync/iCloud) — backup no mesmo disco não protege contra falha do disco.
+
+**Procedimento de RESTORE (testar uma vez ao instalar):**
+
+```bash
+# 1. Parar o engine
+launchctl bootout gui/$(id -u)/com.escora.engine
+# 2. Copiar os .db do backup escolhido de volta
+cp ~/escora-backups/<STAMP>/*.db ~/escora-data/
+# (se necessário: descompactar o tar dos diretórios por cima de ~/escora-data)
+# 3. Religar e validar
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.escora.engine.plist
+curl -s http://127.0.0.1:8020/api/v1/health   # status ok + jobs_count esperado
+# 4. Login em estrutura.app + histórico de jobs visível
+```
 
 ## Checklist antes de convidar parceiros
 

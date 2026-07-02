@@ -8,18 +8,21 @@ Endpoints:
     GET  /api/v1/projects/{id}/download/csv          -- Download BOM CSV
     GET  /api/v1/projects/{id}/download/zip          -- Download pacote completo
     GET  /api/v1/projects/{id}/preview               -- Preview JSON para SVG
+
+Estado persistido em SQLite (api/services/project_service) com escopo por
+branch — sobrevive a restarts e nunca vaza entre locadoras.
 """
 
 import logging
-import uuid
-import multiprocessing as mp
 from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional
 
 from api.config import settings
 from api.deps import get_current_branch, require_operator_or_admin
+from api.services import project_service
 from api.services.project_pipeline_service import process_project
 from src.auth.branches import Branch, User
 
@@ -27,14 +30,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
 
-# In-memory store for project results (simple MVP -- upgrade to DB later)
-_project_store: dict = {}
-
-# Force fork context for subprocess (same as jobs.py)
-try:
-    _MP_CTX = mp.get_context("fork")
-except ValueError:
-    _MP_CTX = mp.get_context("spawn")
+# Keys of the process_project result persisted as project columns.
+_RESULT_FIELDS = (
+    "status", "summary", "preview", "arch_dxf_path", "struct_dxf_path",
+    "memorial_pdf_path", "bom_csv_path", "ifc_path", "zip_path", "error",
+)
 
 
 # === Request/Response schemas ===
@@ -78,43 +78,18 @@ class ProjectStatusResponse(BaseModel):
 
 # === Pipeline worker ===
 
-def _project_worker(project_id: str, input_data: dict, output_dir: str) -> None:
-    """Worker subprocess para geracao do projeto."""
-    try:
-        result = process_project(input_data, project_id, output_dir)
-        _project_store[project_id] = result
-    except Exception as e:
-        logger.exception(f"Project {project_id} failed")
-        _project_store[project_id] = {
-            "status": "error",
-            "project_id": project_id,
-            "error": str(e),
-        }
-
-
-def _run_project_pipeline(project_id: str, input_data: dict, branch_id: str) -> None:
-    """Background task: run project generation."""
-    _project_store[project_id] = {
-        "status": "processing",
-        "project_id": project_id,
-        "branch_id": branch_id,
-    }
-
+def _run_project_pipeline(project_id: str, input_data: dict) -> None:
+    """Background task: run project generation and persist the result."""
     output_dir = str(Path(settings.output_dir) / "projects")
 
-    # Run synchronously in background task (simpler than subprocess for now)
     try:
         result = process_project(input_data, project_id, output_dir)
-        result["branch_id"] = branch_id
-        _project_store[project_id] = result
+        updates = {k: result.get(k) for k in _RESULT_FIELDS if k in result}
+        updates.setdefault("status", "error")
+        project_service.update_project(project_id, **updates)
     except Exception as e:
         logger.exception(f"Project {project_id} failed")
-        _project_store[project_id] = {
-            "status": "error",
-            "project_id": project_id,
-            "branch_id": branch_id,
-            "error": str(e),
-        }
+        project_service.update_project(project_id, status="error", error=str(e))
 
 
 # === Endpoints ===
@@ -122,10 +97,19 @@ def _run_project_pipeline(project_id: str, input_data: dict, branch_id: str) -> 
 def _get_project_for_branch(project_id: str, branch: Branch) -> dict:
     """Fetch a project scoped to the caller's branch (404 on cross-tenant),
     mirroring job_service.get_job(job_id, branch_id=...)."""
-    data = _project_store.get(project_id)
-    if not data or data.get("branch_id") != branch.id:
+    data = project_service.get_project(project_id, branch_id=branch.id)
+    if not data:
         raise HTTPException(404, "Projeto nao encontrado")
     return data
+
+
+def _download(data: dict, path_key: str, media_type: str, missing_label: str):
+    if data.get("status") != "done":
+        raise HTTPException(400, "Projeto ainda nao concluido")
+    path = data.get(path_key)
+    if not path or not Path(path).exists():
+        raise HTTPException(404, f"{missing_label} nao encontrado")
+    return FileResponse(path, media_type=media_type, filename=Path(path).name)
 
 
 @router.post("", status_code=201, response_model=ProjectCreateResponse)
@@ -139,20 +123,12 @@ async def create_project(
 
     Recebe os dados do formulario e inicia a geracao em background.
     """
-    project_id = uuid.uuid4().hex
-
     input_data = request.model_dump()
-
-    _project_store[project_id] = {
-        "status": "processing",
-        "project_id": project_id,
-        "branch_id": branch.id,
-    }
+    project = project_service.create_project(branch.id, input_data)
     background_tasks.add_task(
-        _run_project_pipeline, project_id, input_data, branch.id
+        _run_project_pipeline, project["id"], input_data
     )
-
-    return ProjectCreateResponse(id=project_id, status="processing")
+    return ProjectCreateResponse(id=project["id"], status="processing")
 
 
 @router.get("/{project_id}/status", response_model=ProjectStatusResponse)
@@ -187,21 +163,8 @@ async def download_dxf(
     """Download DXF (arch = arquitetonico, struct = estrutural)."""
     if dxf_type not in ("arch", "struct"):
         raise HTTPException(400, "Tipo invalido. Use: arch, struct")
-
     data = _get_project_for_branch(project_id, branch)
-    if data.get("status") != "done":
-        raise HTTPException(400, "Projeto ainda nao concluido")
-
-    key = f"{dxf_type}_dxf_path"
-    path = data.get(key)
-    if not path or not Path(path).exists():
-        raise HTTPException(404, f"DXF {dxf_type} nao encontrado")
-
-    from fastapi.responses import FileResponse
-    filename = Path(path).name
-    return FileResponse(
-        path, media_type="application/dxf", filename=filename
-    )
+    return _download(data, f"{dxf_type}_dxf_path", "application/dxf", f"DXF {dxf_type}")
 
 
 @router.get("/{project_id}/download/pdf")
@@ -211,17 +174,7 @@ async def download_pdf(
 ):
     """Download memorial de calculo PDF."""
     data = _get_project_for_branch(project_id, branch)
-    if data.get("status") != "done":
-        raise HTTPException(400, "Projeto ainda nao concluido")
-
-    path = data.get("memorial_pdf_path")
-    if not path or not Path(path).exists():
-        raise HTTPException(404, "PDF nao encontrado")
-
-    from fastapi.responses import FileResponse
-    return FileResponse(
-        path, media_type="application/pdf", filename=Path(path).name
-    )
+    return _download(data, "memorial_pdf_path", "application/pdf", "PDF")
 
 
 @router.get("/{project_id}/download/csv")
@@ -231,17 +184,7 @@ async def download_csv(
 ):
     """Download BOM CSV."""
     data = _get_project_for_branch(project_id, branch)
-    if data.get("status") != "done":
-        raise HTTPException(400, "Projeto ainda nao concluido")
-
-    path = data.get("bom_csv_path")
-    if not path or not Path(path).exists():
-        raise HTTPException(404, "CSV nao encontrado")
-
-    from fastapi.responses import FileResponse
-    return FileResponse(
-        path, media_type="text/csv", filename=Path(path).name
-    )
+    return _download(data, "bom_csv_path", "text/csv", "CSV")
 
 
 @router.get("/{project_id}/download/zip")
@@ -251,17 +194,7 @@ async def download_zip(
 ):
     """Download pacote ZIP com todos os arquivos do projeto."""
     data = _get_project_for_branch(project_id, branch)
-    if data.get("status") != "done":
-        raise HTTPException(400, "Projeto ainda nao concluido")
-
-    path = data.get("zip_path")
-    if not path or not Path(path).exists():
-        raise HTTPException(404, "ZIP nao encontrado")
-
-    from fastapi.responses import FileResponse
-    return FileResponse(
-        path, media_type="application/zip", filename=Path(path).name
-    )
+    return _download(data, "zip_path", "application/zip", "ZIP")
 
 
 @router.get("/{project_id}/preview")
@@ -273,11 +206,9 @@ async def get_preview(
     data = _get_project_for_branch(project_id, branch)
     if data.get("status") != "done":
         raise HTTPException(400, "Projeto ainda nao concluido")
-
     preview = data.get("preview")
     if not preview:
         raise HTTPException(404, "Preview nao disponivel")
-
     return preview
 
 
@@ -288,14 +219,4 @@ async def download_ifc(
 ):
     """Download IFC BIM model."""
     data = _get_project_for_branch(project_id, branch)
-    if data.get("status") != "done":
-        raise HTTPException(400, "Projeto ainda nao concluido")
-
-    path = data.get("ifc_path")
-    if not path or not Path(path).exists():
-        raise HTTPException(404, "IFC nao encontrado")
-
-    from fastapi.responses import FileResponse
-    return FileResponse(
-        path, media_type="application/x-step", filename=Path(path).name
-    )
+    return _download(data, "ifc_path", "application/x-step", "IFC")
