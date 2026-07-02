@@ -1,5 +1,4 @@
 """Sprint 4: progresso por estágio (status_detail) + preview 2D no job."""
-import ezdxf
 
 from api.services import job_service
 from api.services.pipeline_service import (

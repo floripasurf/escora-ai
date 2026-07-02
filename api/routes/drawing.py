@@ -2,6 +2,7 @@
 
 import logging
 import tempfile
+from pathlib import Path
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException
