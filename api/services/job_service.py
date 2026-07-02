@@ -59,6 +59,7 @@ _COLUMNS = (
     "validated_results",
     "revision_data",
     "error_message",
+    "status_detail",
     "optimization_mode",
     "inventory_name",
     "created_at",
@@ -87,6 +88,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     validated_results TEXT,
     revision_data TEXT,
     error_message TEXT,
+    status_detail TEXT,
     optimization_mode TEXT DEFAULT 'price',
     inventory_name TEXT,
     created_at TEXT NOT NULL,
@@ -110,6 +112,13 @@ def _connect() -> sqlite3.Connection:
 def init_db() -> None:
     with _lock, _connect() as conn:
         conn.executescript(_CREATE_SQL)
+        # Migração idempotente para DBs criados antes da coluna existir.
+        # NUNCA dentro do _CREATE_SQL: CREATE TABLE IF NOT EXISTS não altera
+        # tabela existente, então a coluna nova precisa do ALTER explícito.
+        try:
+            conn.execute("ALTER TABLE jobs ADD COLUMN status_detail TEXT")
+        except sqlite3.OperationalError:
+            pass  # coluna já existe
 
 
 def _row_to_job(row: sqlite3.Row) -> dict:
