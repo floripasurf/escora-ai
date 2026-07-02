@@ -53,7 +53,7 @@ def _get_mp_context():
     requested = os.environ.get("ESCORA_MP_START_METHOD")
     if requested:
         return mp.get_context(requested)
-    # Force `fork` on Linux/Fly so the child inherits already-loaded modules
+    # Force `fork` on Linux so the child inherits already-loaded modules
     # without paying import cost twice. Avoid fork on macOS: importing Objective-C
     # linked modules after fork can abort the Python process.
     if platform.system() == "Linux":
@@ -68,7 +68,7 @@ _MP_CTX = _get_mp_context()
 def _pipeline_execution_lock(job_id: str):
     """Serialize heavy pipeline jobs on a machine.
 
-    A single Fly shared-CPU VM can time out when multiple DXF pipelines run at
+    A single local machine can time out when multiple DXF pipelines run at
     once. Keep queued jobs in `pending`; only the job holding this file lock is
     marked `processing` and consumes the pipeline wall-clock budget.
     """
