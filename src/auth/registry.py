@@ -310,6 +310,33 @@ def methodology_metadata(locadora_id: Optional[str], branch_id: Optional[str]) -
     return {}
 
 
+def locadora_quota_jobs_mes(locadora_id: Optional[str]) -> int:
+    """Quota mensal de jobs da locadora (0 = ilimitado).
+
+    Fonte: metadata_json["quota_jobs_mes"] da locadora; fallback no env
+    ESCORA_DEFAULT_MONTHLY_QUOTA (tambem 0 = ilimitado por default).
+    """
+    default = 0
+    try:
+        default = int(os.environ.get("ESCORA_DEFAULT_MONTHLY_QUOTA", "0"))
+    except ValueError:
+        default = 0
+    if not locadora_id:
+        return default
+    init_registry_db()
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT metadata_json FROM locadoras WHERE id = ?", (locadora_id,)
+        ).fetchone()
+    if row is None:
+        return default
+    meta = _json_loads(row["metadata_json"])
+    quota = meta.get("quota_jobs_mes")
+    if isinstance(quota, int) and quota >= 0:
+        return quota
+    return default
+
+
 def create_locadora_with_owner(
     *,
     name: str,

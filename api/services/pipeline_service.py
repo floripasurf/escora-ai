@@ -152,6 +152,7 @@ def process_dxf(
     branch_id: Optional[str] = None,
     slab_layout_mode: Optional[str] = None,
     methodology=None,
+    reescoramento: Optional[dict] = None,
 ) -> dict:
     """Run the full pipeline on a DXF file and generate output.
 
@@ -170,6 +171,29 @@ def process_dxf(
     if pipeline_runner is None:
         from src.pipeline.runner import run_pipeline as pipeline_runner
 
+    # Bloco de reescoramento (docs/ux/reescoramento_input_block.md):
+    # payload validado (ReescoramentoInput.model_dump) -> ReescoramentoData
+    # do engine, habilitando os verificadores DECIDE-001/002.
+    reescoramento_data = None
+    desforma_dias = None
+    desforma_justificativa = ""
+    if reescoramento:
+        from src.rules.project import ReescoramentoData
+        reescoramento_data = ReescoramentoData(
+            fcj_aos_dias_mpa=reescoramento.get("fcj_aos_dias_mpa"),
+            eci_mpa=reescoramento.get("eci_mpa"),
+            carga_final_kn_m2=reescoramento.get("carga_final_kn_m2"),
+            carga_estado_construcao_kn_m2=reescoramento.get(
+                "carga_estado_construcao_kn_m2", 1.5
+            ),
+            num_niveis_reescoramento=reescoramento.get(
+                "num_niveis_reescoramento", 0
+            ),
+            calculista_aprovacao=reescoramento.get("calculista_aprovacao", ""),
+        )
+        desforma_dias = reescoramento.get("desforma_dias")
+        desforma_justificativa = reescoramento.get("desforma_justificativa", "")
+
     _set_status_detail(
         job_id, output_suffix, "Analisando o DXF e calculando o escoramento"
     )
@@ -180,6 +204,9 @@ def process_dxf(
         branch_id=branch_id,
         slab_layout_mode=slab_layout_mode,
         methodology=methodology,
+        reescoramento=reescoramento_data,
+        desforma_dias=desforma_dias,
+        desforma_justificativa=desforma_justificativa,
     )
     calc = result.calculation
 
