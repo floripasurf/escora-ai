@@ -124,7 +124,7 @@
         .modal h2 { font-family:var(--display); font-size:20px; margin-bottom:8px; }
         .modal p { color:var(--fg-dim); font-size:13px; margin-bottom:20px; }
         .dl-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-        .dl-btn { display:flex; align-items:center; gap:10px; padding:12px 16px; background:var(--bg-2); border:1px solid var(--line); border-radius:var(--radius-sm); cursor:pointer; transition:all .2s; text-decoration:none; color:var(--fg); }
+        .dl-btn { display:flex; align-items:center; gap:10px; padding:12px 16px; background:var(--bg-2); border:1px solid var(--line); border-radius:var(--radius-sm); cursor:pointer; transition:all .2s; text-decoration:none; color:var(--fg); font-family:var(--sans); text-align:left; }
         .dl-btn:hover { border-color:var(--accent-line); background:var(--accent-soft); }
         .dl-btn .ext { font-family:var(--mono); font-size:11px; font-weight:500; color:var(--accent); background:rgba(207,255,26,0.15); padding:2px 6px; border-radius:3px; }
         .dl-btn .name { font-size:13px; }
@@ -542,13 +542,63 @@
 
 <script>
 const API = window.location.origin;
+const TOKEN = localStorage.getItem('escora_token') || '';
+const BRANCH_ID = localStorage.getItem('escora_branch_id') || '';
 let debounceTimer = null;
 let projectId = null;
 let currentAlternatives = [];
 let selectedTemplateId = null;
 
+function authHeaders(extra = {}) {
+    const headers = { ...extra };
+    if (TOKEN) headers.Authorization = `Bearer ${TOKEN}`;
+    if (BRANCH_ID) headers['X-Branch-Id'] = BRANCH_ID;
+    return headers;
+}
+
+function showWarning(message) {
+    document.getElementById('warn-bar').style.display = 'block';
+    document.getElementById('warn-text').textContent = message;
+}
+
+function requireSession() {
+    if (TOKEN && BRANCH_ID) return true;
+    showWarning('Entre pelo painel e selecione uma unidade antes de usar o design interativo.');
+    const btn = document.getElementById('btn-generate');
+    if (btn) btn.disabled = true;
+    return false;
+}
+
+function filenameFromResponse(res, fallback) {
+    const cd = res.headers.get('Content-Disposition') || '';
+    const m = cd.match(/filename\*?=(?:UTF-8''|")?([^";]+)"?/i);
+    if (m && m[1]) {
+        try { return decodeURIComponent(m[1]); } catch { return m[1]; }
+    }
+    return fallback;
+}
+
+async function downloadFile(path, suggestedName) {
+    try {
+        const res = await fetch(`${API}${path}`, { headers: authHeaders() });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filenameFromResponse(res, suggestedName);
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    } catch (err) {
+        showWarning('Erro ao baixar arquivo: ' + err.message);
+    }
+}
+
 // --- Input change handler ---
 function onInputChange() {
+    if (!requireSession()) return;
     // Update range display
     document.getElementById('areaVal').textContent = document.getElementById('area').value + 'm2';
 
@@ -672,11 +722,12 @@ function updateCostEstimate() {
 }
 
 async function fetchAlternatives() {
+    if (!requireSession()) return;
     try {
         const data = getDesignData();
         const res = await fetch(`${API}/api/v1/design/alternatives`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify(data),
         });
         if (!res.ok) {
@@ -778,12 +829,13 @@ function selectTemplate(templateId) {
 }
 
 async function fetchPreview(templateId) {
+    if (!requireSession()) return;
     try {
         const data = getDesignData();
         if (templateId) data.template_id = templateId;
         const res = await fetch(`${API}/api/v1/design/preview`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify(data),
         });
         if (!res.ok) {
@@ -952,6 +1004,7 @@ function toggleSection(header) {
 
 // --- File generation ---
 async function generateFiles() {
+    if (!requireSession()) return;
     const btn = document.getElementById('btn-generate');
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-sm"></span>Gerando...';
@@ -961,7 +1014,7 @@ async function generateFiles() {
         // Use the existing projects endpoint for full generation
         const res = await fetch(`${API}/api/v1/projects`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify(data),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -971,7 +1024,10 @@ async function generateFiles() {
         // Poll
         for (let i = 0; i < 60; i++) {
             await new Promise(r => setTimeout(r, 1000));
-            const sr = await fetch(`${API}/api/v1/projects/${id}/status`);
+            const sr = await fetch(`${API}/api/v1/projects/${id}/status`, {
+                headers: authHeaders(),
+            });
+            if (!sr.ok) throw new Error(`HTTP ${sr.status}`);
             const sd = await sr.json();
             if (sd.status === 'done') {
                 showDownloads(sd);
@@ -1001,11 +1057,12 @@ function showDownloads(data) {
     ];
     files.forEach(f => {
         if (data[f.key]) {
-            const a = document.createElement('a');
-            a.href = f.url;
-            a.className = 'dl-btn';
-            a.innerHTML = `<span class="ext">${f.ext}</span><span class="name">${f.name}</span>`;
-            grid.appendChild(a);
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'dl-btn';
+            btn.innerHTML = `<span class="ext">${f.ext}</span><span class="name">${f.name}</span>`;
+            btn.onclick = () => downloadFile(f.url, `${f.name}.${f.ext.toLowerCase()}`);
+            grid.appendChild(btn);
         }
     });
     document.getElementById('dl-modal').classList.add('active');
@@ -1016,7 +1073,9 @@ function closeModal() {
 }
 
 // Initial load
-document.addEventListener('DOMContentLoaded', () => fetchAlternatives());
+document.addEventListener('DOMContentLoaded', () => {
+    if (requireSession()) fetchAlternatives();
+});
 </script>
 </body>
 </html>

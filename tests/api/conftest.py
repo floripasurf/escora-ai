@@ -73,8 +73,10 @@ def _isolated_data(tmp_path_factory, monkeypatch):
 
     from src.auth.branches import clear_sessions
     from api.services.job_service import _reset_for_tests
+    from api.services.project_service import _reset_for_tests as _reset_projects_for_tests
     clear_sessions()
     _reset_for_tests()
+    _reset_projects_for_tests()
     yield
     clear_sessions()
 

@@ -232,7 +232,7 @@
             text-align: center;
             cursor: pointer;
             background: var(--bg-1);
-            margin-bottom: 3.5rem;
+            margin-bottom: 0.75rem;
             transition: border-color 0.2s, background 0.2s, transform 0.2s;
             opacity: 0;
             animation: fadeUp 0.6s ease-out 0.1s forwards;
@@ -278,6 +278,17 @@
             letter-spacing: 0;
         }
         .upload-zone input { display: none; }
+        .upload-msg {
+            min-height: 22px;
+            margin: 0 0 3.5rem;
+            font-size: 0.82rem;
+            color: var(--fg-mute);
+            opacity: 0;
+            transition: opacity 0.18s;
+        }
+        .upload-msg.visible { opacity: 1; }
+        .upload-msg.ok { color: var(--ok); }
+        .upload-msg.err { color: var(--err); }
 
         /* ---------- Auth card (login, branch, pwd, signup) ---------- */
         .auth-wrap {
@@ -1446,9 +1457,10 @@
                 <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
                     <div class="icon">&uarr;</div>
                     <h2>Arraste ou selecione seu projeto estrutural</h2>
-                    <p>.dxf &middot; .dwg &middot; ate 200 MB</p>
+                    <p>.dxf &middot; .dwg &middot; ate 30 MB</p>
                     <input type="file" id="fileInput" accept=".dxf,.dwg">
                 </div>
+                <div class="upload-msg" id="uploadMsg" role="status" aria-live="polite"></div>
 
                 <div class="section-head">
                     <span class="section-title">Projetos</span>
@@ -1463,8 +1475,8 @@
                     <div class="inventory-header">
                         <h2>Inventário de Equipamentos</h2>
                         <div class="inventory-actions">
-                            <button class="btn" onclick="alert('Funcionalidade em desenvolvimento')">Importar Inventário</button>
-                            <button class="btn btn-primary" onclick="alert('Funcionalidade em desenvolvimento')">Adicionar Item</button>
+                            <button class="btn" disabled title="Inventário é sincronizado pelo cadastro da locadora">Importar CSV</button>
+                            <button class="btn btn-primary" disabled title="Cadastro manual ainda não está habilitado">Adicionar Item</button>
                         </div>
                     </div>
                     <div class="inventory-note">
@@ -1598,6 +1610,8 @@
             ? ''  // dev: same origin
             : 'https://escora.blackcube.dev';
         const API = `${BACKEND}/api/v1`;
+        const MAX_UPLOAD_MB = 30;
+        const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
         const jobs = {};
 
         // XSS-safe text escaping for all user-controlled strings
@@ -1950,28 +1964,64 @@
             fileInput.value = '';
         });
 
+        function setUploadMessage(message, type = '') {
+            const el = document.getElementById('uploadMsg');
+            if (!el) return;
+            el.textContent = message || '';
+            el.className = `upload-msg${message ? ' visible' : ''}${type ? ' ' + type : ''}`;
+        }
+
+        function uploadWithProgress(formData) {
+            return new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', `${API}/jobs`);
+                Object.entries(authHeaders()).forEach(([key, value]) => {
+                    xhr.setRequestHeader(key, value);
+                });
+                xhr.upload.onprogress = (event) => {
+                    if (!event.lengthComputable) {
+                        setUploadMessage('Enviando arquivo...', '');
+                        return;
+                    }
+                    const pct = Math.max(1, Math.round((event.loaded / event.total) * 100));
+                    setUploadMessage(`Enviando arquivo... ${pct}%`, '');
+                };
+                xhr.onload = () => {
+                    let data = {};
+                    try { data = JSON.parse(xhr.responseText || '{}'); } catch (_) {}
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        resolve(data);
+                        return;
+                    }
+                    reject(new Error(data.detail || data.message || `Erro ${xhr.status}`));
+                };
+                xhr.onerror = () => reject(new Error('Erro de conexão'));
+                xhr.send(formData);
+            });
+        }
+
         async function uploadFile(file) {
-            if (!TOKEN || !BRANCH_ID) { show('loginCard'); return; }
+            setUploadMessage('');
+            if (!TOKEN || !BRANCH_ID) {
+                setUploadMessage('Entre e selecione uma unidade antes de enviar o projeto.', 'err');
+                show('loginCard');
+                return;
+            }
+            if (file.size > MAX_UPLOAD_BYTES) {
+                setUploadMessage(`Arquivo acima de ${MAX_UPLOAD_MB} MB. Reduza ou divida o projeto antes de enviar.`, 'err');
+                return;
+            }
             const formData = new FormData();
             formData.append('file', file);
 
             try {
-                const res = await fetch(`${API}/jobs`, {
-                    method: 'POST',
-                    body: formData,
-                    headers: authHeaders(),
-                });
-                if (!res.ok) {
-                    const msg = await safeErrorMessage(res);
-                    alert(msg || 'Erro no upload');
-                    return;
-                }
-                const data = await res.json();
+                const data = await uploadWithProgress(formData);
                 jobs[data.id] = data;
                 renderJobs();
                 pollJob(data.id);
+                setUploadMessage('Upload recebido. Processamento iniciado.', 'ok');
             } catch (e) {
-                alert('Erro de conexão: ' + e.message);
+                setUploadMessage(e.message || 'Erro no upload', 'err');
             }
         }
 

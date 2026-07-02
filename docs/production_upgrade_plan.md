@@ -1,5 +1,24 @@
 # Production Upgrade Plan — Escora.AI
 
+## Current production state
+
+As of 2026-07-02, `estrutura.app` serves the static frontend from Vercel, but
+API traffic is rewritten to `https://escora.blackcube.dev/api/:path*`. That host
+is a Cloudflare tunnel to the Mac Mini LaunchAgent running:
+
+```text
+/Users/raphaellages/escora-ai/.venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8020
+```
+
+This means production availability still depends on the local Mac Mini, the
+LaunchAgent, and the Cloudflare tunnel. `fly.toml` exists and is the preferred
+hosted-backend target, but do not switch Vercel rewrites to Fly until the
+persistent `/data` volume, `locadoras.json`, sessions, uploads, and generated
+outputs have been validated there.
+
+Use `scripts/verify_production_runtime.py` to make this dependency explicit in
+local checks or CI.
+
 **Goal:** turn the current demo-grade live site (https://escora-ai.fly.dev) into a tool
 we can credibly offer free-of-charge to locadoras and engineering offices as a
 working SaaS. The pitch changes from "look at my prototype" to "use this tool

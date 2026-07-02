@@ -3,10 +3,12 @@
 import logging
 from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from api.deps import get_current_branch
 from src.models.masonry import DesignInput, SiteAnalysis
+from src.auth.branches import Branch
 from src.layout.solver import solve_layout_interactive
 from src.utils.masonry_constants import MIN_ROOM_AREAS, MIN_ROOM_DIMENSION
 from api.services.project_pipeline_service import _build_preview
@@ -52,7 +54,10 @@ class DesignPreviewRequest(BaseModel):
 
 
 @router.post("/alternatives")
-async def design_alternatives(request: DesignPreviewRequest):
+async def design_alternatives(
+    request: DesignPreviewRequest,
+    branch: Branch = Depends(get_current_branch),
+):
     """Return multiple layout alternatives for the user to choose from.
 
     Returns compact previews (mini SVG data) for 3-6 templates,
@@ -105,7 +110,10 @@ async def design_alternatives(request: DesignPreviewRequest):
 
 
 @router.post("/preview")
-async def design_preview(request: DesignPreviewRequest):
+async def design_preview(
+    request: DesignPreviewRequest,
+    branch: Branch = Depends(get_current_branch),
+):
     """Generate layout preview synchronously for real-time editing.
 
     This endpoint is fast (~10ms) and returns JSON geometry

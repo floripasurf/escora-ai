@@ -5,10 +5,11 @@ import tempfile
 from pathlib import Path
 from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from api.deps import get_current_branch
 from src.drawing import TechnicalSheet, NBR
 from src.drawing.nbr import HatchMaterial, ProjectionSystem
 from src.drawing.sheet import TitleBlockInfo
@@ -20,7 +21,11 @@ from src.drawing.views import SectionCut, generate_section_from_walls
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/drawing", tags=["drawing"])
+router = APIRouter(
+    prefix="/api/v1/drawing",
+    tags=["drawing"],
+    dependencies=[Depends(get_current_branch)],
+)
 
 
 # ---------------------------------------------------------------------------

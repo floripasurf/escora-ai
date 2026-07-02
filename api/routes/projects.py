@@ -11,28 +11,20 @@ Endpoints:
 """
 
 import logging
-import uuid
-import multiprocessing as mp
 from pathlib import Path
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional
 
 from api.config import settings
+from api.deps import get_current_branch
+from api.services import project_service
 from api.services.project_pipeline_service import process_project
+from src.auth.branches import Branch
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
-
-# In-memory store for project results (simple MVP -- upgrade to DB later)
-_project_store: dict = {}
-
-# Force fork context for subprocess (same as jobs.py)
-try:
-    _MP_CTX = mp.get_context("fork")
-except ValueError:
-    _MP_CTX = mp.get_context("spawn")
 
 
 # === Request/Response schemas ===
@@ -74,42 +66,28 @@ class ProjectStatusResponse(BaseModel):
     has_zip: bool = False
 
 
-# === Pipeline worker ===
-
-def _project_worker(project_id: str, input_data: dict, output_dir: str) -> None:
-    """Worker subprocess para geracao do projeto."""
-    try:
-        result = process_project(input_data, project_id, output_dir)
-        _project_store[project_id] = result
-    except Exception as e:
-        logger.exception(f"Project {project_id} failed")
-        _project_store[project_id] = {
-            "status": "error",
-            "project_id": project_id,
-            "error": str(e),
-        }
-
-
 def _run_project_pipeline(project_id: str, input_data: dict) -> None:
     """Background task: run project generation."""
-    _project_store[project_id] = {
-        "status": "processing",
-        "project_id": project_id,
-    }
-
     output_dir = str(Path(settings.output_dir) / "projects")
 
     # Run synchronously in background task (simpler than subprocess for now)
     try:
         result = process_project(input_data, project_id, output_dir)
-        _project_store[project_id] = result
+        project_service.finish_project(project_id, result)
     except Exception as e:
         logger.exception(f"Project {project_id} failed")
-        _project_store[project_id] = {
+        project_service.finish_project(project_id, {
             "status": "error",
             "project_id": project_id,
             "error": str(e),
-        }
+        })
+
+
+def _require_project_access(project_id: str, branch: Branch) -> dict:
+    data = project_service.get_project(project_id, branch_id=branch.id)
+    if not data:
+        raise HTTPException(404, "Projeto nao encontrado")
+    return data
 
 
 # === Endpoints ===
@@ -118,30 +96,27 @@ def _run_project_pipeline(project_id: str, input_data: dict) -> None:
 async def create_project(
     request: ProjectCreateRequest,
     background_tasks: BackgroundTasks,
+    branch: Branch = Depends(get_current_branch),
 ):
     """Cria um novo projeto de alvenaria estrutural.
 
     Recebe os dados do formulario e inicia a geracao em background.
     """
-    project_id = str(uuid.uuid4())[:8]
-
     input_data = request.model_dump()
-
-    _project_store[project_id] = {
-        "status": "processing",
-        "project_id": project_id,
-    }
+    project = project_service.create_project(input_data, branch)
+    project_id = project["id"]
     background_tasks.add_task(_run_project_pipeline, project_id, input_data)
 
     return ProjectCreateResponse(id=project_id, status="processing")
 
 
 @router.get("/{project_id}/status", response_model=ProjectStatusResponse)
-async def get_project_status(project_id: str):
+async def get_project_status(
+    project_id: str,
+    branch: Branch = Depends(get_current_branch),
+):
     """Retorna status e resumo do projeto."""
-    data = _project_store.get(project_id)
-    if not data:
-        raise HTTPException(404, "Projeto nao encontrado")
+    data = _require_project_access(project_id, branch)
 
     return ProjectStatusResponse(
         id=project_id,
@@ -159,14 +134,16 @@ async def get_project_status(project_id: str):
 
 
 @router.get("/{project_id}/download/dxf/{dxf_type}")
-async def download_dxf(project_id: str, dxf_type: str):
+async def download_dxf(
+    project_id: str,
+    dxf_type: str,
+    branch: Branch = Depends(get_current_branch),
+):
     """Download DXF (arch = arquitetonico, struct = estrutural)."""
     if dxf_type not in ("arch", "struct"):
         raise HTTPException(400, "Tipo invalido. Use: arch, struct")
 
-    data = _project_store.get(project_id)
-    if not data:
-        raise HTTPException(404, "Projeto nao encontrado")
+    data = _require_project_access(project_id, branch)
     if data.get("status") != "done":
         raise HTTPException(400, "Projeto ainda nao concluido")
 
@@ -183,11 +160,12 @@ async def download_dxf(project_id: str, dxf_type: str):
 
 
 @router.get("/{project_id}/download/pdf")
-async def download_pdf(project_id: str):
+async def download_pdf(
+    project_id: str,
+    branch: Branch = Depends(get_current_branch),
+):
     """Download memorial de calculo PDF."""
-    data = _project_store.get(project_id)
-    if not data:
-        raise HTTPException(404, "Projeto nao encontrado")
+    data = _require_project_access(project_id, branch)
     if data.get("status") != "done":
         raise HTTPException(400, "Projeto ainda nao concluido")
 
@@ -202,11 +180,12 @@ async def download_pdf(project_id: str):
 
 
 @router.get("/{project_id}/download/csv")
-async def download_csv(project_id: str):
+async def download_csv(
+    project_id: str,
+    branch: Branch = Depends(get_current_branch),
+):
     """Download BOM CSV."""
-    data = _project_store.get(project_id)
-    if not data:
-        raise HTTPException(404, "Projeto nao encontrado")
+    data = _require_project_access(project_id, branch)
     if data.get("status") != "done":
         raise HTTPException(400, "Projeto ainda nao concluido")
 
@@ -221,11 +200,12 @@ async def download_csv(project_id: str):
 
 
 @router.get("/{project_id}/download/zip")
-async def download_zip(project_id: str):
+async def download_zip(
+    project_id: str,
+    branch: Branch = Depends(get_current_branch),
+):
     """Download pacote ZIP com todos os arquivos do projeto."""
-    data = _project_store.get(project_id)
-    if not data:
-        raise HTTPException(404, "Projeto nao encontrado")
+    data = _require_project_access(project_id, branch)
     if data.get("status") != "done":
         raise HTTPException(400, "Projeto ainda nao concluido")
 
@@ -240,11 +220,12 @@ async def download_zip(project_id: str):
 
 
 @router.get("/{project_id}/preview")
-async def get_preview(project_id: str):
+async def get_preview(
+    project_id: str,
+    branch: Branch = Depends(get_current_branch),
+):
     """Retorna dados JSON para renderizacao SVG da planta."""
-    data = _project_store.get(project_id)
-    if not data:
-        raise HTTPException(404, "Projeto nao encontrado")
+    data = _require_project_access(project_id, branch)
     if data.get("status") != "done":
         raise HTTPException(400, "Projeto ainda nao concluido")
 
@@ -256,11 +237,12 @@ async def get_preview(project_id: str):
 
 
 @router.get("/{project_id}/download/ifc")
-async def download_ifc(project_id: str):
+async def download_ifc(
+    project_id: str,
+    branch: Branch = Depends(get_current_branch),
+):
     """Download IFC BIM model."""
-    data = _project_store.get(project_id)
-    if not data:
-        raise HTTPException(404, "Projeto nao encontrado")
+    data = _require_project_access(project_id, branch)
     if data.get("status") != "done":
         raise HTTPException(400, "Projeto ainda nao concluido")
 

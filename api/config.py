@@ -50,6 +50,10 @@ class Settings(BaseSettings):
         return self.data_root / "jobs.db"
 
     @property
+    def projects_db_path(self) -> Path:
+        return self.data_root / "projects.db"
+
+    @property
     def learning_dir(self) -> Path:
         return self.data_root / "learning"
 

@@ -14,7 +14,7 @@ from api.routes.projects import router as projects_router
 from api.routes.design import router as design_router
 from api.routes.drawing import router as drawing_router
 from api.config import settings
-from api.services import job_service
+from api.services import job_service, project_service
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +63,10 @@ def _startup() -> None:
     swept = job_service.sweep_orphan_processing()
     if swept:
         logger.warning(f"Startup: marked {swept} orphan job(s) as error")
+    project_service.init_db()
+    swept_projects = project_service.sweep_orphan_processing()
+    if swept_projects:
+        logger.warning(f"Startup: marked {swept_projects} orphan project(s) as error")
     # Session store (SQLite) warm-up.
     from src.auth.branches import init_sessions_db
     init_sessions_db()
@@ -75,7 +79,6 @@ def health():
         "status": "ok",
         "jobs_count": len(jobs),
         "version": "0.3.0",
-        "data_dir": str(settings.data_root),
     }
 
 

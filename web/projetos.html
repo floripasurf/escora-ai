@@ -95,7 +95,7 @@
 
         /* Downloads */
         .dl-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-        .dl-btn { display:flex; align-items:center; gap:10px; padding:12px 16px; background:var(--bg-2); border:1px solid var(--line); border-radius:var(--radius-sm); cursor:pointer; transition:all .2s; text-decoration:none; color:var(--fg); }
+        .dl-btn { display:flex; align-items:center; gap:10px; padding:12px 16px; background:var(--bg-2); border:1px solid var(--line); border-radius:var(--radius-sm); cursor:pointer; transition:all .2s; text-decoration:none; color:var(--fg); font-family:var(--sans); text-align:left; }
         .dl-btn:hover { border-color:var(--accent-line); background:var(--accent-soft); }
         .dl-btn .ext { font-family:var(--mono); font-size:11px; font-weight:500; color:var(--accent); background:rgba(207,255,26,0.15); padding:2px 6px; border-radius:3px; }
         .dl-btn .name { font-size:13px; }
@@ -325,8 +325,74 @@
 
 <script>
 const API = window.location.origin;
+const TOKEN = localStorage.getItem('escora_token') || '';
+const BRANCH_ID = localStorage.getItem('escora_branch_id') || '';
 let currentStep = 1;
 let projectId = null;
+
+function authHeaders(extra = {}) {
+    const headers = { ...extra };
+    if (TOKEN) headers.Authorization = `Bearer ${TOKEN}`;
+    if (BRANCH_ID) headers['X-Branch-Id'] = BRANCH_ID;
+    return headers;
+}
+
+function requireSession() {
+    if (TOKEN && BRANCH_ID) {
+        const guard = document.getElementById('auth-required');
+        if (guard) guard.style.display = 'none';
+        document.getElementById('step-dots').style.display = 'flex';
+        return true;
+    }
+
+    document.querySelectorAll('.form-step').forEach(s => s.classList.remove('active'));
+    document.getElementById('results').style.display = 'none';
+    document.getElementById('step-dots').style.display = 'none';
+
+    let guard = document.getElementById('auth-required');
+    if (!guard) {
+        guard = document.createElement('div');
+        guard.id = 'auth-required';
+        guard.className = 'result-card';
+        guard.innerHTML = `
+            <h3>Acesso restrito</h3>
+            <p class="step-desc">Entre no painel e selecione uma unidade antes de gerar projetos.</p>
+            <div class="btn-row" style="margin-top:16px;">
+                <a class="btn btn-primary" href="/">Entrar no painel</a>
+            </div>
+        `;
+        document.querySelector('main').appendChild(guard);
+    }
+    guard.style.display = 'block';
+    return false;
+}
+
+function filenameFromResponse(res, fallback) {
+    const cd = res.headers.get('Content-Disposition') || '';
+    const m = cd.match(/filename\*?=(?:UTF-8''|")?([^";]+)"?/i);
+    if (m && m[1]) {
+        try { return decodeURIComponent(m[1]); } catch { return m[1]; }
+    }
+    return fallback;
+}
+
+async function downloadFile(path, suggestedName) {
+    try {
+        const res = await fetch(`${API}${path}`, { headers: authHeaders() });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filenameFromResponse(res, suggestedName);
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    } catch (err) {
+        alert('Erro ao baixar arquivo: ' + err.message);
+    }
+}
 
 function nextStep(n) {
     document.querySelectorAll('.form-step').forEach(s => s.classList.remove('active'));
@@ -377,6 +443,7 @@ function buildReview() {
 }
 
 async function generateProject() {
+    if (!requireSession()) return;
     const data = getFormData();
     const btn = document.getElementById('btn-generate');
     btn.disabled = true;
@@ -389,7 +456,7 @@ async function generateProject() {
         // Create project
         const res = await fetch(`${API}/api/v1/projects`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify(data),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -410,7 +477,10 @@ async function pollStatus(id) {
     for (let i = 0; i < maxAttempts; i++) {
         await new Promise(r => setTimeout(r, 1000));
         try {
-            const res = await fetch(`${API}/api/v1/projects/${id}/status`);
+            const res = await fetch(`${API}/api/v1/projects/${id}/status`, {
+                headers: authHeaders(),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
 
             if (data.status === 'done') {
@@ -452,11 +522,12 @@ function showResults(data) {
     ];
     files.forEach(f => {
         if (data[f.key]) {
-            const a = document.createElement('a');
-            a.href = f.url;
-            a.className = 'dl-btn';
-            a.innerHTML = `<span class="ext">${f.ext}</span><span class="name">${f.name}</span>`;
-            dlGrid.appendChild(a);
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'dl-btn';
+            btn.innerHTML = `<span class="ext">${f.ext}</span><span class="name">${f.name}</span>`;
+            btn.onclick = () => downloadFile(f.url, `${f.name}.${f.ext.toLowerCase()}`);
+            dlGrid.appendChild(btn);
         }
     });
 
@@ -535,6 +606,8 @@ function resetForm() {
     projectId = null;
     nextStep(1);
 }
+
+document.addEventListener('DOMContentLoaded', requireSession);
 </script>
 </body>
 </html>
