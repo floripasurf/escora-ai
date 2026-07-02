@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Backup diário do estado durável do engine (Mac Mini) — 03:00 local.
+  Executa scripts/ops/backup_data.sh (SQLite .backup WAL-safe + tar dos
+  diretórios, retenção 14). Instalar:
+
+    cp scripts/ops/com.escora.backup.plist ~/Library/LaunchAgents/
+    launchctl load -w ~/Library/LaunchAgents/com.escora.backup.plist
+    launchctl list | grep escora   # engine + tunnel + backup
+
+  Teste manual imediato:
+    launchctl kickstart gui/$(id -u)/com.escora.backup
+
+  IMPORTANTE: sincronize ~/escora-backups para FORA da máquina
+  (rsync/iCloud) — backup no mesmo disco não protege contra falha do disco.
+  Substitua USER pelo usuário real da máquina.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.escora.backup</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/USER/escora-ai</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/USER/escora-ai/scripts/ops/backup_data.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>ESCORA_DATA_DIR</key>
+        <string>/Users/USER/escora-data</string>
+        <key>BACKUP_DEST</key>
+        <string>/Users/USER/escora-backups</string>
+        <key>BACKUP_KEEP</key>
+        <string>14</string>
+    </dict>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/USER/escora-backups/backup.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/USER/escora-backups/backup.log</string>
+</dict>
+</plist>

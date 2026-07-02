@@ -106,11 +106,13 @@ class FloorPlanRequest(BaseModel):
     """Request for floor plan drawing generation."""
     format: str = Field(default="A2", description="Sheet format: A0-A4")
     scale: str = Field(default="1:50", description="Drawing scale")
-    walls: List[WallSpec]
-    openings: List[OpeningSpec] = []
-    dimensions: List[DimensionSpec] = []
-    sections: List[SectionSpec] = []
-    room_labels: List[dict] = Field(default=[], description="[{name, x, y, area_m2}]")
+    # Caps mantêm o trabalho por request limitado (handlers rodam no
+    # threadpool; sem cap, uma lista gigante seguraria um worker por minutos).
+    walls: List[WallSpec] = Field(max_length=2000)
+    openings: List[OpeningSpec] = Field(default=[], max_length=1000)
+    dimensions: List[DimensionSpec] = Field(default=[], max_length=500)
+    sections: List[SectionSpec] = Field(default=[], max_length=50)
+    room_labels: List[dict] = Field(default=[], max_length=500, description="[{name, x, y, area_m2}]")
     title_block: Optional[TitleBlockSpec] = None
     include_isometric: bool = False
     include_elevation: bool = False
@@ -141,10 +143,12 @@ class SimpleDrawingRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.post("/floor-plan")
-async def generate_floor_plan(request: FloorPlanRequest):
+def generate_floor_plan(request: FloorPlanRequest):
     """Generate a complete floor plan DXF from wall/opening specifications.
 
-    Returns the DXF file as a download.
+    Returns the DXF file as a download. Handler síncrono de propósito:
+    FastAPI o executa no threadpool — a geração ezdxf (CPU-bound) não
+    bloqueia o event loop.
     """
     try:
         sheet = TechnicalSheet(request.format, scale=request.scale)
@@ -229,8 +233,8 @@ async def generate_floor_plan(request: FloorPlanRequest):
 
 
 @router.post("/section")
-async def generate_section(request: FloorPlanRequest):
-    """Generate a building section (corte) DXF."""
+def generate_section(request: FloorPlanRequest):
+    """Generate a building section (corte) DXF. Handler síncrono → threadpool."""
     try:
         if not request.sections:
             raise HTTPException(400, "No section cuts defined")
@@ -285,8 +289,8 @@ async def generate_section(request: FloorPlanRequest):
 
 
 @router.post("/perspective")
-async def generate_perspective(request: FloorPlanRequest):
-    """Generate an isometric perspective DXF."""
+def generate_perspective(request: FloorPlanRequest):
+    """Generate an isometric perspective DXF. Handler síncrono → threadpool."""
     try:
         sheet = TechnicalSheet(request.format, scale=request.scale)
 
