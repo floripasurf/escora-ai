@@ -2,7 +2,8 @@
 
 All persistent paths derive from a single `data_dir` root, resolved from
 `ESCORA_DATA_DIR` on every access so tests can monkeypatch it at runtime.
-In production that root is `/data` (Fly volume); locally it's `./data`.
+In production that root points to the Mac Mini data directory; locally it's
+`./data`.
 """
 
 import os
